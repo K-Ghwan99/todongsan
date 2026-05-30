@@ -1,6 +1,6 @@
 # MARKET_API_SPEC.md
 
-> Market 서비스 API 최종 명세서이다.  
+> Market 서비스 API ver2 이다.  
 > 본 문서는 `ERROR_POLICY.md`, `MARKET_FAILURE_SCENARIO.md`, `MARKET_ERROR_CODE.md`, 그리고 Member-Point 연동 정책을 기준으로 작성한다.  
 > Market 서비스는 REST 기반 MSA 환경에서 Member-Point 서비스와 직접 연동하므로, 멱등성, 타임아웃, 재시도, 상태 대사, 동시성 제어를 반드시 고려한다.
 
