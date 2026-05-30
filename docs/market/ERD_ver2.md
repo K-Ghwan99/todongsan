@@ -603,10 +603,181 @@ CREATE TABLE market_refund_detail (
 ```
 
 ---
+# 5. Mermaid ERD
 
-# 5. Enum 정의
+```mermaid
+erDiagram
+    market ||--o{ market_option : "has"
+    market ||--o{ market_prediction : "has"
+    market ||--o{ market_price_history : "records"
+    market ||--o| market_settlement : "settles"
+    market ||--o| market_void : "voids"
 
-## 5-1. MarketAnswerType
+    market_option ||--o{ market_prediction : "selected_by"
+    market_option ||--o{ market_price_history : "price_changed"
+    market_option ||--o| market_settlement : "result_option"
+
+    market_prediction ||--o{ market_price_history : "causes"
+    market_prediction ||--o| market_settlement_detail : "settled_by"
+    market_prediction ||--o| market_refund_detail : "refunded_by"
+
+    market_settlement ||--o{ market_settlement_detail : "has"
+    market_void ||--o{ market_refund_detail : "has"
+
+    market {
+        bigint id PK
+        varchar title
+        text description
+        varchar category
+        varchar answer_type
+        varchar metric_unit
+        varchar judge_data_source
+        text judge_criteria
+        date judge_date
+        varchar status "PENDING, ACTIVE, CLOSED, DATA_PENDING, SETTLEMENT_IN_PROGRESS, SETTLED, VOIDED"
+        datetime close_at
+        datetime settle_due_at
+        datetime settled_at
+        bigint result_option_id
+        decimal result_value
+        varchar result_text
+        decimal total_pool
+        decimal fee_rate
+        decimal fee_amount
+        decimal settlement_pool
+        decimal initial_virtual_liquidity
+        varchar price_model
+        bigint created_by "REST 참조"
+        datetime deleted_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    market_option {
+        bigint id PK
+        bigint market_id FK
+        varchar option_code
+        varchar option_text
+        int display_order
+        decimal range_min
+        decimal range_max
+        boolean min_inclusive
+        boolean max_inclusive
+        decimal virtual_pool_amount
+        decimal real_pool_amount
+        decimal total_contract_quantity
+        decimal current_price
+        int prediction_count
+        boolean is_result
+        datetime created_at
+        datetime updated_at
+    }
+
+    market_prediction {
+        bigint id PK
+        bigint market_id FK
+        bigint option_id FK
+        bigint member_id "REST 참조"
+        decimal point_amount
+        decimal price_snapshot
+        decimal contract_quantity
+        decimal expected_payout_per_contract_snapshot
+        decimal expected_multiplier_snapshot
+        varchar status "POINT_PENDING, CONFIRMED, FAILED, POINT_UNKNOWN, SETTLED, REFUND_PENDING, REFUND_UNKNOWN, REFUNDED"
+        varchar idempotency_key UK "MARKET_PREDICTION_SPEND"
+        decimal settled_amount
+        varchar fail_reason
+        datetime created_at
+        datetime updated_at
+    }
+
+    market_price_history {
+        bigint id PK
+        bigint market_id FK
+        bigint option_id FK
+        bigint prediction_id FK
+        decimal price_before
+        decimal price_after
+        decimal real_pool_before
+        decimal real_pool_after
+        decimal contract_quantity_before
+        decimal contract_quantity_after
+        varchar event_type
+        datetime created_at
+        datetime updated_at
+    }
+
+    market_settlement {
+        bigint id PK
+        bigint market_id FK
+        bigint result_option_id FK
+        decimal total_pool
+        decimal fee_rate
+        decimal fee_amount
+        decimal settlement_pool
+        decimal winning_contract_quantity
+        decimal payout_per_contract
+        decimal burned_point_amount
+        varchar status "PENDING, IN_PROGRESS, COMPLETED, FAILED"
+        bigint settled_by "REST 참조"
+        datetime settled_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    market_settlement_detail {
+        bigint id PK
+        bigint settlement_id FK
+        bigint prediction_id FK
+        bigint member_id "REST 참조"
+        decimal original_point_amount
+        decimal contract_quantity
+        decimal payout_per_contract
+        decimal settled_amount
+        decimal profit_amount
+        varchar status "PENDING, SUCCESS, FAILED, UNKNOWN"
+        varchar idempotency_key UK "MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{memberId}"
+        varchar reference_type "MARKET_PREDICTION"
+        bigint reference_id "predictionId"
+        varchar fail_reason
+        datetime created_at
+        datetime updated_at
+    }
+
+    market_void {
+        bigint id PK
+        bigint market_id FK
+        varchar reason_type
+        text reason_detail
+        varchar refund_status "PENDING, IN_PROGRESS, COMPLETED, FAILED"
+        bigint voided_by "REST 참조"
+        datetime voided_at
+        datetime created_at
+        datetime updated_at
+    }
+
+    market_refund_detail {
+        bigint id PK
+        bigint market_void_id FK
+        bigint prediction_id FK
+        bigint member_id "REST 참조"
+        decimal refund_amount
+        varchar status "PENDING, SUCCESS, FAILED, UNKNOWN"
+        varchar idempotency_key UK "MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}"
+        varchar reference_type "MARKET_PREDICTION"
+        bigint reference_id "predictionId"
+        varchar fail_reason
+        datetime created_at
+        datetime updated_at
+    }
+```
+
+
+---
+
+# 6. Enum 정의
+
+## 6-1. MarketAnswerType
 
 ```java
 public enum MarketAnswerType {
@@ -616,7 +787,7 @@ public enum MarketAnswerType {
 }
 ```
 
-## 5-2. MarketStatus
+## 6-2. MarketStatus
 
 ```java
 public enum MarketStatus {
@@ -630,7 +801,7 @@ public enum MarketStatus {
 }
 ```
 
-## 5-3. PredictionStatus
+## 6-3. PredictionStatus
 
 ```java
 public enum PredictionStatus {
@@ -645,7 +816,7 @@ public enum PredictionStatus {
 }
 ```
 
-## 5-4. SettlementStatus
+## 6-4. SettlementStatus
 
 ```java
 public enum SettlementStatus {
@@ -657,7 +828,7 @@ public enum SettlementStatus {
 }
 ```
 
-## 5-5. DetailProcessStatus
+## 6-5. DetailProcessStatus
 
 ```java
 public enum DetailProcessStatus {
@@ -668,7 +839,7 @@ public enum DetailProcessStatus {
 }
 ```
 
-## 5-6. VoidReasonType
+## 6-6. VoidReasonType
 
 ```java
 public enum VoidReasonType {
@@ -680,7 +851,7 @@ public enum VoidReasonType {
 }
 ```
 
-## 5-7. PointReferenceType
+## 6-7. PointReferenceType
 
 ```java
 public enum PointReferenceType {
@@ -693,20 +864,20 @@ public enum PointReferenceType {
 
 ---
 
-# 6. 선택지 설계 규칙
+# 7. 선택지 설계 규칙
 
-## 6-1. YES_NO Market
+## 7-1. YES_NO Market
 
 ```text
 YES
 NO
 ```
 
-## 6-2. MULTIPLE_CHOICE Market
+## 7-2. MULTIPLE_CHOICE Market
 
 일반 다중 선택지는 `option_code`, `option_text`, `display_order`로 표현한다.
 
-## 6-3. NUMERIC_RANGE Market
+## 7-3. NUMERIC_RANGE Market
 
 수치 구간형 선택지는 `range_min`, `range_max`, `min_inclusive`, `max_inclusive`를 사용한다.
 
@@ -721,7 +892,7 @@ min_inclusive = TRUE
 max_inclusive = FALSE
 ```
 
-## 6-4. NUMERIC_RANGE 검증 규칙
+## 7-4. NUMERIC_RANGE 검증 규칙
 
 ```text
 1. 선택지 범위가 서로 겹치면 안 된다.
@@ -732,9 +903,9 @@ max_inclusive = FALSE
 
 ---
 
-# 7. 가격 계산 규칙
+# 8. 가격 계산 규칙
 
-## 7-1. 현재 가격 계산
+## 8-1. 현재 가격 계산
 
 MVP에서는 `POOL_SHARE` 방식을 사용한다.
 
@@ -744,13 +915,13 @@ option_effective_pool = option.real_pool_amount + option.virtual_pool_amount
 current_price = option_effective_pool / sum(all option effective_pool)
 ```
 
-## 7-2. 계약 수량 계산
+## 8-2. 계약 수량 계산
 
 ```text
 contract_quantity = point_amount / price_snapshot
 ```
 
-## 7-3. 가격 갱신 대상
+## 8-3. 가격 갱신 대상
 
 예측 참여 후 모든 선택지의 `current_price`를 재계산한다.
 
@@ -763,9 +934,9 @@ contract_quantity = point_amount / price_snapshot
 
 ---
 
-# 8. 정산 공식
+# 9. 정산 공식
 
-## 8-1. 핵심 공식
+## 9-1. 핵심 공식
 
 ```text
 settlement_pool = total_pool - fee_amount
@@ -775,14 +946,14 @@ payout_per_contract = settlement_pool / winning_contract_quantity
 user_settled_amount = user_contract_quantity × payout_per_contract
 ```
 
-## 8-2. 소수점 처리
+## 9-2. 소수점 처리
 
 ```text
 정산 금액은 DECIMAL(10,2) 기준으로 최종 저장한다.
 소수점 처리 후 남는 잔여 금액은 burned_point_amount로 기록한다.
 ```
 
-## 8-3. 수수료 소각
+## 9-3. 수수료 소각
 
 ```text
 fee_amount = total_pool × fee_rate
@@ -791,9 +962,9 @@ burned_point_amount = fee_amount + 소수점 처리 잔여 금액
 
 ---
 
-# 9. 주요 비즈니스 제약
+# 10. 주요 비즈니스 제약
 
-## 9-1. 참여 제약
+## 10-1. 참여 제약
 
 ```text
 1. MarketStatus = ACTIVE인 경우에만 참여 가능
@@ -802,7 +973,7 @@ burned_point_amount = fee_amount + 소수점 처리 잔여 금액
 4. 동일 market_id, member_id는 UNIQUE 제약으로 차단
 ```
 
-## 9-2. 포인트 차감 기록 우선 원칙
+## 10-2. 포인트 차감 기록 우선 원칙
 
 예측 참여 시 Prediction을 먼저 `POINT_PENDING`으로 저장하고 Member-Point 차감을 요청한다.
 
@@ -813,7 +984,7 @@ Prediction POINT_PENDING 저장
 → 타임아웃/5xx 시 POINT_UNKNOWN
 ```
 
-## 9-3. 정산/환불 item별 멱등성
+## 10-3. 정산/환불 item별 멱등성
 
 정산/환불은 batch API를 사용해도 item별 idempotencyKey를 사용한다.
 
@@ -825,7 +996,7 @@ MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{mem
 MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}
 ```
 
-## 9-4. VOIDED 처리 제약
+## 10-4. VOIDED 처리 제약
 
 ```text
 VOIDED 가능:
@@ -839,9 +1010,9 @@ SETTLEMENT_IN_PROGRESS, SETTLED
 
 ---
 
-# 10. 주요 흐름
+# 11. 주요 흐름
 
-## 10-1. 예측 참여 흐름
+## 11-1. 예측 참여 흐름
 
 ```text
 1. Market 조회
@@ -857,7 +1028,7 @@ SETTLEMENT_IN_PROGRESS, SETTLED
 9. Prediction CONFIRMED
 ```
 
-## 10-2. 정산 흐름
+## 11-2. 정산 흐름
 
 ```text
 1. CLOSED 또는 DATA_PENDING Market 조회
@@ -873,7 +1044,7 @@ SETTLEMENT_IN_PROGRESS, SETTLED
 8. 일부 실패면 SETTLEMENT_IN_PROGRESS 유지 후 retry
 ```
 
-## 10-3. 무효 환불 흐름
+## 11-3. 무효 환불 흐름
 
 ```text
 1. VOIDED 가능 상태 검증
@@ -890,9 +1061,9 @@ SETTLEMENT_IN_PROGRESS, SETTLED
 
 ---
 
-# 11. 서비스 간 REST 연계
+# 12. 서비스 간 REST 연계
 
-## 11-1. 예측 참여 시 Point 차감
+## 12-1. 예측 참여 시 Point 차감
 
 ```http
 POST /api/v1/points/spend
@@ -910,7 +1081,7 @@ Idempotency-Key: MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}
 }
 ```
 
-## 11-2. 정산 시 Point 지급
+## 12-2. 정산 시 Point 지급
 
 ```http
 POST /api/v1/points/settlements
@@ -933,7 +1104,7 @@ POST /api/v1/points/settlements
 }
 ```
 
-## 11-3. 무효 처리 시 Point 환불
+## 12-3. 무효 처리 시 Point 환불
 
 ```http
 POST /api/v1/points/refunds
@@ -958,9 +1129,9 @@ POST /api/v1/points/refunds
 
 ---
 
-# 12. 인덱스 전략
+# 13. 인덱스 전략
 
-## 12-1. Market 조회
+## 13-1. Market 조회
 
 ```sql
 CREATE INDEX idx_market_status ON market(status);
@@ -968,7 +1139,7 @@ CREATE INDEX idx_market_close_at ON market(close_at);
 CREATE INDEX idx_market_status_close_at ON market(status, close_at);
 ```
 
-## 12-2. Prediction 조회
+## 13-2. Prediction 조회
 
 ```sql
 CREATE UNIQUE INDEX uq_market_prediction_member
@@ -981,7 +1152,7 @@ CREATE INDEX idx_market_prediction_member_id
 ON market_prediction(member_id);
 ```
 
-## 12-3. 정산 재시도 조회
+## 13-3. 정산 재시도 조회
 
 ```sql
 CREATE INDEX idx_settlement_detail_status
@@ -991,7 +1162,7 @@ CREATE INDEX idx_settlement_detail_idempotency_key
 ON market_settlement_detail(idempotency_key);
 ```
 
-## 12-4. 환불 재시도 조회
+## 13-4. 환불 재시도 조회
 
 ```sql
 CREATE INDEX idx_refund_detail_status
@@ -1001,7 +1172,7 @@ CREATE INDEX idx_refund_detail_idempotency_key
 ON market_refund_detail(idempotency_key);
 ```
 
-## 12-5. Price History 조회
+## 13-5. Price History 조회
 
 ```sql
 CREATE INDEX idx_price_history_market_created
@@ -1010,9 +1181,9 @@ ON market_price_history(market_id, created_at);
 
 ---
 
-# 13. MVP 구현 범위
+# 14. MVP 구현 범위
 
-## 13-1. MVP 필수 테이블
+## 14-1. MVP 필수 테이블
 
 ```text
 market
@@ -1025,7 +1196,7 @@ market_void
 market_refund_detail
 ```
 
-## 13-2. MVP 제외 기능
+## 14-2. MVP 제외 기능
 
 ```text
 오더북
@@ -1038,7 +1209,7 @@ market_refund_detail
 
 ---
 
-# 14. 최종 변경 요약
+# 15. 최종 변경 요약
 
 이번 버전의 핵심 변경 사항은 다음과 같다.
 
