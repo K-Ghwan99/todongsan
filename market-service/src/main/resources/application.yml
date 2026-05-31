@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: market-service
+
+server:
+  port: 8081
+spring:
+  application:
+    name: market-service
+
+server:
+  port: 8081
+
+mybatis:
+  mapper-locations: classpath:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
