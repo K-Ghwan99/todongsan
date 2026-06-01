@@ -12,4 +12,7 @@ public class BattleResponse {
     private String sido;
     private String sigu;
     private String status;
+    private Boolean isClosed;    // Battle 종료 여부
+    private String optionA;      // A 옵션 내용
+    private String optionB;      // B 옵션 내용
 }

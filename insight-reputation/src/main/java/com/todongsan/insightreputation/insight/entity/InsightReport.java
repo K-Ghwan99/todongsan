@@ -11,6 +11,13 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
+/**
+ * AI 분석 리포트 상태 관리
+ * 
+ * 상태 전이: PENDING → PROCESSING → DONE / FAILED
+ * 역방향 전이 불가. PROCESSING 전이 시 processingStartedAt 기록.
+ * retry_count >= 3: 영구 FAILED. 스케줄러 재시도 없음.
+ */
 @Entity
 @Table(
     name = "insight_report",
@@ -63,12 +70,25 @@ public class InsightReport extends BaseEntity {
     @Column(name = "retry_count", nullable = false)
     private Byte retryCount = 0;
 
+    @Column(name = "requested_by", nullable = false)
+    private Long requestedBy;
+
+    @Lob
+    @Column(name = "report_content")
+    private String reportContent;
+
+    @Column(name = "generated_at")
+    private LocalDateTime generatedAt;
+
+    public static final int MAX_RETRY_COUNT = 3;
+
     @Builder
-    public InsightReport(InsightReportType type, Long referenceId) {
+    public InsightReport(InsightReportType type, Long referenceId, Long requestedBy, InsightReportStatus status, Integer retryCount) {
         this.type = type;
         this.referenceId = referenceId;
-        this.status = InsightReportStatus.PENDING;
-        this.retryCount = 0;
+        this.requestedBy = requestedBy;
+        this.status = status != null ? status : InsightReportStatus.PENDING;
+        this.retryCount = retryCount != null ? retryCount.byteValue() : 0;
     }
 
     public void startProcessing() {
@@ -76,25 +96,24 @@ public class InsightReport extends BaseEntity {
         this.processingStartedAt = LocalDateTime.now();
     }
 
-    public void completeProcessing(String summary, String analysisData, String rawPrompt) {
+    public void complete(String reportContent) {
         this.status = InsightReportStatus.DONE;
-        this.summary = summary;
-        this.analysisData = analysisData;
-        this.rawPrompt = rawPrompt;
+        this.reportContent = reportContent;
+        this.generatedAt = LocalDateTime.now();
     }
 
-    public void failProcessing(String reason) {
+    public void failPermanently(String reason) {
         this.status = InsightReportStatus.FAILED;
         this.failedReason = reason;
     }
 
-    public void resetToPending() {
+    public void resetForRetry() {
         this.status = InsightReportStatus.PENDING;
         this.processingStartedAt = null;
         this.retryCount++;
     }
 
     public boolean canRetry() {
-        return this.retryCount < 3;
+        return this.retryCount < MAX_RETRY_COUNT;
     }
 }
