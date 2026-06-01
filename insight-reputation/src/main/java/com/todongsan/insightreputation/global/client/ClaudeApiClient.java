@@ -204,4 +204,50 @@ public class ClaudeApiClient {
         
         return prompt.toString();
     }
+
+    /**
+     * Market 분석용 프롬프트 생성
+     */
+    public String createMarketAnalysisPrompt(String marketTitle, List<MarketInsightSummaryResponse.OptionStatistics> options,
+                                           List<MarketPredictionResponse> predictions, List<MemberInfoResponse> memberInfo) {
+        StringBuilder prompt = new StringBuilder();
+        
+        prompt.append("다음 Market 예측 결과를 분석해 주세요.\\n\\n");
+        prompt.append("# Market 정보\\n");
+        prompt.append("제목: ").append(marketTitle).append("\\n");
+        
+        // 선택지별 집계 정보
+        prompt.append("\\n# 선택지별 집계\\n");
+        for (MarketInsightSummaryResponse.OptionStatistics option : options) {
+            prompt.append("- ").append(option.getOptionLabel())
+                  .append(": ").append(option.getPredictionCount()).append("명")
+                  .append(" (Pool: ").append(option.getPoolAmount()).append("P)");
+            if (Boolean.TRUE.equals(option.getIsResult())) {
+                prompt.append(" ← 정답");
+            }
+            prompt.append("\\n");
+        }
+        
+        prompt.append("\\n총 참여자: ").append(predictions.size()).append("명\\n\\n");
+        
+        // 회원 정보가 있는 경우 세분화 분석 가능
+        if (!memberInfo.isEmpty()) {
+            prompt.append("# 세부 분석 요청\\n");
+            prompt.append("위 예측 데이터를 바탕으로 다음과 같이 분석해 주세요:\\n");
+            prompt.append("1. 각 선택지를 선택한 사람들의 특성 분석\\n");
+            prompt.append("2. 연령대별, 성별 선호 차이\\n");
+            prompt.append("3. 지역별 예측 패턴 차이 (가능한 경우)\\n\\n");
+        }
+        
+        prompt.append("# 분석 지침\\n");
+        prompt.append("- 특정 선택지(YES/NO)를 추천하거나 예측 방향을 제시하지 마세요.\\n");
+        prompt.append("- YES 근거, NO 근거, 관련 통계, 주의사항을 균형 있게 요약하세요.\\n");
+        prompt.append("- 예측 결과를 객관적으로 요약하되, 어떤 선택이 더 좋다는 결론을 내리지 마세요.\\n");
+        prompt.append("- 연령대별, 성별별 예측 패턴과 그 특징을 중심으로 요약하세요.\\n");
+        prompt.append("- 데이터에서 발견되는 흥미로운 패턴이나 특징을 언급해 주세요.\\n");
+        prompt.append("- 응답은 markdown 형식으로 작성해 주세요.\\n");
+        prompt.append("- 분석 결과는 1500자 이내로 작성해 주세요.\\n");
+        
+        return prompt.toString();
+    }
 }

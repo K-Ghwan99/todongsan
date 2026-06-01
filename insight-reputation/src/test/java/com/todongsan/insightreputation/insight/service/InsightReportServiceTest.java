@@ -3,6 +3,8 @@ package com.todongsan.insightreputation.insight.service;
 import com.todongsan.insightreputation.global.client.BattleClient;
 import com.todongsan.insightreputation.global.client.BattleResponse;
 import com.todongsan.insightreputation.global.client.ClaudeApiClient;
+import com.todongsan.insightreputation.global.client.MarketClient;
+import com.todongsan.insightreputation.global.client.MarketInsightSummaryResponse;
 import com.todongsan.insightreputation.global.client.MemberPointClient;
 import com.todongsan.insightreputation.global.exception.CustomException;
 import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
@@ -37,6 +39,9 @@ class InsightReportServiceTest {
     
     @Mock
     BattleClient battleClient;
+    
+    @Mock
+    MarketClient marketClient;
     
     @Mock
     MemberPointClient memberPointClient;
@@ -345,5 +350,201 @@ class InsightReportServiceTest {
         // Then
         verify(insightReportRepository).save(any(InsightReport.class));
         verify(memberPointClient).refundPoints(eq(memberId), eq(80), eq("AI 분석 영구 실패로 인한 환불"));
+    }
+
+    // ========== Market 관련 테스트 ==========
+    
+    @Test
+    @DisplayName("Market 리포트 생성 - 정상 요청 → PENDING 상태 리포트 생성")
+    void requestMarketReport_validRequest_success() {
+        // Given
+        Long memberId = 1L;
+        Long marketId = 100L;
+        
+        // 기존 리포트 없음
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.MARKET, marketId))
+                .thenReturn(Optional.empty());
+        
+        // 포인트 차감 성공
+        doNothing().when(memberPointClient).spendPoints(eq(memberId), eq(80), anyString());
+        
+        // SETTLED Market
+        MarketInsightSummaryResponse.MarketInfo marketInfo = MarketInsightSummaryResponse.MarketInfo.builder()
+                .marketId(marketId)
+                .title("Test Market")
+                .status("SETTLED")
+                .build();
+        MarketInsightSummaryResponse marketResponse = MarketInsightSummaryResponse.builder()
+                .market(marketInfo)
+                .build();
+        when(marketClient.getSummary(marketId)).thenReturn(marketResponse);
+        
+        // 새 리포트 저장 후 ID 설정을 모킹
+        InsightReport savedReport = mock(InsightReport.class);
+        when(savedReport.getId()).thenReturn(1L);
+        when(savedReport.getStatus()).thenReturn(InsightReportStatus.PENDING);
+        when(insightReportRepository.save(any(InsightReport.class))).thenReturn(savedReport);
+        
+        // When
+        InsightReportResponse response = service.requestMarketReport(memberId, marketId);
+        
+        // Then
+        assertThat(response.getReportId()).isEqualTo(1L);
+        assertThat(response.getStatus()).isEqualTo("PENDING");
+        assertThat(response.getPointCharged()).isEqualTo(80);
+        assertThat(response.getReportContent()).isNull();
+        
+        verify(memberPointClient).spendPoints(eq(memberId), eq(80), anyString());
+        verify(marketClient).getSummary(marketId);
+        verify(insightReportRepository).save(any(InsightReport.class));
+    }
+    
+    @Test
+    @DisplayName("Market 리포트 생성 - 기존 DONE 리포트 존재 → 즉시 반환")
+    void requestMarketReport_existingDoneReport_returnImmediately() {
+        // Given
+        Long memberId = 1L;
+        Long marketId = 100L;
+        
+        InsightReport existingReport = mock(InsightReport.class);
+        when(existingReport.getId()).thenReturn(1L);
+        when(existingReport.getStatus()).thenReturn(InsightReportStatus.DONE);
+        when(existingReport.getReportContent()).thenReturn("기존 분석 결과");
+        when(existingReport.getGeneratedAt()).thenReturn(LocalDateTime.now());
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.MARKET, marketId))
+                .thenReturn(Optional.of(existingReport));
+        
+        // When
+        InsightReportResponse response = service.requestMarketReport(memberId, marketId);
+        
+        // Then
+        assertThat(response.getReportId()).isEqualTo(1L);
+        assertThat(response.getStatus()).isEqualTo("DONE");
+        assertThat(response.getPointCharged()).isEqualTo(0);  // 포인트 차감 없음
+        assertThat(response.getReportContent()).isEqualTo("기존 분석 결과");
+        
+        verify(memberPointClient, never()).spendPoints(anyLong(), anyInt(), anyString());
+        verify(marketClient, never()).getSummary(anyLong());
+        verify(insightReportRepository, never()).save(any(InsightReport.class));
+    }
+    
+    @Test
+    @DisplayName("Market 리포트 생성 - PROCESSING 중복 요청 → ALREADY_PROCESSING 오류")
+    void requestMarketReport_alreadyProcessing_throwsException() {
+        // Given
+        Long memberId = 1L;
+        Long marketId = 100L;
+        
+        InsightReport processingReport = mock(InsightReport.class);
+        when(processingReport.getId()).thenReturn(1L);
+        when(processingReport.getStatus()).thenReturn(InsightReportStatus.PROCESSING);
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.MARKET, marketId))
+                .thenReturn(Optional.of(processingReport));
+        
+        // When & Then
+        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.INSIGHT_REPORT_ALREADY_PROCESSING);
+        
+        verify(memberPointClient, never()).spendPoints(anyLong(), anyInt(), anyString());
+    }
+    
+    @Test
+    @DisplayName("Market 리포트 생성 - Market 미정산 → SOURCE_DATA_NOT_READY 오류 + 환불")
+    void requestMarketReport_marketNotSettled_throwsExceptionAndRefund() {
+        // Given
+        Long memberId = 1L;
+        Long marketId = 100L;
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.MARKET, marketId))
+                .thenReturn(Optional.empty());
+        
+        // 포인트 차감 성공
+        doNothing().when(memberPointClient).spendPoints(eq(memberId), eq(80), anyString());
+        
+        // Market 미정산 상태
+        when(marketClient.getSummary(marketId))
+                .thenThrow(new CustomException(ErrorCode.INSIGHT_REPORT_SOURCE_DATA_NOT_READY));
+        
+        // 환불 처리
+        doNothing().when(memberPointClient).refundPoints(eq(memberId), eq(80), anyString());
+        
+        // When & Then
+        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.INSIGHT_REPORT_SOURCE_DATA_NOT_READY);
+        
+        verify(memberPointClient).spendPoints(eq(memberId), eq(80), anyString());
+        verify(memberPointClient).refundPoints(eq(memberId), eq(80), eq("Market 미정산으로 인한 환불"));
+        verify(insightReportRepository, never()).save(any(InsightReport.class));
+    }
+    
+    @Test
+    @DisplayName("Market 리포트 생성 - 포인트 부족 → POINT_INSUFFICIENT 오류")
+    void requestMarketReport_insufficientPoints_throwsException() {
+        // Given
+        Long memberId = 1L;
+        Long marketId = 100L;
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.MARKET, marketId))
+                .thenReturn(Optional.empty());
+        
+        doThrow(new CustomException(ErrorCode.POINT_INSUFFICIENT))
+                .when(memberPointClient).spendPoints(eq(memberId), eq(80), anyString());
+        
+        // When & Then
+        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.POINT_INSUFFICIENT);
+        
+        verify(marketClient, never()).getSummary(anyLong());
+        verify(insightReportRepository, never()).save(any(InsightReport.class));
+    }
+    
+    @Test
+    @DisplayName("Market 리포트 상태 조회 - 정상 조회")
+    void getMarketReportStatus_validRequest_success() {
+        // Given
+        Long marketId = 100L;
+        
+        InsightReport report = mock(InsightReport.class);
+        when(report.getId()).thenReturn(1L);
+        when(report.getStatus()).thenReturn(InsightReportStatus.PROCESSING);
+        when(report.getRetryCount()).thenReturn((byte) 1);
+        when(report.getCreatedAt()).thenReturn(LocalDateTime.now().minusMinutes(5));
+        when(report.getProcessingStartedAt()).thenReturn(LocalDateTime.now().minusMinutes(3));
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.MARKET, marketId))
+                .thenReturn(Optional.of(report));
+        
+        // When
+        InsightReportStatusResponse response = service.getMarketReportStatus(marketId);
+        
+        // Then
+        assertThat(response.getReportId()).isEqualTo(1L);
+        assertThat(response.getStatus()).isEqualTo("PROCESSING");
+        assertThat(response.getRetryCount()).isEqualTo(1);
+        assertThat(response.getProcessingStartedAt()).isNotNull();
+    }
+    
+    @Test
+    @DisplayName("Market 리포트 상태 조회 - 리포트 없음 → NOT_FOUND 오류")
+    void getMarketReportStatus_reportNotFound_throwsException() {
+        // Given
+        Long marketId = 100L;
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.MARKET, marketId))
+                .thenReturn(Optional.empty());
+        
+        // When & Then
+        assertThatThrownBy(() -> service.getMarketReportStatus(marketId))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
     }
 }
