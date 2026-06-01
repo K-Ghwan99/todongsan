@@ -67,9 +67,10 @@ CREATE TABLE point_history (
     amount              DECIMAL(10,2)   NOT NULL CHECK (amount > 0), -- 항상 양수
     balance_snapshot    DECIMAL(10,2)   NOT NULL,                    -- 처리 후 잔액
     reason              VARCHAR(255),
-    reference_id        BIGINT,                                      -- 연관 battle_id / market_id
+    reference_type      VARCHAR(50)     NULL,                        -- PointReferenceType (BATTLE / MARKET_PREDICTION / INSIGHT_REPORT)
+    reference_id        BIGINT          NULL,                        -- 해당 도메인 객체의 ID
     idempotency_key     VARCHAR(100)    UNIQUE,                      -- 중복 처리 방지
-    request_hash        VARCHAR(64)     NULL,                        -- SHA-256(memberId+type+amount+referenceId) 충돌 감지용, idempotency_key 없는 경우 NULL
+    request_hash        VARCHAR(64)     NULL,                        -- SHA-256(memberId+type+amount+referenceType+referenceId) 충돌 감지용
     created_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -81,6 +82,7 @@ CREATE INDEX idx_point_history_member_id ON point_history(member_id);
 CREATE INDEX idx_point_history_created_at ON point_history(created_at);
 CREATE INDEX idx_point_history_type ON point_history(type);
 CREATE INDEX idx_point_history_idempotency_key ON point_history(idempotency_key);
+CREATE INDEX idx_point_history_reference ON point_history(reference_type, reference_id);
 ```
 
 ---
@@ -124,7 +126,8 @@ erDiagram
         DECIMAL amount "CHECK > 0 (항상 양수)"
         DECIMAL balance_snapshot "처리 후 잔액"
         VARCHAR reason
-        BIGINT reference_id "battle_id or market_id"
+        VARCHAR reference_type "BATTLE/MARKET_PREDICTION/INSIGHT_REPORT"
+        BIGINT reference_id "도메인 객체 ID"
         VARCHAR idempotency_key UK
         VARCHAR request_hash "SHA-256 해시 (충돌 감지)"
         DATETIME created_at "DEFAULT CURRENT_TIMESTAMP"
@@ -175,6 +178,22 @@ public enum PointHistoryType {
 }
 ```
 
+### 4-3. PointReferenceType
+
+```java
+public enum PointReferenceType {
+    BATTLE,             // Battle 도메인 (reference_id = battleId)
+    MARKET_PREDICTION,  // Market Prediction 도메인 (reference_id = predictionId)
+    INSIGHT_REPORT      // Insight Report 도메인 (reference_id = reportId)
+}
+```
+
+| reference_type | reference_id 의미 | 사용 상황 |
+|---|---|---|
+| `BATTLE` | battle.id | 투표/댓글/주제 승인 보상, 주제 생성권 차감 |
+| `MARKET_PREDICTION` | market_prediction.id | Market 예측 참여/정산/환불 |
+| `INSIGHT_REPORT` | insight_report.id | Insight 열람 차감, AI 생성 실패 환불 |
+
 ---
 
 ## 5. 비즈니스 제약
@@ -184,27 +203,87 @@ public enum PointHistoryType {
 | point_balance | 음수 불가 (CHECK 제약) |
 | amount | 항상 양수 (CHECK 제약), 방향은 type으로 구분 |
 | idempotency_key | UNIQUE 제약, 중복 처리 방지 |
-| request_hash | SHA-256(memberId + type + amount + referenceId), 같은 키로 다른 요청 감지 |
+| reference_type | PointReferenceType enum 값만 허용 (BATTLE / MARKET_PREDICTION / INSIGHT_REPORT) |
+| reference_id | reference_type과 함께 사용, 해당 도메인 객체의 ID |
+| request_hash | SHA-256(memberId + type + amount + referenceType + referenceId) |
 | 거주지 변경 | 30일마다 1회 (residence_changed_at으로 추적) |
 | soft delete | deleted_at 설정, 물리 삭제 금지 |
 | 토큰 저장 | access_token, refresh_token 암호화 필수 |
 
 ---
 
+## 5-1. point_balance 동시성 제어
+
+포인트 변경 API는 동시 요청으로 인한 Lost Update 방지를 위해 Atomic UPDATE를 사용한다.
+
+**차감 (SPEND)**
+```sql
+UPDATE member
+SET point_balance = point_balance - :amount
+WHERE id = :memberId
+AND point_balance >= :amount;
+
+-- affected row = 1 → 차감 성공
+-- affected row = 0 → 잔액 부족 → POINT_INSUFFICIENT
+```
+
+**적립 / 정산 / 환불 (EARN / SETTLE / REFUND)**
+```sql
+UPDATE member
+SET point_balance = point_balance + :amount
+WHERE id = :memberId;
+```
+
+---
+
+## 5-2. 탈퇴 회원 정산/환불 정책
+
+일반 사용자 API에서는 탈퇴 회원 접근을 차단한다.
+
+```
+일반 API (로그인, 조회, 투표, 예측 참여 등)
+  → deleted_at IS NULL 조건 필수
+  → 탈퇴 회원 요청 시 MEMBER_ALREADY_DELETED 반환
+```
+
+시스템 보정성 API는 탈퇴 회원도 처리 가능하다.
+
+```
+POST /api/v1/points/settlements
+POST /api/v1/points/refunds
+
+  → deleted_at 무시 (WHERE id = :memberId 만 사용)
+  → 탈퇴 전 발생한 거래에 대한 정산/환불 책임 유지
+```
+
+탈퇴 전 포인트 차감이 완료된 경우 정산/환불 책임은 유지된다.
+
+```
+유저 예측 참여 → 포인트 차감 완료
+→ 유저 탈퇴
+→ Market 정산/환불 발생
+→ 탈퇴 여부와 무관하게 정산/환불 처리
+```
+
+---
+
 ## 6. request_hash 생성 규칙
 
 ```java
-// 예시 코드
-String raw = memberId + "|" + type + "|" + amount + "|" + referenceId;
+// referenceType 포함 (v5부터 변경)
+String raw = memberId + "|" + type + "|" + amount + "|" + referenceType + "|" + referenceId;
 String hash = sha256(raw);
 // 결과: "a3f8c2d1e9b4..."  (64자리 16진수)
 ```
 
-같은 키로 다른 요청이 들어왔을 때 감지 방법:
+referenceType을 포함하는 이유:
 ```
-저장된 request_hash: "a3f8c2d1..."  (amount=100 기준)
-새 요청 request_hash: "b7e9a4f2..."  (amount=999 기준)
-  ↓ 다르면 IDEMPOTENCY_KEY_CONFLICT
+referenceType = BATTLE,            referenceId = 42  → Battle 42
+referenceType = MARKET_PREDICTION, referenceId = 42  → Prediction 42
+referenceType = INSIGHT_REPORT,    referenceId = 42  → Report 42
+
+같은 referenceId라도 referenceType이 다르면 완전히 다른 거래임.
+따라서 request_hash에 referenceType을 포함해야 정확한 충돌 감지 가능.
 ```
 
 ---
@@ -222,3 +301,9 @@ String hash = sha256(raw);
 | v3 | `point_history.request_hash` 추가 (SHA-256 기반 충돌 감지) |
 | v3 | `point_history.idempotency_key` 인덱스 추가 |
 | v4 | `PointHistoryType`에 `REFUND_INSIGHT` 추가 (AI 리포트 생성 실패 환불) |
+| v5 | `point_history.reference_type` 컬럼 추가 (PointReferenceType enum) |
+| v5 | `PointReferenceType` enum 추가 (BATTLE / MARKET_PREDICTION / INSIGHT_REPORT) |
+| v5 | `idx_point_history_reference` 인덱스 추가 (reference_type, reference_id) |
+| v5 | `request_hash` 생성 규칙 변경 (referenceType 포함) |
+| v5 | `point_balance` Atomic UPDATE 동시성 제어 정책 추가 |
+| v5 | 탈퇴 회원 정산/환불 허용 정책 추가 |

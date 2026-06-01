@@ -31,15 +31,12 @@ http://localhost:8080/api/v1
 
 | 에러 코드 | 상황 |
 |---|---|
-| NOT_FOUND | 회원 없음 |
-| UNAUTHORIZED | 인증 실패 (JWT 만료 또는 유효하지 않음) |
-| FORBIDDEN | 권한 없음 |
-| POINT_INSUFFICIENT | 포인트 부족 |
-| DUPLICATE_REQUEST | 중복 요청 (idempotency_key 충돌) |
-| DUPLICATE_NICKNAME | 닉네임 중복 |
-| RESIDENCE_CHANGE_COOLDOWN | 거주지 변경 30일 제한 |
-| KAKAO_AUTH_FAILED | 카카오 access_token 유효하지 않음 |
-| INTERNAL_ERROR | 서버 오류 |
+| `UNAUTHORIZED` | 인증 실패 (JWT 만료 또는 유효하지 않음) |
+| `FORBIDDEN` | 권한 없음 |
+| `VALIDATION_FAILED` | 요청 필드 누락 또는 타입 오류 |
+| `INTERNAL_ERROR` | 서버 오류 |
+
+> 도메인별 에러코드는 `docs/member-point/ERROR_CODE.md` 참조
 
 ---
 
@@ -238,7 +235,7 @@ Authorization: Bearer {JWT}
     "role": "USER",
     "residenceSido": "서울특별시",
     "residenceSigu": "마포구",
-    "pointBalance": 150.00,
+    "pointBalance": "150.00",
     "createdAt": "2026-05-28T10:00:00"
   },
   "timestamp": "2026-05-28T10:00:00"
@@ -301,8 +298,10 @@ Authorization: Bearer {JWT}
 
 | 에러 코드 | 상황 |
 |---|---|
-| DUPLICATE_NICKNAME | 닉네임 중복 |
-| RESIDENCE_CHANGE_COOLDOWN | 거주지 변경 30일 제한 |
+| `UNAUTHORIZED` | JWT 유효하지 않음 |
+| `MEMBER_NOT_FOUND` | 회원 없음 |
+| `MEMBER_NICKNAME_DUPLICATE` | 닉네임 중복 |
+| `MEMBER_RESIDENCE_CHANGE_COOLDOWN` | 거주지 30일 이내 재변경 |
 
 ---
 
@@ -345,8 +344,9 @@ Authorization: Bearer {JWT}
 
 | 에러 코드 | 상황 |
 |---|---|
-| UNAUTHORIZED | JWT 유효하지 않음 |
-| NOT_FOUND | 회원 없음 |
+| `UNAUTHORIZED` | JWT 유효하지 않음 |
+| `MEMBER_NOT_FOUND` | 회원 없음 |
+| `MEMBER_ALREADY_DELETED` | 탈퇴한 회원 |
 
 ---
 
@@ -371,7 +371,7 @@ Authorization: Bearer {JWT}
   "message": null,
   "data": {
     "memberId": 1,
-    "pointBalance": 150.00
+    "pointBalance": "150.00"
   },
   "timestamp": "2026-05-28T10:00:00"
 }
@@ -411,8 +411,8 @@ Authorization: Bearer {JWT}
       {
         "id": 1,
         "type": "EARN_VOTE",
-        "amount": 10.00,
-        "balanceSnapshot": 150.00,
+        "amount": "10.00",
+        "balanceSnapshot": "150.00",
         "reason": "Battle 투표 참여 보상",
         "referenceId": 42,
         "createdAt": "2026-05-28T10:00:00"
@@ -429,6 +429,73 @@ Authorization: Bearer {JWT}
 ---
 
 ## 3. 내부 연계 API (다른 서비스 → Member-Point)
+
+---
+
+### 3-0. 거래 상태 조회
+
+```
+GET /api/v1/points/transactions?idempotencyKey={key}
+```
+
+Market이 포인트 차감 요청 후 Timeout 발생 시 처리 성공 여부를 확인하기 위해 호출한다.
+
+**인증**: 불필요 (내부 서비스 간 호출)
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| idempotencyKey | String | Y | 조회할 거래의 Idempotency-Key |
+
+**Response 200 — PROCESSED (처리 완료)**
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "idempotencyKey": "MARKET_PREDICTION_SPEND:market:7:prediction:1001:member:1",
+    "status": "PROCESSED",
+    "memberId": 1,
+    "type": "SPEND_MARKET",
+    "amount": "100.00",
+    "referenceType": "MARKET_PREDICTION",
+    "referenceId": 1001,
+    "requestHashMatched": true,
+    "balanceSnapshot": "50.00",
+    "createdAt": "2026-05-28T10:00:00"
+  },
+  "timestamp": "2026-05-28T10:00:00"
+}
+```
+
+**Response 200 — NOT_FOUND (처리 이력 없음)**
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "idempotencyKey": "MARKET_PREDICTION_SPEND:market:7:prediction:1001:member:1",
+    "status": "NOT_FOUND"
+  },
+  "timestamp": "2026-05-28T10:00:00"
+}
+```
+
+**status 값 설명**
+
+| status | 의미 | Market 처리 방향 |
+|---|---|---|
+| `PROCESSED` | point_history 존재, 차감 완료 | Prediction CONFIRMED 처리 |
+| `NOT_FOUND` | point_history 없음, 미처리 | Idempotency-Key 들고 재시도 가능 |
+
+**Error Codes**
+
+| 에러 코드 | 상황 |
+|---|---|
+| `IDEMPOTENCY_KEY_REQUIRED` | idempotencyKey 파라미터 누락 |
 
 ---
 
@@ -451,7 +518,8 @@ X-Member-Id: {memberId}
 {
   "memberId": 1,
   "type": "EARN_VOTE",
-  "amount": 10,
+  "amount": "10",
+  "referenceType": "BATTLE",
   "referenceId": 42,
   "reason": "Battle 투표 참여 보상"
 }
@@ -462,25 +530,30 @@ X-Member-Id: {memberId}
 | memberId | Long | Y | member.id |
 | type | String | Y | PointHistoryType |
 | amount | Decimal | Y | 적립 포인트 (양수, point_history.amount CHECK > 0) |
-| referenceId | Long | N | battle_id 또는 market_id (point_history.reference_id) |
+| referenceType | String | Y | PointReferenceType (BATTLE / MARKET_PREDICTION / INSIGHT_REPORT) |
+| referenceId | Long | Y | 해당 도메인 객체 ID (point_history.reference_id) |
 | reason | String | N | 사용자 노출용 설명 (point_history.reason) |
 
 **내부 처리**
 ```
 1. Idempotency-Key 헤더 확인
    → 누락 시 IDEMPOTENCY_KEY_REQUIRED (400)
-2. point_history에서 idempotency_key 조회
+2. referenceType 유효성 확인
+   → BATTLE / MARKET_PREDICTION / INSIGHT_REPORT 외 값이면 POINT_INVALID_REFERENCE_TYPE (400)
+3. point_history에서 idempotency_key 조회
    → 없으면 신규 요청 → 정상 처리
    → 있으면 request_hash 비교
       동일 → 기존 처리 결과 반환 (200, POINT_TRANSACTION_ALREADY_PROCESSED)
       불일치 → IDEMPOTENCY_KEY_CONFLICT (409)
-3. member.point_balance += amount
-4. point_history INSERT
+4. member.point_balance += amount
+5. point_history INSERT
    - type: EARN_VOTE
    - amount: 10 (양수)
+   - reference_type: BATTLE
+   - reference_id: 42
    - balance_snapshot: 변경 후 잔액
    - idempotency_key: 헤더값
-   - request_hash: SHA-256(memberId+type+amount+referenceId)
+   - request_hash: SHA-256(memberId+type+amount+referenceType+referenceId)
 ```
 
 **Response 200**
@@ -492,8 +565,10 @@ X-Member-Id: {memberId}
   "data": {
     "memberId": 1,
     "type": "EARN_VOTE",
-    "amount": 10,
-    "balanceSnapshot": 60
+    "amount": "10",
+    "referenceType": "BATTLE",
+    "referenceId": 42,
+    "balanceSnapshot": "60.00"
   },
   "timestamp": "2026-05-28T10:00:00"
 }
@@ -528,8 +603,9 @@ X-Member-Id: {memberId}
 {
   "memberId": 1,
   "type": "SPEND_MARKET",
-  "amount": 100,
-  "referenceId": 7,
+  "amount": "100",
+  "referenceType": "MARKET_PREDICTION",
+  "referenceId": 1001,
   "reason": "Market 예측 참여"
 }
 ```
@@ -538,19 +614,23 @@ X-Member-Id: {memberId}
 ```
 1. Idempotency-Key 헤더 확인
    → 누락 시 IDEMPOTENCY_KEY_REQUIRED (400)
-2. point_history에서 idempotency_key 조회
+2. referenceType 유효성 확인
+   → BATTLE / MARKET_PREDICTION / INSIGHT_REPORT 외 값이면 POINT_INVALID_REFERENCE_TYPE (400)
+3. point_history에서 idempotency_key 조회
    → 없으면 신규 요청 → 정상 처리
    → 있으면 request_hash 비교
       동일 → 기존 처리 결과 반환 (200, POINT_TRANSACTION_ALREADY_PROCESSED)
       불일치 → IDEMPOTENCY_KEY_CONFLICT (409)
-3. member.point_balance 잔액 확인 (부족 시 POINT_INSUFFICIENT)
-4. member.point_balance -= amount
-5. point_history INSERT
+4. member.point_balance 잔액 확인 (부족 시 POINT_INSUFFICIENT)
+5. member.point_balance -= amount
+6. point_history INSERT
    - type: SPEND_MARKET
    - amount: 100 (양수, CHECK > 0 제약)
+   - reference_type: MARKET_PREDICTION
+   - reference_id: 1001
    - balance_snapshot: 변경 후 잔액
    - idempotency_key: 헤더값
-   - request_hash: SHA-256(memberId+type+amount+referenceId)
+   - request_hash: SHA-256(memberId+type+amount+referenceType+referenceId)
 ```
 
 **Response 200**
@@ -562,8 +642,10 @@ X-Member-Id: {memberId}
   "data": {
     "memberId": 1,
     "type": "SPEND_MARKET",
-    "amount": 100,
-    "balanceSnapshot": 50
+    "amount": "100",
+    "referenceType": "MARKET_PREDICTION",
+    "referenceId": 1001,
+    "balanceSnapshot": "50.00"
   },
   "timestamp": "2026-05-28T10:00:00"
 }
@@ -600,14 +682,22 @@ Idempotency-Key: {settlementId}
   "settlementId": "settle-market-7-20260528",
   "items": [
     {
+      "predictionId": 1001,
       "memberId": 1,
-      "amount": 190.00,
-      "reason": "Market 정산 보상"
+      "amount": "190.00",
+      "referenceType": "MARKET_PREDICTION",
+      "referenceId": 1001,
+      "reason": "Market 정산 보상",
+      "idempotencyKey": "MARKET_SETTLEMENT_REWARD:market:7:prediction:1001:member:1"
     },
     {
+      "predictionId": 1002,
       "memberId": 2,
-      "amount": 95.00,
-      "reason": "Market 정산 보상"
+      "amount": "95.00",
+      "referenceType": "MARKET_PREDICTION",
+      "referenceId": 1002,
+      "reason": "Market 정산 보상",
+      "idempotencyKey": "MARKET_SETTLEMENT_REWARD:market:7:prediction:1002:member:2"
     }
   ]
 }
@@ -615,14 +705,22 @@ Idempotency-Key: {settlementId}
 
 **내부 처리**
 ```
-items 순회하며 각 member에 대해:
-  1. member.point_balance += amount
-  2. point_history INSERT
+items 순회하며 각 prediction에 대해:
+  1. member 조회 (탈퇴 회원 포함 — deleted_at 무시)
+  2. member.point_balance += amount (Atomic UPDATE)
+  3. point_history INSERT
      - type: SETTLE_MARKET
      - amount: 양수
-     - reference_id: marketId
+     - reference_type: MARKET_PREDICTION
+     - reference_id: predictionId
+     - idempotency_key: item.idempotencyKey
      - balance_snapshot: 변경 후 잔액
+  4. 성공/실패 여부를 results[]에 기록
 ```
+
+**HTTP 정책**
+- 부분 성공/부분 실패는 **HTTP 200** 반환
+- items 자체가 비어있거나 포맷 오류면 **HTTP 400** 반환
 
 **Response 200**
 ```json
@@ -632,12 +730,43 @@ items 순회하며 각 member에 대해:
   "message": null,
   "data": {
     "marketId": 7,
-    "settledCount": 2,
-    "totalSettledAmount": 285.00
+    "results": [
+      {
+        "predictionId": 1001,
+        "memberId": 1,
+        "status": "PROCESSED",
+        "errorCode": null,
+        "amount": "190.00",
+        "balanceSnapshot": "340.00"
+      },
+      {
+        "predictionId": 1002,
+        "memberId": 2,
+        "status": "FAILED",
+        "errorCode": "MEMBER_NOT_FOUND",
+        "amount": "95.00",
+        "balanceSnapshot": null
+      }
+    ]
   },
   "timestamp": "2026-05-28T10:00:00"
 }
 ```
+
+**results[].status 값**
+
+| status | 의미 | Market 처리 |
+|---|---|---|
+| `PROCESSED` | 이번 요청에서 새로 처리됨 | Prediction SETTLED |
+| `ALREADY_PROCESSED` | 이전 요청에서 이미 처리됨 | 성공으로 간주 |
+| `FAILED` | 처리 실패 | 재시도 대상 |
+
+**Error Codes (전체 요청 실패 시)**
+
+| 에러 코드 | 상황 |
+|---|---|
+| `IDEMPOTENCY_KEY_REQUIRED` | item의 idempotencyKey 누락 |
+| `POINT_INVALID_AMOUNT` | amount <= 0 |
 
 ---
 
@@ -664,9 +793,13 @@ Idempotency-Key: {refundId}
   "refundId": "refund-market-7-20260528",
   "items": [
     {
+      "predictionId": 1001,
       "memberId": 1,
-      "amount": 100.00,
-      "reason": "Market 무효 환불"
+      "amount": "100.00",
+      "referenceType": "MARKET_PREDICTION",
+      "referenceId": 1001,
+      "reason": "Market 무효 환불",
+      "idempotencyKey": "MARKET_REFUND:market:7:prediction:1001:member:1"
     }
   ]
 }
@@ -680,8 +813,11 @@ Idempotency-Key: {refundId}
   "items": [
     {
       "memberId": 1,
-      "amount": 80.00,
-      "reason": "AI 리포트 생성 실패 환불"
+      "amount": "80.00",
+      "referenceType": "INSIGHT_REPORT",
+      "referenceId": 42,
+      "reason": "AI 리포트 생성 실패 환불",
+      "idempotencyKey": "INSIGHT_REFUND:report:42:member:1"
     }
   ]
 }
@@ -689,15 +825,22 @@ Idempotency-Key: {refundId}
 
 **내부 처리**
 ```
-items 순회하며 각 member에 대해:
-  1. member.point_balance += amount
-  2. point_history INSERT
-     - type: REFUND_MARKET  (Market 무효 환불)
-           또는 REFUND_INSIGHT (AI 생성 실패 환불)
+items 순회하며 각 건에 대해:
+  1. member 조회 (탈퇴 회원 포함 — deleted_at 무시)
+  2. member.point_balance += amount (Atomic UPDATE)
+  3. point_history INSERT
+     - type: REFUND_MARKET 또는 REFUND_INSIGHT
      - amount: 양수
-     - reference_id: marketId 또는 reportId
+     - reference_type: MARKET_PREDICTION 또는 INSIGHT_REPORT
+     - reference_id: predictionId 또는 reportId
+     - idempotency_key: item.idempotencyKey
      - balance_snapshot: 변경 후 잔액
+  4. 성공/실패 여부를 results[]에 기록
 ```
+
+**HTTP 정책**
+- 부분 성공/부분 실패는 **HTTP 200** 반환
+- items 자체가 비어있거나 포맷 오류면 **HTTP 400** 반환
 
 **Response 200**
 ```json
@@ -706,13 +849,36 @@ items 순회하며 각 member에 대해:
   "errorCode": null,
   "message": null,
   "data": {
-    "referenceId": 7,
-    "refundedCount": 1,
-    "totalRefundedAmount": 100.00
+    "marketId": 7,
+    "results": [
+      {
+        "predictionId": 1001,
+        "memberId": 1,
+        "status": "PROCESSED",
+        "errorCode": null,
+        "amount": "100.00",
+        "balanceSnapshot": "200.00"
+      }
+    ]
   },
   "timestamp": "2026-05-28T10:00:00"
 }
 ```
+
+**results[].status 값**
+
+| status | 의미 | Market 처리 |
+|---|---|---|
+| `PROCESSED` | 이번 요청에서 새로 처리됨 | Prediction REFUNDED |
+| `ALREADY_PROCESSED` | 이전 요청에서 이미 처리됨 | 성공으로 간주 |
+| `FAILED` | 처리 실패 | 재시도 대상 |
+
+**Error Codes (전체 요청 실패 시)**
+
+| 에러 코드 | 상황 |
+|---|---|
+| `IDEMPOTENCY_KEY_REQUIRED` | item의 idempotencyKey 누락 |
+| `POINT_INVALID_AMOUNT` | amount <= 0 |
 
 ---
 
