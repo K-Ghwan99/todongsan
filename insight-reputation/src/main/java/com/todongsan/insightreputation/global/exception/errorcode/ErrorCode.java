@@ -70,6 +70,7 @@ public enum ErrorCode {
     // Visit Certification 도메인
     VISIT_CERT_COOLDOWN("VISIT_CERT_COOLDOWN", "방문 인증 쿨다운 중입니다.", HttpStatus.BAD_REQUEST),
     VISIT_CERT_OUT_OF_RANGE("VISIT_CERT_OUT_OF_RANGE", "현재 위치가 인증 가능 반경을 벗어났습니다.", HttpStatus.BAD_REQUEST),
+    VISIT_CERT_UNSUPPORTED_REGION("VISIT_CERT_UNSUPPORTED_REGION", "지원하지 않는 지역입니다.", HttpStatus.BAD_REQUEST),
     VISIT_CERT_COMMENT_NOT_FOUND("VISIT_CERT_COMMENT_NOT_FOUND", "댓글을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
     VISIT_CERT_COMMENT_REGION_MISMATCH("VISIT_CERT_COMMENT_REGION_MISMATCH", "해당 지역 Battle의 댓글이 아닙니다.", HttpStatus.BAD_REQUEST),
 
