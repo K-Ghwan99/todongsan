@@ -302,6 +302,9 @@ CREATE TABLE market_prediction (
 
 ## 6-4. market_price_history
 
+`virtual_pool_amount`는 Market 생성 후 변경하지 않는다. 따라서 가격 이력 테이블에 별도
+snapshot을 저장하지 않고, 가격 이력 조회 시 `market_option`과 JOIN하여 응답한다.
+
 ```sql
 CREATE TABLE market_price_history (
     id                              BIGINT          NOT NULL AUTO_INCREMENT,

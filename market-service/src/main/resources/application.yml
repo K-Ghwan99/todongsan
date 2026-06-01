@@ -1,12 +1,8 @@
 spring:
   application:
     name: market-service
-
-server:
-  port: 8081
-spring:
-  application:
-    name: market-service
+  profiles:
+    default: local
 
 server:
   port: 8081
