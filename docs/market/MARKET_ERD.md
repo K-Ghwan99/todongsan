@@ -1,4 +1,4 @@
-# MARKET_ERD_v2.md
+# MARKET_ERD_v3.md
 
 > Market Service 데이터베이스 설계 문서 ver3.  
 > 본 버전은 API 명세와 동일하게 다음 정책을 반영한다.
@@ -8,6 +8,7 @@
 > - Market DB에는 `reference_type`, `reference_id`를 중복 저장하지 않는다.
 > - Member-Point 호출 시 애플리케이션 코드에서 `referenceType=MARKET_PREDICTION`, `referenceId=predictionId`를 만들어 보낸다.
 > - 정산/환불 멱등성은 batch가 아니라 detail item 단위로 보장한다.
+> - Insight-Reputation 연계용 데이터는 별도 테이블을 추가하지 않고 기존 Market 원본 테이블을 조회하여 제공한다.
 
 ---
 
@@ -275,6 +276,8 @@ CREATE TABLE market_prediction (
 
     UNIQUE KEY uq_market_prediction_member (market_id, member_id),
     INDEX idx_market_prediction_market_status (market_id, status),
+    INDEX idx_market_prediction_market_option (market_id, option_id),
+    INDEX idx_market_prediction_market_created (market_id, created_at),
     INDEX idx_market_prediction_member_id (member_id),
     INDEX idx_market_prediction_option_status (option_id, status),
     INDEX idx_market_prediction_point_spend_key (point_spend_idempotency_key),
@@ -729,6 +732,12 @@ CREATE INDEX idx_market_option_market_id ON market_option(market_id);
 CREATE INDEX idx_market_prediction_market_status
 ON market_prediction(market_id, status);
 
+CREATE INDEX idx_market_prediction_market_option
+ON market_prediction(market_id, option_id);
+
+CREATE INDEX idx_market_prediction_market_created
+ON market_prediction(market_id, created_at);
+
 CREATE INDEX idx_market_prediction_member_id
 ON market_prediction(member_id);
 
@@ -773,3 +782,87 @@ ON market_refund_detail(idempotency_key);
 - [ ] 환불 멱등성은 `market_refund_detail.idempotency_key`로 보장한다.
 - [ ] `market_settlement`에는 batch 단위 `idempotency_key`를 두지 않는다.
 - [ ] `market_void`에는 batch 단위 `idempotency_key`를 두지 않는다.
+- [ ] Insight-Reputation 연계용 별도 테이블을 추가하지 않는다.
+- [ ] Insight 조회 API는 기존 `market`, `market_option`, `market_prediction` 데이터를 조합하여 제공한다.
+- [ ] Insight Prediction 페이지 조회를 위해 `(market_id, created_at)` 인덱스를 둔다.
+- [ ] Insight 선택지별 집계를 위해 `(market_id, option_id)` 인덱스를 둔다.
+
+---
+
+
+# 10. Insight-Reputation 연계 조회 정책
+
+Insight-Reputation Service는 Market AI 리포트 생성을 위해 Market Service의 원본 참여 데이터를 REST 내부 API로 조회한다.
+
+## 10-1. 테이블 추가 여부
+
+Insight 연계만을 위해 Market DB에 별도 테이블을 추가하지 않는다.
+
+이유:
+
+```text
+1. Insight용 데이터는 기존 Market 원본 데이터에서 조회 가능하다.
+2. Insight 분석 결과와 리포트 저장은 Insight-Reputation Service의 책임이다.
+3. Market Service가 insight_report 또는 분석용 snapshot을 저장하면 도메인 책임이 섞인다.
+4. Market Service는 Market 원본 데이터의 소유자 역할만 수행한다.
+```
+
+사용 테이블:
+
+| 제공 데이터 | 조회 기준 테이블 |
+|---|---|
+| Market 기본 정보 | `market` |
+| 선택지별 집계 데이터 | `market_option`, `market_prediction` |
+| Prediction 원본 데이터 | `market_prediction`, `market_option`, `market` |
+| 정답 선택지 | `market.result_option_id` |
+| 실제 결과값 | `market.result_value`, `market.result_text` |
+| 정산 완료 여부 | `market.status = 'SETTLED'` |
+| 적중 여부 | `market_prediction.option_id = market.result_option_id` |
+
+## 10-2. Insight 조회 가능 상태
+
+Insight 분석용 Market 데이터는 정산 완료 후 제공한다.
+
+```text
+MarketStatus = SETTLED
+```
+
+SETTLED가 아닌 Market은 내부 Insight 조회 API에서 `MARKET_INVALID_STATUS`를 반환한다.
+
+## 10-3. 개인정보 제공 범위
+
+Market Service는 Insight-Reputation Service에 회원 프로필 정보를 제공하지 않는다.
+
+제공하는 회원 관련 값:
+
+```text
+member_id
+```
+
+제공하지 않는 값:
+
+```text
+회원 이름
+이메일
+성별
+나이
+거주지역
+방문 인증 정보
+```
+
+성별, 나이대, 거주지역 등 분석용 회원 프로필 정보는 Insight-Reputation 또는 Member-Point Service에서 별도로 조회한다.
+
+## 10-4. 조회 성능 인덱스
+
+Insight Prediction 페이지 조회와 선택지별 집계를 위해 다음 인덱스를 사용한다.
+
+```sql
+CREATE INDEX idx_market_prediction_market_option
+ON market_prediction(market_id, option_id);
+
+CREATE INDEX idx_market_prediction_market_created
+ON market_prediction(market_id, created_at);
+```
+
+위 인덱스는 Insight API 외에도 Market 상세 통계, 정산 대상 조회, 관리자 조회에 활용할 수 있다.
+
