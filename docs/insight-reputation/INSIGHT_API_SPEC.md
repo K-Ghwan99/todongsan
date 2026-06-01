@@ -1,7 +1,18 @@
-# API_SPEC_v4.md - Insight-Reputation Service
+# API_SPEC_v5.md - Insight-Reputation Service
 
 > Insight-Reputation Service의 상세 API 명세이다.
 > 사용자 신뢰도(Reputation) 조회 및 관리, 방문 인증, AI 분석 리포트 생성 기능을 제공한다.
+
+---
+
+## 변경 내역 (v4 → v5)
+
+| 섹션 | 변경 내용 |
+|---|---|
+| 섹션 3-2, 5-1, 6-1, 6-3 | 공통 에러 `NOT_FOUND` → `RESOURCE_NOT_FOUND` 통일 (ERROR_CODE.md 정합성) |
+| 섹션 6-1 | `INSIGHT_REPORT_ALREADY_PROCESSING`, `INSIGHT_REPORT_SOURCE_DATA_NOT_READY` 누락 ErrorCode 추가 |
+| 섹션 6-4 | `INSIGHT_REPORT_ALREADY_PROCESSING`, `INSIGHT_REPORT_SOURCE_DATA_NOT_READY` 누락 ErrorCode 추가 |
+| 섹션 7 | `REPUTATION_NOT_FOUND`, `VISIT_CERT_COMMENT_NOT_FOUND`, `INSIGHT_REPORT_NOT_FOUND`, `INSIGHT_REPORT_ALREADY_PROCESSING`, `INSIGHT_REPORT_SOURCE_DATA_NOT_READY` 누락 5개 추가 |
 
 ---
 
@@ -72,9 +83,18 @@ X-Member-Role: USER | ADMIN
 
 ---
 
-## 2. 서비스 간 내부 연계 API
+## 2. 서비스 간 내부 연계 API (아웃바운드)
 
-다른 서비스가 Insight-Reputation Service를 호출하는 API이다.
+Insight-Reputation Service가 다른 서비스를 호출하는 API 목록이다.
+
+| 호출 대상 | 엔드포인트 | 목적 |
+|---|---|---|
+| Battle Service | GET /api/v1/battles/{battleId} | Battle 기본 정보 조회 |
+| Battle Service | GET /api/v1/battles/{battleId}/votes | 투표 목록 조회 (member_id, selected_option) |
+| Battle Service | GET /api/v1/battles/comments/{commentId} | 댓글 단건 조회 (방문 인증용) |
+| Market Service | GET /api/v1/markets/{marketId} | Market 기본 정보 조회 |
+| Market Service | GET /api/v1/markets/{marketId}/predictions | 예측 참여 목록 조회 (member_id, selected_option) |
+| Member-Point Service | POST /api/v1/members/batch | 회원 정보 배치 조회 (ageGroup, gender, residenceSido/Sigu) |
 
 [루트 API_SPEC.md 섹션 3](../API_SPEC.md#3-insight-reputation-service-내부-연계-api) 참조
 
@@ -184,7 +204,7 @@ GET /api/v1/reputations/{memberId}
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
-| NOT_FOUND | 404 | 존재하지 않는 회원 또는 Reputation 미생성 회원 |
+| RESOURCE_NOT_FOUND | 404 | 존재하지 않는 회원 또는 Reputation 미생성 회원 |
 
 ---
 
@@ -370,7 +390,7 @@ POST /api/v1/reputations/visit-certifications
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
-| NOT_FOUND | 404 | COMMENT 방식에서 존재하지 않는 댓글 ID |
+| RESOURCE_NOT_FOUND | 404 | COMMENT 방식에서 존재하지 않는 댓글 ID |
 | FORBIDDEN | 403 | GPS 사용 불가 환경 (HTTP 환경) |
 | VISIT_CERT_OUT_OF_RANGE | 400 | GPS 좌표가 지역 중심에서 3km 초과 |
 | VISIT_CERT_COMMENT_REGION_MISMATCH | 400 | 댓글이 해당 지역(sido+sigu) Battle이 아님 |
@@ -500,10 +520,12 @@ Idempotency-Key: {uuid}
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
-| NOT_FOUND | 404 | 존재하지 않는 Battle |
-| INSIGHT_REPORT_SOURCE_NOT_CLOSED | 400 | Battle이 아직 종료되지 않음 (status != CLOSED) |
+| RESOURCE_NOT_FOUND | 404 | 존재하지 않는 Battle |
+| INSIGHT_REPORT_ALREADY_PROCESSING | 409 | 이미 PENDING/PROCESSING 상태의 리포트가 존재함. Point 차감 없음 |
+| INSIGHT_REPORT_SOURCE_NOT_CLOSED | 400 | Battle이 아직 종료되지 않음 (status != CLOSED). Point 차감 없음 |
 | POINT_INSUFFICIENT | 400 | 보유 Point 80P 미만 |
-| INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패. Member-Point 서비스가 환불 처리한다. 이 서비스는 예외만 발생시킨다. |
+| INSIGHT_REPORT_SOURCE_DATA_NOT_READY | 409 | 분석 데이터 부족. Point 차감 후 환불 처리됨 |
+| INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패. Point 차감 후 환불 처리됨 |
 
 ---
 
@@ -540,7 +562,7 @@ GET /api/v1/insights/battles/{battleId}/report
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
-| NOT_FOUND | 404 | Battle이 존재하지 않거나 리포트가 아직 없음 |
+| RESOURCE_NOT_FOUND | 404 | Battle이 존재하지 않거나 리포트가 아직 없음 |
 
 ---
 
@@ -590,7 +612,7 @@ GET /api/v1/insights/battles/{battleId}/report/status
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
-| NOT_FOUND | 404 | 리포트 자체가 없음 |
+| RESOURCE_NOT_FOUND | 404 | 리포트 자체가 없음 |
 
 ---
 
@@ -655,9 +677,11 @@ Idempotency-Key: {uuid}
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
-| NOT_FOUND | 404 | 존재하지 않는 Market |
+| RESOURCE_NOT_FOUND | 404 | 존재하지 않는 Market |
+| INSIGHT_REPORT_ALREADY_PROCESSING | 409 | 이미 PENDING/PROCESSING 상태의 리포트가 존재함. Point 차감 없음 |
 | POINT_INSUFFICIENT | 400 | 보유 Point 80P 미만 |
-| INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패. Member-Point 서비스가 환불 처리한다. 이 서비스는 예외만 발생시킨다. |
+| INSIGHT_REPORT_SOURCE_DATA_NOT_READY | 409 | 분석 데이터 부족. Point 차감 후 환불 처리됨 |
+| INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패. Point 차감 후 환불 처리됨 |
 
 ---
 
@@ -694,7 +718,7 @@ GET /api/v1/insights/markets/{marketId}/report
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
-| NOT_FOUND | 404 | Market이 존재하지 않거나 리포트가 아직 없음 |
+| RESOURCE_NOT_FOUND | 404 | Market이 존재하지 않거나 리포트가 아직 없음 |
 
 ---
 
@@ -732,7 +756,7 @@ GET /api/v1/insights/markets/{marketId}/report/status
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
-| NOT_FOUND | 404 | 리포트 자체가 없음 |
+| RESOURCE_NOT_FOUND | 404 | 리포트 자체가 없음 |
 
 ---
 
@@ -742,10 +766,15 @@ GET /api/v1/insights/markets/{marketId}/report/status
 
 | 에러 코드 | HTTP | 설명 |
 |---|---:|---|
+| REPUTATION_NOT_FOUND | 404 | 해당 회원의 Reputation 레코드 없음 |
 | REPUTATION_RESIDENCE_CHANGE_COOLDOWN | 400 | 거주지역 변경 후 30일 미경과 |
 | VISIT_CERT_COOLDOWN | 400 | 동일 지역 30일 내 재인증 시도 |
 | VISIT_CERT_OUT_OF_RANGE | 400 | GPS 좌표가 지역 중심에서 3km 초과 |
+| VISIT_CERT_COMMENT_NOT_FOUND | 404 | COMMENT 인증에서 댓글 ID 없음 |
 | VISIT_CERT_COMMENT_REGION_MISMATCH | 400 | 댓글이 해당 지역 Battle이 아님 |
+| INSIGHT_REPORT_NOT_FOUND | 404 | 분석 리포트 레코드 없음 |
+| INSIGHT_REPORT_ALREADY_PROCESSING | 409 | 동일 Battle/Market 리포트가 이미 PENDING/PROCESSING 상태 |
 | INSIGHT_REPORT_SOURCE_NOT_CLOSED | 400 | Battle이 아직 종료되지 않음 |
-| INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패 |
+| INSIGHT_REPORT_SOURCE_DATA_NOT_READY | 409 | 분석에 필요한 데이터 부족. Point 차감 후 환불 처리됨 |
+| INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패. Point 차감 후 환불 처리됨 |
 
