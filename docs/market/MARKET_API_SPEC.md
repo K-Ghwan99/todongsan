@@ -1,4 +1,4 @@
-# MARKET_API_SPEC_v2.md
+# MARKET_API_SPEC_v3.md
 
 > Market 서비스 API 명세서.  
 > 본 버전은 다음 피드백을 반영한다.
@@ -8,6 +8,7 @@
 > - 예측 참여는 `POINT_PENDING` 선저장 → 포인트 차감 호출 → 가격 확정 트랜잭션 순서로 처리한다.
 > - Member-Point 연동 시 `referenceType=MARKET_PREDICTION`, `referenceId=predictionId`를 전달한다.
 > - 정산/환불은 batch API를 유지하되, item별 `idempotencyKey`로 멱등성을 보장한다.
+> - Insight-Reputation Service 연계를 위해 SETTLED Market 기준 요약/Prediction 페이지 조회 내부 API를 제공한다.
 
 ---
 
@@ -981,12 +982,249 @@ POST /api/v1/points/refunds
 
 ---
 
-## 11. 내부 Scheduler API
+
+## 11. Insight-Reputation 내부 연계 API
+
+Insight-Reputation Service가 Market AI 리포트 생성을 위해 Market 원본 참여 데이터를 조회하는 내부 API이다.
+
+### 기본 정책
+
+```text
+1. Insight 분석용 내부 API는 읽기 전용 API이다.
+2. Market Service는 Market 원본 참여 데이터만 제공한다.
+3. Market Service는 회원 프로필 정보(성별, 나이, 거주지역, 이메일, 이름 등)를 제공하지 않는다.
+4. Market Service는 memberId까지만 제공한다.
+5. 회원 프로필 정보는 Insight-Reputation 또는 Member-Point Service에서 별도 조회한다.
+6. 분석 대상 Market은 SETTLED 상태만 허용한다.
+7. 응답 크기 증가를 방지하기 위해 Market 요약/선택지 집계 API와 Prediction 페이지 조회 API를 분리한다.
+8. Decimal 필드는 기존 정책과 동일하게 JSON String으로 응답한다.
+```
+
+분석 가능 상태:
+
+```text
+MarketStatus = SETTLED
+```
+
+SETTLED가 아닌 Market에 대해 Insight 데이터 조회를 요청하면 `MARKET_INVALID_STATUS`를 반환한다.
+
+---
+
+### 12-1. Market Insight 요약 및 선택지 집계 조회
+
+```http
+GET /internal/api/v1/markets/{marketId}/insight-summary
+```
+
+#### 사용 목적
+
+```text
+Insight-Reputation Service가 Market AI 리포트 생성을 위해
+Market 기본 정보와 선택지별 집계 데이터를 조회한다.
+```
+
+#### Path Variable
+
+| 이름 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `marketId` | Long | O | 조회할 Market ID |
+
+#### Response
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "market": {
+      "marketId": 7,
+      "title": "다음 주 서울 아파트 매매가격지수는 상승할까?",
+      "category": "PRICE_INDEX",
+      "answerType": "NUMERIC_RANGE",
+      "status": "SETTLED",
+      "closeAt": "2026-05-27T23:59:59",
+      "judgeDate": "2026-06-01",
+      "judgeDataSource": "REB",
+      "judgeCriteria": "서울 아파트 매매가격지수 주간 변동률",
+      "resultOptionId": 2,
+      "resultValue": "0.3400",
+      "resultText": null,
+      "totalPredictionCount": 79,
+      "totalPoolAmount": "25000.00",
+      "settlementPoolAmount": "23750.00",
+      "settledAt": "2026-06-02T10:00:00"
+    },
+    "optionStatistics": [
+      {
+        "optionId": 1,
+        "optionCode": "RANGE_1",
+        "optionLabel": "0.4% 이상",
+        "rangeMin": "0.4000",
+        "rangeMax": null,
+        "minInclusive": true,
+        "maxInclusive": false,
+        "predictionCount": 32,
+        "participantCount": 32,
+        "poolAmount": "10500.00",
+        "finalPrice": "0.42100000",
+        "totalContractQuantity": "24940.61757720",
+        "isResult": false
+      },
+      {
+        "optionId": 2,
+        "optionCode": "RANGE_2",
+        "optionLabel": "0.3% 이상 ~ 0.4% 미만",
+        "rangeMin": "0.3000",
+        "rangeMax": "0.4000",
+        "minInclusive": true,
+        "maxInclusive": false,
+        "predictionCount": 47,
+        "participantCount": 47,
+        "poolAmount": "14500.00",
+        "finalPrice": "0.57900000",
+        "totalContractQuantity": "25043.17789291",
+        "isResult": true
+      }
+    ]
+  },
+  "timestamp": "2026-06-02T10:00:00"
+}
+```
+
+#### 필드 설명
+
+| 필드 | 설명 |
+|---|---|
+| `market` | Market 기본 정보와 정산 결과 요약 |
+| `optionStatistics` | 선택지별 참여 수, Pool 금액, 최종 가격, 정답 여부 집계 |
+| `optionLabel` | `market_option.option_text`를 응답 DTO에서 사용하는 이름 |
+| `participantCount` | 해당 선택지를 선택한 회원 수. 현재 정책상 한 회원은 한 Market에 하나의 Prediction만 가지므로 `predictionCount`와 동일할 수 있다. |
+| `finalPrice` | SETTLED 시점의 선택지 최종 가격. `market_option.current_price` 기준 |
+| `isResult` | 정답 선택지 여부 |
+
+#### 발생 가능한 ErrorCode
+
+| ErrorCode | HTTP Status | 설명 |
+|---|---:|---|
+| `MARKET_NOT_FOUND` | 404 | Market 없음 |
+| `MARKET_INVALID_STATUS` | 409 | SETTLED 상태가 아닌 Market |
+| `MARKET_NO_PREDICTIONS` | 409 | 분석할 예측 참여 데이터가 없음 |
+
+---
+
+### 12-2. Market Insight Prediction 페이지 조회
+
+```http
+GET /internal/api/v1/markets/{marketId}/insight-predictions?page=0&size=500
+```
+
+#### 사용 목적
+
+```text
+Insight-Reputation Service가 회원별 예측 참여 원본 데이터를 페이지 단위로 조회한다.
+회원의 성별, 나이대, 거주지역 등 프로필 정보는 포함하지 않는다.
+```
+
+#### Query Parameters
+
+| 이름 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `page` | int | X | 페이지 번호. 기본값 0 |
+| `size` | int | X | 페이지 크기. 기본값 500, 최대 1000 |
+
+#### Response
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "content": [
+      {
+        "predictionId": 100,
+        "memberId": 10,
+        "optionId": 2,
+        "optionCode": "RANGE_2",
+        "optionLabel": "0.3% 이상 ~ 0.4% 미만",
+        "pointAmount": "100.00",
+        "priceSnapshot": "0.68750000",
+        "contractQuantity": "145.45454545",
+        "status": "SETTLED",
+        "isCorrect": true,
+        "participatedAt": "2026-05-21T15:30:00"
+      },
+      {
+        "predictionId": 101,
+        "memberId": 15,
+        "optionId": 1,
+        "optionCode": "RANGE_1",
+        "optionLabel": "0.4% 이상",
+        "pointAmount": "300.00",
+        "priceSnapshot": "0.40120000",
+        "contractQuantity": "747.75822431",
+        "status": "SETTLED",
+        "isCorrect": false,
+        "participatedAt": "2026-05-22T11:20:00"
+      }
+    ],
+    "page": 0,
+    "size": 500,
+    "totalElements": 1200,
+    "totalPages": 3,
+    "last": false
+  },
+  "timestamp": "2026-06-02T10:00:00"
+}
+```
+
+#### 필드 설명
+
+| 필드 | 설명 |
+|---|---|
+| `predictionId` | Market Prediction ID |
+| `memberId` | 참여 회원 ID. Market Service가 제공하는 유일한 회원 식별 정보 |
+| `optionId` | 선택한 Market Option ID |
+| `optionCode` | 선택지 코드 |
+| `optionLabel` | 선택지 표시명 |
+| `pointAmount` | 사용 포인트 |
+| `priceSnapshot` | 예측 확정 시점 1계약 가격 |
+| `contractQuantity` | 구매 계약 수량 |
+| `status` | Prediction 상태. Insight 조회 대상은 SETTLED 기준 |
+| `isCorrect` | `prediction.optionId == market.resultOptionId` 기준으로 계산한 적중 여부 |
+| `participatedAt` | 예측 참여 시각 |
+
+#### 발생 가능한 ErrorCode
+
+| ErrorCode | HTTP Status | 설명 |
+|---|---:|---|
+| `MARKET_NOT_FOUND` | 404 | Market 없음 |
+| `MARKET_INVALID_STATUS` | 409 | SETTLED 상태가 아닌 Market |
+| `MARKET_NO_PREDICTIONS` | 409 | 분석할 예측 참여 데이터가 없음 |
+
+---
+
+### 12-3. Insight 연계 책임 범위
+
+| 항목 | Market Service | Insight-Reputation Service |
+|---|---|---|
+| Market 원본 정보 | 제공 | 사용 |
+| 선택지별 집계 데이터 | 제공 | 사용 |
+| Prediction 원본 데이터 | 제공 | 사용 |
+| memberId | 제공 | 기준 키로 사용 |
+| 회원 이름/이메일 | 제공하지 않음 | 필요 시 Member-Point 조회 |
+| 성별/나이대/거주지역 | 제공하지 않음 | Insight/Reputation 또는 Member-Point 조회 |
+| AI 분석/Claude 호출 | 수행하지 않음 | 수행 |
+| insight_report 저장 | 수행하지 않음 | 수행 |
+
+
+## 12. 내부 Scheduler API
 
 > 내부 Scheduler API는 외부 클라이언트에 공개하지 않는다.  
 > Gateway 또는 내부 네트워크에서만 접근 가능하도록 제한한다.
 
-### 11-1. 포인트 차감 상태 대사
+### 12-1. 포인트 차감 상태 대사
 
 ```http
 POST /internal/api/v1/markets/predictions/reconcile-point?limit=100
@@ -1012,7 +1250,7 @@ Idempotency-Key로 Member-Point 처리 이력 조회
 
 ---
 
-### 11-2. 정산 실패 건 재시도
+### 12-2. 정산 실패 건 재시도
 
 ```http
 POST /internal/api/v1/markets/settlements/retry-failed?limit=100
@@ -1036,7 +1274,7 @@ limit 건만 조회
 
 ---
 
-### 11-3. 환불 실패 건 재시도
+### 12-3. 환불 실패 건 재시도
 
 ```http
 POST /internal/api/v1/markets/refunds/retry-failed?limit=100
@@ -1058,7 +1296,7 @@ limit 건만 조회
 
 ---
 
-### 11-4. 공공 데이터 수집 재시도
+### 12-4. 공공 데이터 수집 재시도
 
 ```http
 POST /internal/api/v1/markets/settlement-data/retry-fetch?limit=100
@@ -1082,7 +1320,7 @@ limit 건만 조회
 
 ---
 
-## 12. Market API 완료 기준
+## 13. Market API 완료 기준
 
 - [ ] Decimal 필드는 JSON String으로 응답한다.
 - [ ] 가격 이력 조회 API는 page/size 페이징을 지원한다.
@@ -1098,4 +1336,7 @@ limit 건만 조회
 - [ ] 정산/환불 item별 `idempotencyKey`를 사용한다.
 - [ ] 정산 시작은 Atomic Update로 `SETTLEMENT_IN_PROGRESS`를 획득한다.
 - [ ] 내부 Scheduler API는 `limit` 파라미터로 chunk 처리한다.
+- [ ] Insight-Reputation 내부 API는 SETTLED Market만 조회 가능하게 한다.
+- [ ] Insight-Reputation 내부 API는 요약/선택지 집계와 Prediction 페이지 조회를 분리한다.
+- [ ] Insight-Reputation 내부 API는 memberId까지만 제공하고 회원 프로필 정보는 제공하지 않는다.
 - [ ] `SETTLEMENT_IN_PROGRESS`, `SETTLED` 상태는 VOIDED 처리할 수 없다.
