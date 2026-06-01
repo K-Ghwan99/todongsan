@@ -15,9 +15,6 @@ public class CommentCertificationRequest {
     @NotBlank(message = "시/구는 필수입니다.")
     private String sigu;
     
-    @NotBlank(message = "댓글 내용은 필수입니다.")
-    private String commentContent;
-    
-    @NotNull(message = "Battle ID는 필수입니다.")
-    private Long battleId;
+    @NotNull(message = "댓글 ID는 필수입니다.")
+    private Long commentId;
 }

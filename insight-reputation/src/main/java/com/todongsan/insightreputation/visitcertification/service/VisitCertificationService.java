@@ -10,6 +10,9 @@ import com.todongsan.insightreputation.visitcertification.entity.VisitCertificat
 import com.todongsan.insightreputation.visitcertification.repository.VisitCertificationRepository;
 import com.todongsan.insightreputation.visitcertification.util.GpsDistanceCalculator;
 import com.todongsan.insightreputation.visitcertification.util.RegionCenterCoordinateProvider;
+import com.todongsan.insightreputation.global.client.BattleClient;
+import com.todongsan.insightreputation.global.client.BattleCommentResponse;
+import com.todongsan.insightreputation.global.client.BattleResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,6 +34,7 @@ public class VisitCertificationService {
 
     private final VisitCertificationRepository visitCertificationRepository;
     private final RegionCenterCoordinateProvider regionCoordinateProvider;
+    private final BattleClient battleClient;
 
     public List<VisitCertification> getVisitCertificationsByMemberId(Long memberId) {
         return visitCertificationRepository.findByMemberIdOrderByCertifiedAtDesc(memberId);
@@ -136,6 +140,83 @@ public class VisitCertificationService {
         return VisitCertificationResponse.from(savedCert);
     }
 
+    /**
+     * 댓글 기반 방문 인증을 등록합니다.
+     * 
+     * @param memberId 회원 ID
+     * @param sido 시/도
+     * @param sigu 시/구
+     * @param commentId 댓글 ID
+     * @return 방문 인증 응답
+     */
+    @Transactional
+    public VisitCertificationResponse registerComment(Long memberId, String sido, String sigu, Long commentId) {
+        log.info("댓글 방문 인증 등록 시작: memberId={}, sido={}, sigu={}, commentId={}", 
+                memberId, sido, sigu, commentId);
+
+        // 1. 기존 인증 조회
+        Optional<VisitCertification> existingCert = visitCertificationRepository
+                .findByMemberIdAndSidoAndSigu(memberId, sido, sigu);
+
+        // 2. 쿨다운 체크 (기존 인증 존재 시)
+        if (existingCert.isPresent()) {
+            LocalDateTime lastCertified = existingCert.get().getLastCertifiedAt();
+            LocalDateTime cooldownExpiry = lastCertified.plusDays(30);
+            
+            if (LocalDateTime.now().isBefore(cooldownExpiry)) {
+                log.warn("방문 인증 쿨다운 미경과: memberId={}, lastCertified={}, cooldownExpiry={}", 
+                        memberId, lastCertified, cooldownExpiry);
+                throw new CustomException(ErrorCode.VISIT_CERT_COOLDOWN);
+            }
+        }
+
+        // 3. 댓글 조회
+        BattleCommentResponse comment = battleClient.getComment(commentId);
+        
+        // 4. Battle 정보 조회 (지역 정보 확인용)
+        BattleResponse battle = battleClient.getBattle(comment.getBattleId());
+        
+        // 5. 댓글의 지역과 요청 지역 비교
+        if (!sido.equals(battle.getSido()) || !sigu.equals(battle.getSigu())) {
+            log.warn("댓글 지역 불일치: 요청={},{}, 댓글 Battle={},{}", 
+                    sido, sigu, battle.getSido(), battle.getSigu());
+            throw new CustomException(ErrorCode.VISIT_CERT_COMMENT_REGION_MISMATCH);
+        }
+
+        // 6. 인증 저장 (신규 또는 업데이트)
+        VisitCertification savedCert;
+        if (existingCert.isPresent()) {
+            // 재인증: 기존 레코드 업데이트
+            VisitCertification cert = existingCert.get();
+            cert.updateCommentCertification(generateCommentContent(comment), comment.getBattleId());
+            savedCert = cert;
+            log.info("댓글 재인증 완료: memberId={}, sido={}, sigu={}, commentId={}", 
+                    memberId, sido, sigu, commentId);
+        } else {
+            // 최초 인증: 새 레코드 생성
+            VisitCertification newCert = VisitCertification.builder()
+                    .memberId(memberId)
+                    .sido(sido)
+                    .sigu(sigu)
+                    .method(VisitCertMethod.COMMENT)
+                    .commentContent(generateCommentContent(comment))
+                    .battleId(comment.getBattleId())
+                    .build();
+            savedCert = visitCertificationRepository.save(newCert);
+            log.info("댓글 최초 인증 완료: memberId={}, sido={}, sigu={}, commentId={}", 
+                    memberId, sido, sigu, commentId);
+        }
+
+        return VisitCertificationResponse.from(savedCert);
+    }
+
+    /**
+     * 댓글 정보를 기반으로 comment_content 생성
+     */
+    private String generateCommentContent(BattleCommentResponse comment) {
+        return String.format("댓글 ID: %d (작성자: %d)", comment.getCommentId(), comment.getMemberId());
+    }
+
     @Transactional
     public VisitCertification registerGpsCertification(Long memberId, String sido, String sigu, 
                                                       BigDecimal latitude, BigDecimal longitude) {
@@ -164,16 +245,20 @@ public class VisitCertificationService {
 
     @Transactional
     public VisitCertification registerCommentCertification(Long memberId, String sido, String sigu,
-                                                          String commentContent, Long battleId) {
+                                                          Long commentId) {
         validateCooldown(memberId, sido, sigu);
-        validateCommentRegion(battleId, sido, sigu);
+        validateCommentRegion(commentId, sido, sigu);
+        
+        // 댓글 정보 조회
+        BattleCommentResponse comment = battleClient.getComment(commentId);
+        String commentContent = generateCommentContent(comment);
 
         Optional<VisitCertification> existingCert = 
             visitCertificationRepository.findByMemberIdAndSidoAndSigu(memberId, sido, sigu);
 
         if (existingCert.isPresent()) {
             VisitCertification cert = existingCert.get();
-            cert.updateCommentCertification(commentContent, battleId);
+            cert.updateCommentCertification(commentContent, comment.getBattleId());
             return cert;
         } else {
             VisitCertification newCert = VisitCertification.builder()
@@ -182,7 +267,7 @@ public class VisitCertificationService {
                 .sigu(sigu)
                 .method(VisitCertMethod.COMMENT)
                 .commentContent(commentContent)
-                .battleId(battleId)
+                .battleId(comment.getBattleId())
                 .build();
             return visitCertificationRepository.save(newCert);
         }
@@ -222,10 +307,15 @@ public class VisitCertificationService {
         }
     }
 
-    private void validateCommentRegion(Long battleId, String sido, String sigu) {
-        // TODO: Battle Service에서 댓글의 지역 정보 조회
-        // 현재는 임시 검증
-        if (battleId == null) {
+    private void validateCommentRegion(Long commentId, String sido, String sigu) {
+        // 댓글 조회
+        BattleCommentResponse comment = battleClient.getComment(commentId);
+        
+        // Battle 정보 조회 (지역 정보 확인용)
+        BattleResponse battle = battleClient.getBattle(comment.getBattleId());
+        
+        // 댓글의 지역과 요청 지역 비교
+        if (!sido.equals(battle.getSido()) || !sigu.equals(battle.getSigu())) {
             throw new CustomException(ErrorCode.VISIT_CERT_COMMENT_REGION_MISMATCH);
         }
     }

@@ -24,6 +24,7 @@ public class VisitCertificationResponse {
     private Long battleId;
     private LocalDateTime lastCertifiedAt;
     private LocalDateTime certifiedAt;
+    private LocalDateTime nextAvailableDate;
     
     public static VisitCertificationResponse from(VisitCertification visitCertification) {
         return VisitCertificationResponse.builder()
@@ -37,6 +38,7 @@ public class VisitCertificationResponse {
                 .battleId(visitCertification.getBattleId())
                 .lastCertifiedAt(visitCertification.getLastCertifiedAt())
                 .certifiedAt(visitCertification.getCertifiedAt())
+                .nextAvailableDate(visitCertification.getLastCertifiedAt().plusDays(30))
                 .build();
     }
     
