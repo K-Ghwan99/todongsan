@@ -85,4 +85,22 @@ public class VisitCertification extends BaseEntity {
         this.battleId = battleId;
         this.lastCertifiedAt = LocalDateTime.now();
     }
+
+    public void updateGpsCertification(BigDecimal latitude, BigDecimal longitude) {
+        this.method = VisitCertMethod.GPS;
+        this.latitude = latitude;
+        this.longitude = longitude;
+        this.commentContent = null;
+        this.battleId = null;
+        this.lastCertifiedAt = LocalDateTime.now();
+    }
+
+    public void updateCommentCertification(String commentContent, Long battleId) {
+        this.method = VisitCertMethod.COMMENT;
+        this.latitude = null;
+        this.longitude = null;
+        this.commentContent = commentContent;
+        this.battleId = battleId;
+        this.lastCertifiedAt = LocalDateTime.now();
+    }
 }

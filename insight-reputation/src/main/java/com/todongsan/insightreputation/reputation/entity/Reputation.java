@@ -76,9 +76,13 @@ public class Reputation extends BaseEntity {
         this.predictionCorrect = correct;
         
         if (count > 0) {
-            this.predictionAccuracy = new BigDecimal(correct)
+            // CLAUDE.md 요구사항: FLOOR(correct/count * 100 * 100) / 100 (버림)
+            BigDecimal accuracy = new BigDecimal(correct)
                     .multiply(new BigDecimal("100"))
-                    .divide(new BigDecimal(count), 2, BigDecimal.ROUND_DOWN);
+                    .multiply(new BigDecimal("100"))
+                    .divide(new BigDecimal(count), 0, BigDecimal.ROUND_DOWN)
+                    .divide(new BigDecimal("100"), 2, BigDecimal.ROUND_DOWN);
+            this.predictionAccuracy = accuracy;
         } else {
             this.predictionAccuracy = BigDecimal.ZERO;
         }
