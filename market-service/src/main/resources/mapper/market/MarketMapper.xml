@@ -115,6 +115,8 @@
         FROM market_price_history history
         JOIN market_option
           ON market_option.id = history.option_id
+         AND market_option.market_id = history.market_id
+        <!-- virtual_pool_amount is immutable after market creation, so price history reads it from market_option. -->
         WHERE history.market_id = #{marketId}
         <if test="optionId != null">
             AND history.option_id = #{optionId}
@@ -125,10 +127,13 @@
 
     <select id="countPriceHistory" resultType="long">
         SELECT COUNT(*)
-        FROM market_price_history
-        WHERE market_id = #{marketId}
+        FROM market_price_history history
+        JOIN market_option
+          ON market_option.id = history.option_id
+         AND market_option.market_id = history.market_id
+        WHERE history.market_id = #{marketId}
         <if test="optionId != null">
-            AND option_id = #{optionId}
+            AND history.option_id = #{optionId}
         </if>
     </select>
 
