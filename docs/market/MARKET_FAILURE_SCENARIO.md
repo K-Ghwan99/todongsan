@@ -1,4 +1,4 @@
-# MARKET_FAILURE_SCENARIO_v2.md
+# MARKET_FAILURE_SCENARIO_v3.md
 
 > Market 서비스에서 발생할 수 있는 실패 시나리오와 상태 전이, 재시도 정책, 복구 방식을 정의한다.  
 > 이 문서는 `MARKET_ERROR_CODE.md`와 `MARKET_API_SPEC.md` 작성 전 기준 문서로 사용한다.  
@@ -972,7 +972,113 @@ POST /internal/api/v1/markets/refunds/retry-failed?limit=100
 
 ---
 
-## 13. 관리자 확인 대상
+
+## 13. Insight-Reputation 내부 연계 실패 시나리오
+
+Insight-Reputation Service는 Market AI 리포트 생성을 위해 Market Service의 내부 조회 API를 호출한다.
+
+Market Service는 분석 결과를 생성하거나 저장하지 않고, SETTLED Market의 원본 참여 데이터만 제공한다.
+
+### 13-1. 정상 Insight 데이터 조회
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Insight-Reputation Service가 Market AI 리포트 생성을 위해 Market 데이터 조회 |
+| 조건 | MarketStatus = SETTLED, Prediction 존재 |
+| 제공 데이터 | Market 기본 정보, 선택지별 집계, Prediction 페이지 데이터 |
+| 회원 정보 범위 | memberId까지만 제공 |
+| 상태 변화 | 없음 |
+| 관련 ErrorCode | 없음 |
+
+처리 기준:
+
+```text
+1. Insight-Reputation Service가 insight-summary API 호출
+2. Market Service가 MarketStatus = SETTLED 검증
+3. Market 기본 정보와 optionStatistics 반환
+4. Insight-Reputation Service가 insight-predictions API를 page 단위로 반복 호출
+5. Market Service가 Prediction 원본 데이터를 memberId까지만 포함하여 반환
+6. Insight-Reputation Service가 회원 프로필 정보와 공공 데이터를 별도로 결합하여 AI 분석 수행
+```
+
+---
+
+### 13-2. 존재하지 않는 Market 조회
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Insight 내부 API 호출 |
+| 실패 원인 | marketId에 해당하는 Market 없음 |
+| 상태 변화 | 없음 |
+| 재시도 | X |
+| 관련 ErrorCode | MARKET_NOT_FOUND |
+| HTTP Status | 404 |
+
+---
+
+### 13-3. SETTLED 상태가 아닌 Market 조회
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Insight 내부 API 호출 |
+| 실패 원인 | MarketStatus가 SETTLED가 아님 |
+| 예시 | ACTIVE, CLOSED, DATA_PENDING, SETTLEMENT_IN_PROGRESS, VOIDED |
+| 상태 변화 | 없음 |
+| 재시도 | X |
+| 관련 ErrorCode | MARKET_INVALID_STATUS |
+| HTTP Status | 409 |
+
+처리 기준:
+
+```text
+Insight 분석용 내부 API는 정산 완료 후 데이터 분석을 전제로 한다.
+따라서 SETTLED 상태가 아닌 Market은 분석 대상이 아니다.
+```
+
+---
+
+### 13-4. 예측 참여 데이터가 없는 Market 조회
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Insight 내부 API 호출 |
+| 실패 원인 | SETTLED 상태이지만 분석할 Prediction 데이터가 없음 |
+| 상태 변화 | 없음 |
+| 재시도 | X |
+| 관련 ErrorCode | MARKET_NO_PREDICTIONS |
+| HTTP Status | 409 |
+
+처리 기준:
+
+```text
+Prediction 데이터가 없으면 선택지별 참여 분포, 적중 여부, 회원별 예측 패턴을 분석할 수 없다.
+Insight-Reputation Service는 이 응답을 INSIGHT_REPORT_SOURCE_DATA_NOT_READY로 매핑할 수 있다.
+```
+
+---
+
+### 13-5. Prediction 페이지 조회 중 일부 페이지 실패
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Insight-Reputation Service가 page 단위로 Prediction을 수집하는 중 |
+| 실패 원인 | 일시적인 네트워크 장애, Market Service 장애 |
+| 상태 변화 | 없음 |
+| 재시도 | O |
+| 관련 ErrorCode | EXTERNAL_SERVICE_TIMEOUT, EXTERNAL_SERVICE_UNAVAILABLE, EXTERNAL_SERVICE_ERROR |
+| HTTP Status | 502/503/504 |
+
+복구 방식:
+
+```text
+Insight-Reputation Service가 실패한 page부터 다시 조회한다.
+Market Service는 조회 API이므로 별도 보상 트랜잭션을 수행하지 않는다.
+```
+
+---
+
+
+## 14. 관리자 확인 대상
 
 | 상황 | 상태 |
 |---|---|
@@ -988,9 +1094,9 @@ POST /internal/api/v1/markets/refunds/retry-failed?limit=100
 
 ---
 
-## 14. Retry 정책 요약
+## 15. Retry 정책 요약
 
-### 14-1. 재시도 대상
+### 15-1. 재시도 대상
 
 | 상황 | Retry | 이유 |
 |---|---:|---|
@@ -1002,10 +1108,11 @@ POST /internal/api/v1/markets/refunds/retry-failed?limit=100
 | 공공 데이터 API 실패 | O | 외부 API 일시 장애 가능 |
 | 정산 포인트 지급 실패 | O | 일부 실패 건 재처리 가능 |
 | 환불 실패 | O | 일부 실패 건 재처리 가능 |
+| Insight Prediction 페이지 조회 중 일시 장애 | O | 읽기 전용 API이므로 실패 page부터 재조회 가능 |
 
 ---
 
-### 14-2. 재시도 금지 대상
+### 15-2. 재시도 금지 대상
 
 | 상황 | Retry | 이유 |
 |---|---:|---|
@@ -1019,10 +1126,12 @@ POST /internal/api/v1/markets/refunds/retry-failed?limit=100
 | 이미 정산 완료 | X | 중복 정산 방지 |
 | 이미 환불 완료 | X | 중복 환불 방지 |
 | SETTLEMENT_IN_PROGRESS 또는 SETTLED 상태의 VOIDED 시도 | X | 비즈니스 락 위반 |
+| SETTLED가 아닌 Market의 Insight 데이터 조회 | X | 분석 가능 상태가 아님 |
+| Prediction이 없는 Market의 Insight 데이터 조회 | X | 분석할 원본 데이터가 없음 |
 
 ---
 
-## 15. 최종 완료 기준
+## 16. 최종 완료 기준
 
 - [ ] 예측 참여 시 Prediction을 먼저 `POINT_PENDING`으로 저장하고 커밋한다.
 - [ ] DB 락을 잡은 상태로 Member-Point HTTP API를 호출하지 않는다.
@@ -1045,3 +1154,7 @@ POST /internal/api/v1/markets/refunds/retry-failed?limit=100
 - [ ] `SETTLEMENT_IN_PROGRESS`, `SETTLED` 상태는 VOIDED 처리할 수 없다.
 - [ ] 환불은 item별 idempotencyKey를 사용하고 환불 타임아웃은 `REFUND_UNKNOWN`으로 변경한다.
 - [ ] Scheduler는 `limit` 기반 chunk 처리를 한다.
+- [ ] Insight-Reputation 내부 조회 API는 SETTLED Market만 허용한다.
+- [ ] Insight-Reputation 내부 조회 API는 summary와 prediction page를 분리한다.
+- [ ] Insight-Reputation 내부 조회 API는 memberId까지만 제공한다.
+- [ ] Insight-Reputation 내부 조회 API 실패는 Market 상태를 변경하지 않는다.
