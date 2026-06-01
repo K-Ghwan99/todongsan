@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.todongsan.marketservice.market.repository.MarketMapper">
+
+    <select id="selectMarkets" resultType="com.todongsan.marketservice.market.entity.Market">
+        SELECT
+            id,
+            title,
+            status,
+            close_at,
+            total_pool,
+            created_at
+        FROM market
+        WHERE deleted_at IS NULL
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND title LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        ORDER BY created_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countMarkets" resultType="long">
+        SELECT COUNT(*)
+        FROM market
+        WHERE deleted_at IS NULL
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND title LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+    </select>
+
+    <select id="selectMarketById" resultType="com.todongsan.marketservice.market.entity.Market">
+        SELECT
+            id,
+            title,
+            description,
+            status,
+            close_at,
+            settle_due_at,
+            total_pool,
+            created_at,
+            updated_at
+        FROM market
+        WHERE id = #{marketId}
+          AND deleted_at IS NULL
+    </select>
+
+    <select id="selectOptionsByMarketId" resultType="com.todongsan.marketservice.market.entity.MarketOption">
+        SELECT
+            id,
+            market_id,
+            option_code,
+            option_text,
+            display_order,
+            range_min,
+            range_max,
+            min_inclusive,
+            max_inclusive,
+            virtual_pool_amount,
+            real_pool_amount,
+            total_contract_quantity,
+            current_price,
+            prediction_count,
+            is_result,
+            created_at,
+            updated_at
+        FROM market_option
+        WHERE market_id = #{marketId}
+        ORDER BY display_order ASC, id ASC
+    </select>
+
+    <select id="selectOptionsByMarketIds" resultType="com.todongsan.marketservice.market.entity.MarketOption">
+        SELECT
+            id,
+            market_id,
+            option_code,
+            option_text,
+            display_order,
+            range_min,
+            range_max,
+            min_inclusive,
+            max_inclusive,
+            virtual_pool_amount,
+            real_pool_amount,
+            total_contract_quantity,
+            current_price,
+            prediction_count,
+            is_result,
+            created_at,
+            updated_at
+        FROM market_option
+        WHERE market_id IN
+        <foreach collection="marketIds" item="marketId" open="(" close=")" separator=",">
+            #{marketId}
+        </foreach>
+        ORDER BY market_id ASC, display_order ASC, id ASC
+    </select>
+
+    <select id="selectPriceHistory" resultType="com.todongsan.marketservice.market.repository.MarketPriceHistoryRow">
+        SELECT
+            history.id AS history_id,
+            history.option_id,
+            history.price_after AS price,
+            history.real_pool_after AS real_pool_amount,
+            market_option.virtual_pool_amount,
+            history.contract_quantity_after AS contract_quantity,
+            history.created_at
+        FROM market_price_history history
+        JOIN market_option
+          ON market_option.id = history.option_id
+        WHERE history.market_id = #{marketId}
+        <if test="optionId != null">
+            AND history.option_id = #{optionId}
+        </if>
+        ORDER BY history.created_at DESC, history.id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countPriceHistory" resultType="long">
+        SELECT COUNT(*)
+        FROM market_price_history
+        WHERE market_id = #{marketId}
+        <if test="optionId != null">
+            AND option_id = #{optionId}
+        </if>
+    </select>
+
+</mapper>
