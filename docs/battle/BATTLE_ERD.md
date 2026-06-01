@@ -14,6 +14,7 @@
 | 보상 정책 | 다수 선택자 보상 | `battle.winning_option`, `battle.reward_amount` |
 | 신고 기능 | MVP 제외 | `report` 테이블 없음 |
 | 투표 변경 | 불가 (1인 1표 확정) | `uq_battle_vote`로 강제, 집계는 단순 증가만 |
+| BattleStatus | `CONVENTION.md` 6-1 기준 통일 | `PENDING / ACTIVE / CLOSED / CANCELLED` |
 
 ---
 
@@ -32,13 +33,13 @@ erDiagram
         VARCHAR title
         VARCHAR option_a
         VARCHAR option_b
-        VARCHAR status "PENDING/ONGOING/CLOSED/SETTLED"
+        VARCHAR status "PENDING/ACTIVE/CLOSED/CANCELLED"
         INT option_a_count
         INT option_b_count
         INT vote_count
         VARCHAR winning_option "A/B/DRAW"
         DECIMAL reward_amount
-        DATETIME settled_at
+        DATETIME settled_at "정산 완료 시각 (status는 CLOSED 유지)"
         BIGINT created_by "member.id (REST)"
         DATETIME start_at
         DATETIME end_at
@@ -70,7 +71,8 @@ erDiagram
     point_reward_retry_queue {
         BIGINT id PK
         BIGINT member_id "member.id (REST)"
-        BIGINT reference_id "battle.id"
+        VARCHAR reference_type "고정값: BATTLE"
+        BIGINT reference_id "투표/정산: battle.id, 댓글: battle.id"
         VARCHAR type "PointHistoryType"
         DECIMAL amount
         VARCHAR idempotency_key UK
@@ -115,7 +117,7 @@ flowchart LR
 | `battle` | Battle 주제, 상태, 투표 기간, 결과/보상 | 결과·보상 컬럼 포함 |
 | `battle_vote` | 개별 투표 기록 | 보상 지급 여부 플래그 포함 |
 | `comment` | Battle 댓글 (단일 depth) | 대댓글 없음 |
-| `point_reward_retry_queue` | Point 지급 재시도 큐 | 정산 실패 재처리용 |
+| `point_reward_retry_queue` | Point 지급 재시도 큐 | Member-Point 호출 실패 재처리용 |
 
 ---
 
@@ -129,7 +131,7 @@ CREATE TABLE battle (
     title           VARCHAR(255)    NOT NULL,
     option_a        VARCHAR(100)    NOT NULL,
     option_b        VARCHAR(100)    NOT NULL,
-    status          VARCHAR(20)     NOT NULL DEFAULT 'PENDING',  -- BattleStatus
+    status          VARCHAR(20)     NOT NULL DEFAULT 'PENDING',  -- BattleStatus: PENDING/ACTIVE/CLOSED/CANCELLED
 
     -- 집계 (비정규화: 결과 화면 조회 부하 방지)
     option_a_count  INT             NOT NULL DEFAULT 0,
@@ -139,7 +141,7 @@ CREATE TABLE battle (
     -- 결과 / 보상 (다수 선택자 보상)
     winning_option  VARCHAR(4),                                  -- 'A', 'B', 'DRAW' (정산 전 NULL)
     reward_amount   DECIMAL(10,2)   NOT NULL DEFAULT 0,          -- 승자 1인당 지급 포인트
-    settled_at      DATETIME,                                    -- 정산 완료 시각
+    settled_at      DATETIME,                                    -- 정산 완료 시각 (NULL이면 미정산. status는 CLOSED 유지)
 
     created_by      BIGINT          NOT NULL,                    -- member.id (REST)
     start_at        DATETIME        NOT NULL,
@@ -151,6 +153,9 @@ CREATE TABLE battle (
     KEY idx_battle_status_end (status, end_at, deleted_at)       -- 마감 대상 배치 조회용
 );
 ```
+
+> **정산 완료 표현**: 별도 status 값(SETTLED)을 두지 않고 `settled_at IS NOT NULL`로 판단한다.
+> CONVENTION.md 6-1의 BattleStatus(`PENDING/ACTIVE/CLOSED/CANCELLED`) 4종을 그대로 따른다.
 
 ### 3-2. battle_vote
 
@@ -193,8 +198,9 @@ CREATE TABLE comment (
 CREATE TABLE point_reward_retry_queue (
     id              BIGINT          NOT NULL AUTO_INCREMENT,
     member_id       BIGINT          NOT NULL,
-    reference_id    BIGINT          NOT NULL,                    -- battle_id
-    type            VARCHAR(50)     NOT NULL,                    -- PointHistoryType
+    reference_type  VARCHAR(50)     NOT NULL DEFAULT 'BATTLE',   -- PointReferenceType (Battle 큐는 항상 BATTLE)
+    reference_id    BIGINT          NOT NULL,                    -- 투표/정산: battle.id, 댓글: battle.id (commentId는 idempotency_key에 포함)
+    type            VARCHAR(50)     NOT NULL,                    -- PointHistoryType (EARN_VOTE, EARN_VOTE_WIN, EARN_COMMENT 등)
     amount          DECIMAL(10,2)   NOT NULL,
     idempotency_key VARCHAR(100)    NOT NULL UNIQUE,
     retry_count     INT             NOT NULL DEFAULT 0,
@@ -206,35 +212,49 @@ CREATE TABLE point_reward_retry_queue (
 );
 ```
 
+> **reference_type 컬럼 추가 이유**: Member-Point Service의 `point_history.reference_type`(`PointReferenceType` enum)과 정합성을 맞추기 위함이다. Battle Service의 큐이므로 값은 항상 `'BATTLE'`이지만, 재시도 시 Member-Point API에 그대로 전달하려면 컬럼이 존재해야 한다. (`MEMBER_POINT_ERD.md` 4-3 참조)
+
 ---
 
 ## 4. 상태값 (Enum)
 
 ### 4-1. BattleStatus
 
+`CONVENTION.md` 6-1과 동일하다.
+
 ```
-PENDING   생성됨 / 투표 시작 전 (start_at 이전)
-ONGOING   투표 진행 중 (start_at ~ end_at)
-CLOSED    투표 마감 / 결과 집계 완료, 정산 대기
-SETTLED   포인트 정산 완료
+PENDING    검수 대기 (사용자 등록 후 관리자 승인 전)
+ACTIVE     투표 진행 중 (관리자 승인 후 자동 전환, start_at 도달 후 실제 투표 가능)
+CLOSED     투표 종료 (end_at 도달, 자동 전환)
+CANCELLED  강제 취소 / 관리자 거절
 ```
+
+> **정산 상태는 별도 컬럼**: status에 `SETTLED`를 두지 않고 `settled_at IS NOT NULL`로 판단한다.
+> 정산이 끝나도 status는 `CLOSED` 그대로 유지된다.
 
 ### 4-2. 상태 전이도
 
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING: Battle 생성
-    PENDING --> ONGOING: start_at 도달
-    ONGOING --> CLOSED: end_at 도달<br/>(winning_option 확정)
-    CLOSED --> SETTLED: 포인트 정산 완료
-    SETTLED --> [*]
+    PENDING --> ACTIVE: 관리자 승인
+    PENDING --> CANCELLED: 관리자 거절
+    ACTIVE --> CLOSED: end_at 도달<br/>(winning_option 확정)
+    ACTIVE --> CANCELLED: 관리자 강제 취소
+    CLOSED --> [*]
+    CANCELLED --> [*]
 
     note right of CLOSED
-        동수일 경우
-        winning_option = 'DRAW'
+        정산 완료 시
+        settled_at 기록
+        status는 CLOSED 유지
+        무승부: winning_option = 'DRAW',
         보상 미지급
     end note
 ```
+
+> **start_at은 status 전이를 트리거하지 않는다.** 승인 시점에 바로 ACTIVE로 전환되며,
+> 실제 투표 가능 여부는 service 레이어에서 `start_at <= NOW() <= end_at` 체크.
 
 ---
 
@@ -242,28 +262,29 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-    Start([end_at 도달]) --> S1[status: ONGOING → CLOSED]
+    Start([end_at 도달]) --> S1[status: ACTIVE → CLOSED]
     S1 --> S2{option_a_count<br/>vs<br/>option_b_count}
     S2 -->|동수| Draw[winning_option = 'DRAW'<br/>보상 미지급]
-    Draw --> End2[status: SETTLED]
+    Draw --> End2[settled_at 기록<br/>status는 CLOSED 유지]
     S2 -->|승자 확정| S3[winning_option = 'A' 또는 'B']
     S3 --> S4[승리 옵션 투표자 조회<br/>is_rewarded = false]
-    S4 --> S5[Member-Point REST 호출<br/>idempotency_key 사용]
+    S4 --> S5[Member-Point REST 호출<br/>POST /api/v1/points/settlements]
     S5 -->|성공| S6[battle_vote.is_rewarded = true]
     S5 -->|실패| Retry[point_reward_retry_queue 적재]
     Retry --> Scheduler[Scheduler 재시도<br/>1분 간격, 최대 3회]
     S6 --> S7{전원<br/>처리 완료?}
     S7 -->|No| S4
-    S7 -->|Yes| End1[status: SETTLED<br/>settled_at 기록]
+    S7 -->|Yes| End1[settled_at 기록<br/>status는 CLOSED 유지]
     End1 --> Done([정산 완료])
     End2 --> Done
 ```
 
 **핵심 포인트**
 
-1. `idempotency_key = "battle:{battle_id}:member:{member_id}"` 형태로 중복 지급 방지
+1. `idempotency_key = "battle:settle:{battle_id}:member:{member_id}"` 형태로 중복 지급 방지
 2. `is_rewarded` 플래그 덕분에 배치 중간 실패 후 재실행되어도 이미 지급된 투표는 건너뜀
-3. 무승부(`DRAW`)는 보상 없이 바로 SETTLED 처리
+3. 무승부(`DRAW`)는 보상 없이 바로 `settled_at` 기록
+4. 정산 완료 후에도 `status = CLOSED`로 유지 (별도 SETTLED 상태 없음)
 
 ---
 
@@ -271,7 +292,7 @@ flowchart TD
 
 - 1인 1표, 한 번 투표하면 변경/취소 불가.
 - DB 강제: `uq_battle_vote (battle_id, member_id)` 유니크 제약.
-  중복 투표 시도는 DB 레벨에서 막히고, 앱은 이를 "이미 투표함" 에러(`ALREADY_VOTED`)로 변환.
+  중복 투표 시도는 DB 레벨에서 막히고, 앱은 이를 "이미 투표함" 에러(`BATTLE_ALREADY_VOTED`)로 변환.
 - 집계 갱신은 단일 UPDATE 문의 원자성에 의존한다 (별도 비관적 락 불필요).
   ```sql
   UPDATE battle
@@ -286,7 +307,24 @@ flowchart TD
 ## 7. 추가 합의 필요 사항 (선택)
 
 - **닉네임 조회 N+1**: 댓글/투표 목록 표시 시 `member_id` → 닉네임을 매번 REST 호출하면
-  N+1이 된다. Member-Point Service에 "여러 member 일괄 조회" API를 두거나,
-  Battle 측에서 닉네임을 짧게 캐시하는 방안을 합의해둘 것.
+  N+1이 된다. Member-Point Service에 "여러 member 일괄 조회" API 추가 요청 예정
+  (이미 Insight Service도 `POST /api/v1/members/batch`를 필요로 함).
 - **마이페이지 "내가 만든 Battle"**: 해당 기능이 MVP에 포함되면
   `KEY idx_battle_creator (created_by, deleted_at, created_at)` 인덱스 추가.
+- **댓글 기반 방문 인증 검증 정책 (Insight 요청 관련)**: Insight Service의
+  `VISIT_CERT_COMMENT_REGION_MISMATCH` 검증을 위해 Battle에 sido/sigu 추가가 필요한지
+  Insight 담당자와 합의 필요. Battle의 본질은 지역 비종속(예: "강남 vs 강북")이므로
+  Battle 도메인에 지역을 강제하는 것은 부적절. Insight 측에서 검증을 완화하는 방향 권장.
+
+---
+
+## 8. 변경 이력
+
+| 버전 | 변경 내용 |
+|---|---|
+| v1 | 초안 작성 (대댓글 1단계 포함) |
+| v2 | 대댓글 제거, 단일 depth로 변경 |
+| v3 | 다이어그램 추가, 중복 인덱스 정리 |
+| v4 | BattleStatus를 CONVENTION.md 6-1 기준(`PENDING/ACTIVE/CLOSED/CANCELLED`)으로 정정. ONGOING/SETTLED 제거. 정산 완료는 `settled_at` 컬럼으로 표현 |
+| v4 | `point_reward_retry_queue`에 `reference_type` 컬럼 추가 (Member-Point `point_history`와 정합성) |
+| v4 | `ALREADY_VOTED` 참조를 `BATTLE_ALREADY_VOTED`로 정정 |

@@ -36,6 +36,10 @@ Authorization: Bearer {token}
 | 댓글 content 최대 길이 | 500자 |
 | 페이징 기본 size | Battle 20, 댓글 10 |
 | 종료 후 결과 전체 공개 기간 | 72시간 |
+| BattleStatus | `PENDING / ACTIVE / CLOSED / CANCELLED` (CONVENTION 6-1) |
+
+> **정산 완료 표현**: BattleStatus에 `SETTLED`를 두지 않고 `battle.settled_at IS NOT NULL`로
+> 판단한다. 정산 완료 후에도 `status`는 `CLOSED` 유지.
 
 ---
 
@@ -106,7 +110,7 @@ GET /api/v1/battles?status={status}&page={page}&size={size}
 
 | 파라미터 | 타입 | 필수 | 설명 |
 |---|---|---|---|
-| status | String | N | ACTIVE, CLOSED (기본: ACTIVE) |
+| status | String | N | `ACTIVE`, `CLOSED` (기본: `ACTIVE`). `PENDING`/`CANCELLED`은 일반 사용자에게 노출 안 됨 |
 | page | Integer | N | 페이지 번호 (기본: 0) |
 | size | Integer | N | 페이지 크기 (기본: 20) |
 
@@ -116,7 +120,7 @@ GET /api/v1/battles?status={status}&page={page}&size={size}
 
 | ErrorCode | HTTP | 상황 |
 |---|---:|---|
-| `VALIDATION_FAILED` | 400 | 잘못된 status 값 |
+| `VALIDATION_FAILED` | 400 | 잘못된 status 값 (`PENDING`/`CANCELLED` 요청 등) |
 
 ---
 
@@ -128,13 +132,15 @@ GET /api/v1/battles/{battleId}
 
 **인증**: 불필요
 
-**Response**: (기존 형식 유지)
+**Response**: (기존 형식 유지, status는 `ACTIVE` 또는 `CLOSED`만 노출)
 
 **Error Codes**
 
 | ErrorCode | HTTP | 상황 |
 |---|---:|---|
-| `BATTLE_NOT_FOUND` | 404 | 존재하지 않거나 soft delete됨 |
+| `BATTLE_NOT_FOUND` | 404 | 존재하지 않거나 soft delete됨. **`PENDING`/`CANCELLED` 상태도 일반 사용자에게는 이 에러로 응답** |
+
+> 관리자 전용 조회는 별도 API로 분리 (MVP 이후).
 
 ---
 
@@ -146,7 +152,20 @@ PATCH /api/v1/battles/{battleId}/approve
 
 **인증**: 필요 (관리자)
 
-**Response**: (기존 형식 유지, status=ACTIVE)
+**Response**: status가 `PENDING` → `ACTIVE`
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "battleId": 42,
+    "status": "ACTIVE"
+  },
+  "timestamp": "2026-05-28T10:00:00"
+}
+```
 
 **Error Codes**
 
@@ -155,7 +174,7 @@ PATCH /api/v1/battles/{battleId}/approve
 | `UNAUTHORIZED` | 401 | — |
 | `FORBIDDEN` | 403 | 관리자 권한 없음 |
 | `BATTLE_NOT_FOUND` | 404 | — |
-| `BATTLE_INVALID_STATUS` | 409 | PENDING 상태가 아님 (이미 승인/거절/취소됨) |
+| `BATTLE_INVALID_STATUS` | 409 | `PENDING` 상태가 아님 (이미 승인/거절/취소됨) |
 
 ---
 
@@ -167,7 +186,7 @@ PATCH /api/v1/battles/{battleId}/reject
 
 **인증**: 필요 (관리자)
 
-**Response**: (기존 형식 유지, status=CANCELLED)
+**Response**: status가 `PENDING` → `CANCELLED`
 
 **Error Codes**: 2-4와 동일
 
@@ -181,7 +200,7 @@ PATCH /api/v1/battles/{battleId}/cancel
 
 **인증**: 필요 (관리자)
 
-**Response**: (기존 형식 유지)
+**Response**: status가 `ACTIVE` → `CANCELLED`
 
 **Error Codes**
 
@@ -190,7 +209,7 @@ PATCH /api/v1/battles/{battleId}/cancel
 | `UNAUTHORIZED` | 401 | — |
 | `FORBIDDEN` | 403 | 관리자 권한 없음 |
 | `BATTLE_NOT_FOUND` | 404 | — |
-| `BATTLE_INVALID_STATUS` | 409 | 이미 종료/취소된 Battle |
+| `BATTLE_INVALID_STATUS` | 409 | `ACTIVE`가 아님 (이미 종료/취소되었거나 PENDING) |
 
 ---
 
@@ -222,7 +241,7 @@ POST /api/v1/battles/{battleId}/votes
 
 - 정상: `battle_vote` 생성 + `battle.option_a_count`/`vote_count` +1, 그 후 Member-Point 보상 호출
 - Point 호출 Timeout: 투표 유지, `point_reward_retry_queue` 적재 (사용자에게는 투표 성공 응답)
-- 자세한 흐름은 `docs/battle/ERROR_CODE.md` 4-1 참조
+- Member-Point 호출 페이로드 규칙은 `docs/battle/ERROR_CODE.md` 5-4 참조
 
 **Error Codes**
 
@@ -231,9 +250,8 @@ POST /api/v1/battles/{battleId}/votes
 | `UNAUTHORIZED` | 401 | — |
 | `VALIDATION_FAILED` | 400 | option 필드 누락 |
 | `BATTLE_INVALID_OPTION` | 400 | A/B 외의 값 |
-| `BATTLE_NOT_FOUND` | 404 | — |
-| `BATTLE_NOT_ACTIVE` | 400 | PENDING 상태 (아직 시작 전) |
-| `BATTLE_CLOSED` | 409 | CLOSED/SETTLED/CANCELLED |
+| `BATTLE_NOT_FOUND` | 404 | 존재하지 않거나 `PENDING` 상태 |
+| `BATTLE_CLOSED` | 409 | `CLOSED`/`CANCELLED` 상태 또는 `start_at` 미도달 |
 | `BATTLE_ALREADY_VOTED` | 409 | 중복 투표 |
 
 ---
@@ -246,7 +264,7 @@ GET /api/v1/battles/{battleId}/result
 
 **인증**: 선택
 
-**Response**: (기존 형식 유지 - 상태/투표여부/72h 경과 분기)
+**Response**: (기존 형식 유지 - 상태/투표여부/72h 경과 분기. status 값은 `ACTIVE`/`CLOSED`만 사용)
 
 **Error Codes**
 
@@ -277,7 +295,7 @@ GET /api/v1/battles/{battleId}/result/cross
 |---|---:|---|
 | `UNAUTHORIZED` | 401 | — |
 | `BATTLE_NOT_FOUND` | 404 | — |
-| `BATTLE_RESULT_NOT_AVAILABLE` | 409 | 진행 중인 Battle (CLOSED 아님) |
+| `BATTLE_RESULT_NOT_AVAILABLE` | 409 | `CLOSED` 상태가 아님 |
 | `POINT_INSUFFICIENT` | 400 | 30P 부족 |
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | 헤더 누락 |
 
@@ -324,9 +342,8 @@ POST /api/v1/battles/{battleId}/comments
 | `UNAUTHORIZED` | 401 | — |
 | `VALIDATION_FAILED` | 400 | content 빈 값 |
 | `BATTLE_COMMENT_TOO_LONG` | 400 | 500자 초과 |
-| `BATTLE_NOT_FOUND` | 404 | — |
-| `BATTLE_NOT_ACTIVE` | 400 | PENDING 상태 |
-| `BATTLE_CLOSED` | 409 | 종료된 Battle |
+| `BATTLE_NOT_FOUND` | 404 | 존재하지 않거나 `PENDING` 상태 |
+| `BATTLE_CLOSED` | 409 | `CLOSED`/`CANCELLED` 상태 |
 
 ---
 
@@ -390,7 +407,36 @@ GET /api/v1/battles/{battleId}/votes/raw
 
 **인증**: 내부 서비스 인증
 
-**Response**: (기존 형식 유지)
+**Response**
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "battleId": 42,
+    "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
+    "optionA": "성수",
+    "optionB": "연남",
+    "totalVoteCount": 320,
+    "optionACount": 195,
+    "optionBCount": 125,
+    "status": "CLOSED",
+    "winningOption": "A",
+    "settledAt": "2026-06-05T10:00:00",
+    "votes": [
+      { "memberId": 1, "selectedOption": "A" },
+      { "memberId": 2, "selectedOption": "B" }
+    ]
+  },
+  "timestamp": "2026-05-28T10:00:00"
+}
+```
+
+> **응답 보강 (v2)**: Insight의 교차분석/AI 분석을 위해 개별 투표 데이터(`votes` 배열)를 포함한다.
+> 이전 버전은 집계 데이터만 제공해서 Insight 측이 member별 통계를 산출할 수 없었음.
+> `INSIGHT_API_SPEC.md` 2번 아웃바운드 호출 표의 "투표 목록 조회(member_id, selected_option)" 요구사항을 충족.
 
 **Error Codes**
 
@@ -442,7 +488,9 @@ GET /api/v1/battles/comments/{commentId}
   응답 비대화·개인정보 노출 최소화를 위함.
 - soft delete된 댓글은 `BATTLE_COMMENT_NOT_FOUND`로 응답 (인증 무효 처리).
   → 인증 후 댓글을 지우는 우회를 방지.
-- 향후 Insight가 추가 필드를 요구할 경우 합의 후 응답 스키마 확장.
+- **지역 정보(sido/sigu)는 응답에 포함하지 않음.** Battle 도메인은 본질적으로 지역 비종속
+  (예: "강남 vs 강북" Battle은 어느 지역도 아님)이므로 Battle 테이블에 sido/sigu를 두지 않는다.
+  Insight 측의 `VISIT_CERT_COMMENT_REGION_MISMATCH` 검증 정책은 Insight 담당자와 별도 합의 필요.
 
 **Error Codes**
 
@@ -453,6 +501,49 @@ GET /api/v1/battles/comments/{commentId}
 
 ---
 
+### 5-3. Battle 기본 정보 조회 (Insight Service 등 내부용)
+
+```
+GET /api/v1/battles/{battleId}/info
+```
+
+**용도**: Insight Service가 AI 분석 시 Battle 메타데이터 조회. 외부 API(`GET /api/v1/battles/{battleId}`)와 분리하여 내부 인증 채널로 노출.
+
+**인증**: 내부 서비스 인증
+
+**Response**
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "battleId": 42,
+    "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
+    "optionA": "성수",
+    "optionB": "연남",
+    "status": "CLOSED",
+    "createdBy": 7,
+    "startAt": "2026-05-29T00:00:00",
+    "endAt": "2026-06-05T00:00:00",
+    "settledAt": "2026-06-05T10:00:00"
+  },
+  "timestamp": "2026-05-28T10:00:00"
+}
+```
+
+> 외부 API(2-3)는 `PENDING`/`CANCELLED`를 노출하지 않지만, 내부 API는 모든 상태를 그대로 노출한다.
+
+**Error Codes**
+
+| ErrorCode | HTTP | 상황 |
+|---|---:|---|
+| `FORBIDDEN` | 403 | 내부 서비스 인증 실패 |
+| `BATTLE_NOT_FOUND` | 404 | — |
+
+---
+
 ## 6. 변경 이력
 
 | 일자 | 내용 |
@@ -460,3 +551,8 @@ GET /api/v1/battles/comments/{commentId}
 | 2026-05-28 | 초안 작성 |
 | 2026-05-29 | 에러 코드 가이드 기준 정비 (도메인 prefix, HTTP 상태 코드, 추가 케이스) |
 | 2026-05-29 | 5-2 댓글 단건 조회 내부 API 추가 (Insight 요청) |
+| 2026-06-01 | BattleStatus를 CONVENTION.md 6-1 기준(`PENDING/ACTIVE/CLOSED/CANCELLED`)으로 통일. `ONGOING`/`SETTLED` 제거 |
+| 2026-06-01 | `BATTLE_NOT_ACTIVE` 폐기 → `BATTLE_NOT_FOUND`로 통합 (PENDING Battle은 일반 사용자에게 비공개) |
+| 2026-06-01 | 5-1 응답에 `votes[]` 배열 추가 (Insight 교차분석 지원) |
+| 2026-06-01 | 5-3 Battle 기본 정보 조회 내부 API 신설 (외부 API와 채널 분리) |
+| 2026-06-01 | 5-2 댓글 단건 조회 응답에 sido/sigu 미포함 정책 명시 (Battle 도메인은 지역 비종속) |
