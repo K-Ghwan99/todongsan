@@ -1,8 +1,10 @@
 package com.todongsan.marketservice.market.controller;
 
 import com.todongsan.marketservice.global.response.ApiResponse;
+import com.todongsan.marketservice.market.dto.request.ConfirmMarketResultRequest;
 import com.todongsan.marketservice.market.dto.request.CreateMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
+import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
 import com.todongsan.marketservice.market.service.AdminMarketService;
 import jakarta.validation.Valid;
@@ -33,5 +35,13 @@ public class AdminMarketController {
             @PathVariable long marketId
     ) {
         return ApiResponse.ok(adminMarketService.activateMarket(marketId));
+    }
+
+    @PatchMapping("/{marketId}/result")
+    public ApiResponse<ConfirmMarketResultResponse> confirmMarketResult(
+            @PathVariable long marketId,
+            @Valid @RequestBody ConfirmMarketResultRequest request
+    ) {
+        return ApiResponse.ok(adminMarketService.confirmMarketResult(marketId, request));
     }
 }

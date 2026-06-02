@@ -236,6 +236,39 @@
           AND deleted_at IS NULL
     </update>
 
+    <select id="countUnresolvedPredictionsForResult" resultType="long">
+        SELECT COUNT(*)
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status IN ('POINT_PENDING', 'POINT_UNKNOWN')
+    </select>
+
+    <update id="clearResultOptions">
+        UPDATE market_option
+        SET is_result = FALSE,
+            updated_at = #{updatedAt}
+        WHERE market_id = #{marketId}
+    </update>
+
+    <update id="markResultOption">
+        UPDATE market_option
+        SET is_result = TRUE,
+            updated_at = #{updatedAt}
+        WHERE id = #{resultOptionId}
+          AND market_id = #{marketId}
+    </update>
+
+    <update id="updateMarketResult">
+        UPDATE market
+        SET result_option_id = #{resultOptionId},
+            result_value = #{resultValue},
+            result_text = #{resultText},
+            status = 'CLOSED',
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND deleted_at IS NULL
+    </update>
+
     <select id="selectOptionById" resultType="com.todongsan.marketservice.market.entity.MarketOption">
         SELECT *
         FROM market_option

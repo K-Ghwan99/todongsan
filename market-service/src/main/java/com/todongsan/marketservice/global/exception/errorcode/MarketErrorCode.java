@@ -19,7 +19,9 @@ public enum MarketErrorCode implements ErrorCode {
     MARKET_NOT_FOUND("MARKET_NOT_FOUND", "Market을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
     MARKET_INVALID_OPTION("MARKET_INVALID_OPTION", "Market 선택지 구성이 유효하지 않습니다.", HttpStatus.BAD_REQUEST),
     MARKET_INVALID_OPTION_RANGE("MARKET_INVALID_OPTION_RANGE", "Market 선택지 범위가 유효하지 않습니다.", HttpStatus.BAD_REQUEST),
-    MARKET_INVALID_FEE_RATE("MARKET_INVALID_FEE_RATE", "Market 수수료율이 유효하지 않습니다.", HttpStatus.BAD_REQUEST);
+    MARKET_INVALID_FEE_RATE("MARKET_INVALID_FEE_RATE", "Market 수수료율이 유효하지 않습니다.", HttpStatus.BAD_REQUEST),
+    MARKET_WINNING_OPTION_NOT_FOUND("MARKET_WINNING_OPTION_NOT_FOUND", "정산 결과와 매칭되는 정답 선택지를 찾을 수 없습니다.", HttpStatus.CONFLICT),
+    MARKET_INVALID_SETTLEMENT_DATA("MARKET_INVALID_SETTLEMENT_DATA", "정산 데이터가 유효하지 않습니다.", HttpStatus.CONFLICT);
 
     private final String code;
     private final String message;

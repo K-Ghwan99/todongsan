@@ -52,6 +52,27 @@ public interface MarketMapper {
             @Param("updatedAt") java.time.LocalDateTime updatedAt
     );
 
+    long countUnresolvedPredictionsForResult(@Param("marketId") long marketId);
+
+    void clearResultOptions(
+            @Param("marketId") long marketId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int markResultOption(
+            @Param("marketId") long marketId,
+            @Param("resultOptionId") long resultOptionId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateMarketResult(
+            @Param("marketId") long marketId,
+            @Param("resultOptionId") long resultOptionId,
+            @Param("resultValue") BigDecimal resultValue,
+            @Param("resultText") String resultText,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
     MarketOption selectOptionById(@Param("optionId") long optionId);
 
     MarketPrediction selectPredictionByMarketIdAndMemberId(
