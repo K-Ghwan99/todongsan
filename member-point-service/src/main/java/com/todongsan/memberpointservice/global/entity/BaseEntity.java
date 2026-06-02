@@ -1,4 +1,4 @@
-package com.todongsan.memberpointservice.common.entity;
+package com.todongsan.memberpointservice.global.entity;
 
 
 import jakarta.persistence.Column;

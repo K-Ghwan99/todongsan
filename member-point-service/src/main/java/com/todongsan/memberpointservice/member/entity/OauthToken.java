@@ -1,6 +1,6 @@
 package com.todongsan.memberpointservice.member.entity;
 
-import com.todongsan.memberpointservice.common.entity.BaseEntity;
+import com.todongsan.memberpointservice.global.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
