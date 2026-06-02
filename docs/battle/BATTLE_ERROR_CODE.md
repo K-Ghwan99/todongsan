@@ -14,7 +14,7 @@
 - Battle 등록 / 조회 / 관리자 상태 전환
 - 투표 참여 / 결과 조회
 - 댓글 작성 / 삭제 / 단건 조회
-- 투표 성공 후 Point 지급 실패 처리
+- 투표/댓글 성공 후 Point 지급 실패 처리
 
 ---
 
@@ -22,18 +22,21 @@
 
 | ErrorCode | HTTP | 메시지 | 발생 조건 | Retry | 실패 후 상태 |
 |---|---:|---|---|:---:|---|
-| `BATTLE_NOT_FOUND` | 404 | 존재하지 않는 Battle입니다. | 존재하지 않거나 soft delete된 Battle 조회·투표·댓글 요청 | X | 변경 없음 |
-| `BATTLE_NOT_ACTIVE` | 400 | 아직 시작되지 않은 Battle입니다. | `PENDING` 상태에서 투표·댓글 요청 | X | 변경 없음 |
-| `BATTLE_CLOSED` | 409 | 종료된 Battle입니다. | `CLOSED`/`SETTLED`/`CANCELLED` 상태에서 투표·댓글 요청 | X | 변경 없음 |
+| `BATTLE_NOT_FOUND` | 404 | 존재하지 않는 Battle입니다. | 존재하지 않거나 soft delete된 Battle 조회·투표·댓글 요청. **`PENDING` 상태 Battle에 대한 일반 사용자 접근도 이 에러로 처리** | X | 변경 없음 |
+| `BATTLE_CLOSED` | 409 | 종료된 Battle입니다. | `CLOSED` 또는 `CANCELLED` 상태에서 투표·댓글 요청 | X | 변경 없음 |
 | `BATTLE_ALREADY_VOTED` | 409 | 이미 투표한 Battle입니다. | 동일 회원이 같은 Battle에 중복 투표 요청 | X | `battle_vote` 생성 안 함, 집계 변경 없음 |
 | `BATTLE_INVALID_OPTION` | 400 | 올바르지 않은 선택지입니다. | `option`이 `A`/`B`가 아님 | X | 변경 없음 |
 | `BATTLE_INVALID_PERIOD` | 400 | Battle 기간이 올바르지 않습니다. | `end_at`이 `start_at` 이전이거나 과거 시점 | X | Battle 생성 안 함 |
-| `BATTLE_INVALID_STATUS` | 409 | 현재 상태에서 처리할 수 없습니다. | 관리자 승인/거절/취소 시 상태 전이 불가 (예: `PENDING`이 아닌데 승인) | X | 변경 없음 |
+| `BATTLE_INVALID_STATUS` | 409 | 현재 상태에서 처리할 수 없습니다. | 관리자 승인/거절/취소 시 상태 전이 불가 (예: `PENDING`이 아닌데 승인 요청, 이미 `CANCELLED`인데 다시 취소 등) | X | 변경 없음 |
 | `BATTLE_RESULT_NOT_AVAILABLE` | 409 | 진행 중인 Battle은 상세 결과를 볼 수 없습니다. | 포인트 소비 결과 조회(교차분석/인증자 필터) 요청 시 Battle이 `CLOSED`가 아님 | X | Point 차감 안 함 |
 | `BATTLE_COMMENT_NOT_FOUND` | 404 | 존재하지 않는 댓글입니다. | 존재하지 않거나 soft delete된 댓글 삭제·조회 요청 | X | 변경 없음 |
 | `BATTLE_COMMENT_FORBIDDEN` | 403 | 본인 댓글만 삭제할 수 있습니다. | 다른 회원의 댓글에 대한 삭제 요청 | X | 변경 없음 |
 | `BATTLE_COMMENT_TOO_LONG` | 400 | 댓글 길이가 너무 깁니다. (최대 500자) | `content` 길이가 정책 한도 초과 | X | 댓글 생성 안 함 |
-| `BATTLE_POINT_REWARD_FAILED` | (내부 기록) | — | 투표 성공 후 Member-Point 지급 호출 실패 (Timeout/5xx) | O | 투표 유지, `point_reward_retry_queue` 적재 |
+| `BATTLE_POINT_REWARD_FAILED` | (내부 기록) | — | 투표/댓글 성공 후 Member-Point 지급 호출 실패 (Timeout/5xx) | O | 활동 유지, `point_reward_retry_queue` 적재 |
+
+> **이전 버전 대비 변경 사항**
+> - `BATTLE_NOT_ACTIVE` 폐기 → `PENDING` 상태 Battle은 일반 사용자에게 노출되지 않으므로 접근 시 `BATTLE_NOT_FOUND`로 처리 (검수 중인 Battle 보호)
+> - `BATTLE_CLOSED` 발생 조건에서 `SETTLED` 제거 → BattleStatus enum에서 `SETTLED`가 없어졌기 때문 (정산은 `settled_at` 컬럼으로 표현)
 
 ---
 
@@ -43,24 +46,25 @@
 
 | ErrorCode | 메모 |
 |---|---|
-| `VALIDATION_FAILED` (공통) | title/optionA/optionB 빈 값, 길이 초과 |
-| `BATTLE_INVALID_PERIOD` | end_at < start_at |
-| `POINT_INSUFFICIENT` (공통) | Battle 생성권 부족 |
 | `UNAUTHORIZED` (공통) | JWT 없음/만료 |
+| `VALIDATION_FAILED` (공통) | title/optionA/optionB 빈 값, 길이 초과 |
+| `BATTLE_INVALID_PERIOD` | end_at < start_at 또는 과거 시점 |
+| `POINT_INSUFFICIENT` (공통) | Battle 생성권 부족 |
 
 ### 3-2. Battle 목록/상세 조회 — `GET /api/v1/battles`, `GET /api/v1/battles/{id}`
 
 | ErrorCode | 메모 |
 |---|---|
-| `BATTLE_NOT_FOUND` | 상세 조회 시 |
+| `BATTLE_NOT_FOUND` | 상세 조회 시. `PENDING` 상태 Battle도 일반 사용자에게는 이 에러로 응답 |
 
 ### 3-3. 관리자 상태 전환 — `PATCH /api/v1/battles/{id}/{approve|reject|cancel}`
 
 | ErrorCode | 메모 |
 |---|---|
+| `UNAUTHORIZED` (공통) | — |
 | `FORBIDDEN` (공통) | 관리자 권한 없음 |
-| `BATTLE_NOT_FOUND` | — |
-| `BATTLE_INVALID_STATUS` | 현재 상태에서 해당 전이 불가 |
+| `BATTLE_NOT_FOUND` | 관리자는 `PENDING` 상태도 조회 가능. 진짜로 없을 때만 |
+| `BATTLE_INVALID_STATUS` | 현재 상태에서 해당 전이 불가 (예: PENDING이 아닌데 승인 요청) |
 
 ### 3-4. 투표 참여 — `POST /api/v1/battles/{id}/votes`
 
@@ -69,11 +73,13 @@
 | `UNAUTHORIZED` (공통) | — |
 | `VALIDATION_FAILED` (공통) | option 필드 누락 |
 | `BATTLE_INVALID_OPTION` | option이 A/B가 아님 |
-| `BATTLE_NOT_FOUND` | — |
-| `BATTLE_NOT_ACTIVE` | PENDING 상태 |
-| `BATTLE_CLOSED` | CLOSED/SETTLED 상태 |
+| `BATTLE_NOT_FOUND` | 존재하지 않거나 PENDING 상태 |
+| `BATTLE_CLOSED` | CLOSED/CANCELLED 상태 |
 | `BATTLE_ALREADY_VOTED` | 중복 투표 |
 | `EXTERNAL_SERVICE_TIMEOUT` (공통) | Member-Point 지급 호출 Timeout → 투표는 유지, Retry Queue 적재 |
+
+> **start_at 미도달 시**: ACTIVE 상태이지만 service 레이어에서 `BATTLE_CLOSED` 응답.
+> (사용자 메시지는 "투표가 시작되지 않았습니다"로 처리 가능하나 ErrorCode는 같음)
 
 ### 3-5. 결과 조회 — `GET /api/v1/battles/{id}/result`
 
@@ -89,6 +95,7 @@
 | `BATTLE_NOT_FOUND` | — |
 | `BATTLE_RESULT_NOT_AVAILABLE` | 진행 중인 Battle (Point 차감 전에 차단) |
 | `POINT_INSUFFICIENT` (공통) | 30P 부족 |
+| `IDEMPOTENCY_KEY_REQUIRED` (공통) | 헤더 누락 |
 
 ### 3-7. 댓글 작성 — `POST /api/v1/battles/{id}/comments`
 
@@ -97,9 +104,8 @@
 | `UNAUTHORIZED` (공통) | — |
 | `VALIDATION_FAILED` (공통) | content 빈 값 |
 | `BATTLE_COMMENT_TOO_LONG` | 500자 초과 |
-| `BATTLE_NOT_FOUND` | — |
-| `BATTLE_NOT_ACTIVE` | PENDING 상태에서 작성 시도 |
-| `BATTLE_CLOSED` | 종료된 Battle |
+| `BATTLE_NOT_FOUND` | 존재하지 않거나 PENDING 상태 |
+| `BATTLE_CLOSED` | CLOSED/CANCELLED 상태 |
 
 ### 3-8. 댓글 목록 — `GET /api/v1/battles/{id}/comments`
 
@@ -173,55 +179,66 @@
 | 5xx (서버 오류) | O | 1분 간격, 최대 3회 |
 | Timeout | O | 1분 간격, 최대 3회 |
 
-### 5-2. 투표 성공 후 Point 지급 실패 (`BATTLE_POINT_REWARD_FAILED`)
+### 5-2. 투표/댓글 성공 후 Point 지급 실패 (`BATTLE_POINT_REWARD_FAILED`)
 
 `CONVENTION.md` 8-4와 동일한 흐름이다.
 
-1. 투표 자체는 유지 (`battle_vote.is_rewarded = false`)
-2. `point_reward_retry_queue`에 적재 (멱등성 키: `battle:{battleId}:member:{memberId}`)
+1. 투표/댓글 자체는 유지 (`battle_vote.is_rewarded = false`)
+2. `point_reward_retry_queue`에 적재 (멱등성 키는 5-4 참조)
 3. Scheduler가 1분 간격으로 최대 3회 재시도
 4. 3회 실패 시 `status = FAILED` 처리, 관리자 보정 대상
 
 ### 5-3. 정산 보상 지급 실패 (다수 선택자 보상)
 
-`docs/battle/ERD.md` 4번 흐름과 동일.
+`docs/battle/ERD.md` 5번 흐름과 동일.
 
 1. `winning_option` 확정 후 승자 측 투표자(`is_rewarded=false`) 순회
-2. Member-Point 호출 실패 시 `point_reward_retry_queue` 적재
-3. 전원 처리 완료 시점에 `battle.status = SETTLED`, `settled_at` 기록
-4. 실패 건이 남아 있어도 `SETTLED`로 진행 (재시도 큐로 처리되므로)
+2. Member-Point 호출 (`POST /api/v1/points/settlements` 배치) 실패 시 `point_reward_retry_queue` 적재
+3. 전원 처리 완료 시점에 `battle.settled_at` 기록 (`status`는 `CLOSED` 유지)
+4. 실패 건이 남아 있어도 `settled_at` 기록은 진행 (재시도 큐로 처리되므로)
 
-### 5-4. 멱등성
+### 5-4. Member-Point 호출 정책 (reference / idempotency_key)
 
-Battle Service가 호출하는 Member-Point API는 `Idempotency-Key` 헤더 필수.
-- 투표 보상: `battle:vote:{battleId}:member:{memberId}`
-- 댓글 보상: `battle:comment:{commentId}:member:{memberId}`
-- 정산 보상: `battle:settle:{battleId}:member:{memberId}`
+Battle Service가 Member-Point를 호출할 때 페이로드 규칙이다.
+모든 보상 호출에서 `referenceType = "BATTLE"`, `referenceId = battleId`로 통일한다.
+댓글 보상의 경우 commentId는 `idempotency_key`에 포함시켜 unique를 보장한다.
+(`MEMBER_POINT_ERD.md` 4-3 `PointReferenceType` 규칙 준수)
 
-같은 키로 재시도하면 Member-Point가 첫 응답을 반환하므로 중복 지급 없음.
+| 상황 | type | referenceType | referenceId | idempotency_key |
+|---|---|---|---|---|
+| 투표 보상 | `EARN_VOTE` | `BATTLE` | `battleId` | `battle:vote:{battleId}:member:{memberId}` |
+| 댓글 보상 | `EARN_COMMENT` | `BATTLE` | `battleId` | `battle:comment:{commentId}:member:{memberId}` |
+| 승리 보상 (정산) | `EARN_VOTE_WIN` | `BATTLE` | `battleId` | `battle:settle:{battleId}:member:{memberId}` |
+| 주제 승인 보상 | `EARN_BATTLE_APPROVED` | `BATTLE` | `battleId` | `battle:approved:{battleId}:member:{memberId}` |
+| 주제 생성권 차감 | `SPEND_BATTLE_CREATE` | `BATTLE` | `battleId` | `battle:create:{battleId}:member:{memberId}` |
+
+> **댓글 보상의 reference_id가 battleId인 이유**: `PointReferenceType.BATTLE`은 `reference_id = battle.id`로 정의되어 있음 (Member-Point ERD 4-3). 같은 사용자가 같은 Battle에 여러 댓글을 작성해도 `idempotency_key`에 commentId가 포함되어 unique가 보장되므로, Member-Point의 `request_hash` 충돌은 발생하지 않는다 (서로 다른 idempotency_key는 비교 자체가 일어나지 않음).
 
 ---
 
-## 6. CONVENTION.md와 충돌 / 합의 필요 항목
+## 6. CONVENTION.md / README.md와의 충돌 정리
 
-가이드 1-1 표 기준으로 정리하면서 기존 CONVENTION.md의 ErrorCode 명칭과 차이가 발생한다.
+가이드 1-1 표 기준으로 정리하면서 기존 CONVENTION.md / README.md의 ErrorCode와 차이가 발생한다.
 CONVENTION 담당자(Insight)와 협의해서 통일 필요.
 
-| 현재 CONVENTION.md | 가이드 기준 권장 | 비고 |
+| 현재 CONVENTION/README | 가이드 기준 권장 | 비고 |
 |---|---|---|
-| `ALREADY_VOTED` | `BATTLE_ALREADY_VOTED` | 도메인 prefix 누락. Market의 `ALREADY_PREDICTED`도 동일 |
-| `BATTLE_CLOSED` (HTTP 400) | `BATTLE_CLOSED` (HTTP 409) | 상태 충돌은 409가 적절 |
+| `ALREADY_VOTED` | `BATTLE_ALREADY_VOTED` | 도메인 prefix 누락. ERROR_POLICY 3-3 예시와 본 문서는 후자 사용 |
+| `BATTLE_CLOSED` (HTTP 400) | `BATTLE_CLOSED` (HTTP 409) | 상태 충돌은 409가 적절 (ERROR_POLICY 2-6) |
 | `ALREADY_PREDICTED` | `MARKET_ALREADY_PREDICTED` | 도메인 prefix 누락 |
 | `INVALID_SETTLE` | `MARKET_SETTLEMENT_NOT_ALLOWED` | 도메인 prefix + 의미 명확화 |
+| `NOT_FOUND` | `RESOURCE_NOT_FOUND` | ERROR_POLICY 4-3 기준. Insight는 이미 전환 완료 |
+| `POINT_INSUFFICIENT` HTTP | 400 (CONVENTION) vs 409 (MEMBER_POINT) | Member-Point만 409. 400으로 통일 권장 |
+| PointHistoryType `REFUND_INSIGHT` 누락 | 추가 필요 | MEMBER_POINT_ERD v4에 이미 추가됨 |
 
 또한 가이드에서 공통으로 둬야 한다고 명시한 항목 중 CONVENTION.md에 누락된 것:
 
 - `VALIDATION_FAILED` (400)
-- `TOKEN_EXPIRED` (401, `UNAUTHORIZED`와 분리)
+- `TOKEN_EXPIRED`, `INVALID_TOKEN` (401, `UNAUTHORIZED`와 분리)
 - `IDEMPOTENCY_KEY_REQUIRED` / `IDEMPOTENCY_KEY_CONFLICT` (400/409)
 - `EXTERNAL_SERVICE_TIMEOUT` / `EXTERNAL_SERVICE_UNAVAILABLE` (504/503)
 
-→ 루트 `ERROR_POLICY.md` 작성 시 일괄 반영 요청 예정.
+→ 루트 `ERROR_POLICY.md`에는 모두 정의되어 있으므로, CONVENTION.md를 ERROR_POLICY 기준으로 일괄 업데이트 요청 예정 (CONVENTION 담당자).
 
 ---
 
@@ -235,4 +252,20 @@ CONVENTION 담당자(Insight)와 협의해서 통일 필요.
 - [x] 도메인 ErrorCode는 `BATTLE_{REASON}` / `BATTLE_{ACTION}_{REASON}` 형식을 따른다.
 - [x] 4xx는 Retry 대상에서 제외하고 5xx/Timeout만 Retry 대상으로 분리했다.
 - [x] 정산 보상의 멱등성 키 패턴을 명시했다.
+- [x] BattleStatus를 `CONVENTION.md` 6-1 기준(`PENDING/ACTIVE/CLOSED/CANCELLED`)으로 통일했다.
+- [x] `BATTLE_NOT_ACTIVE`를 폐기하고 `BATTLE_NOT_FOUND`로 흡수했다.
+- [x] Member-Point 호출 시 `referenceType=BATTLE`, `referenceId=battleId` 통일 정책을 명시했다.
 - [ ] (팀 합의 후) CONVENTION.md의 `ALREADY_VOTED` → `BATTLE_ALREADY_VOTED` 리네이밍 반영.
+
+---
+
+## 8. 변경 이력
+
+| 버전 | 변경 내용 |
+|---|---|
+| v1 | 초안 작성 (가이드 PDF 기준) |
+| v2 | BattleStatus를 `PENDING/ACTIVE/CLOSED/CANCELLED`로 정정 (CONVENTION 6-1 일치) |
+| v2 | `BATTLE_NOT_ACTIVE` 폐기 → `BATTLE_NOT_FOUND`로 통합 |
+| v2 | `BATTLE_CLOSED` 발생 조건에서 `SETTLED` 제거 (Status enum에 SETTLED 없음) |
+| v2 | 5-4 섹션 추가: Member-Point 호출 시 referenceType/referenceId/idempotency_key 정책 명확화 |
+| v2 | 6번 충돌 항목 확장: NOT_FOUND, POINT_INSUFFICIENT HTTP 코드 등 추가 |
