@@ -61,6 +61,41 @@ CREATE TABLE market_option (
         REFERENCES market(id)
 );
 
+CREATE TABLE market_prediction (
+    id                                      BIGINT          NOT NULL AUTO_INCREMENT,
+    market_id                               BIGINT          NOT NULL,
+    option_id                               BIGINT          NOT NULL,
+    member_id                               BIGINT          NOT NULL,
+    point_amount                            DECIMAL(10,2)   NOT NULL,
+    price_snapshot                          DECIMAL(18,8),
+    contract_quantity                       DECIMAL(24,8),
+    expected_payout_per_contract_snapshot   DECIMAL(18,8),
+    expected_multiplier_snapshot            DECIMAL(18,8),
+    status                                  VARCHAR(30)     NOT NULL DEFAULT 'POINT_PENDING',
+    point_spend_idempotency_key             VARCHAR(150)    NOT NULL UNIQUE,
+    settled_amount                          DECIMAL(10,2),
+    refund_amount                           DECIMAL(10,2),
+    fail_reason                             VARCHAR(255),
+    created_at                              DATETIME        NOT NULL,
+    updated_at                              DATETIME        NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_market_prediction_member (market_id, member_id),
+    INDEX idx_market_prediction_market_status (market_id, status),
+    INDEX idx_market_prediction_market_option (market_id, option_id),
+    INDEX idx_market_prediction_market_created (market_id, created_at),
+    INDEX idx_market_prediction_member_id (member_id),
+    INDEX idx_market_prediction_option_status (option_id, status),
+    INDEX idx_market_prediction_point_spend_key (point_spend_idempotency_key),
+    CONSTRAINT fk_market_prediction_market
+        FOREIGN KEY (market_id)
+        REFERENCES market(id),
+    CONSTRAINT fk_market_prediction_option
+        FOREIGN KEY (option_id)
+        REFERENCES market_option(id),
+    CONSTRAINT chk_market_prediction_point_amount
+        CHECK (point_amount >= 10 AND point_amount <= 500)
+);
+
 CREATE TABLE market_price_history (
     id                              BIGINT          NOT NULL AUTO_INCREMENT,
     market_id                       BIGINT          NOT NULL,
@@ -83,5 +118,8 @@ CREATE TABLE market_price_history (
         REFERENCES market(id),
     CONSTRAINT fk_price_history_option
         FOREIGN KEY (option_id)
-        REFERENCES market_option(id)
+        REFERENCES market_option(id),
+    CONSTRAINT fk_price_history_prediction
+        FOREIGN KEY (prediction_id)
+        REFERENCES market_prediction(id)
 );
