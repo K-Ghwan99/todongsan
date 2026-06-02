@@ -34,7 +34,7 @@ class RebDataParserTest {
     @DisplayName("REB 데이터 파싱 - 주간 정상 데이터 처리 성공 (ERD 컬럼 전체 매핑)")
     void parseRebData_weeklyValidData_success() throws Exception {
         // given
-        RebDataRow rebData = createRebDataRow(50071L, "경기>경부1권>과천시", 100.5, "2012-05-07", "WK");
+        RebDataRow rebData = createRebDataRow(50071L, "경기>경부1권>과천시", 10001L, "지수", 100.5, "2012-05-07", "WK");
         List<RebDataRow> rebDataRows = Arrays.asList(rebData);
         
         // when
@@ -51,6 +51,8 @@ class RebDataParserTest {
         assertEquals("경기", snapshot.getRegionSido());
         assertEquals("50071", snapshot.getSourceRegionId());
         assertEquals("경기>경부1권>과천시", snapshot.getRegionFullpath());
+        assertEquals("10001", snapshot.getItmId());
+        assertEquals("지수", snapshot.getItmNm());
         assertEquals(new BigDecimal("100.5"), snapshot.getNumericValue());
         assertNotNull(snapshot.getRawData());
         assertNotNull(snapshot.getCollectedAt()); // collected_at 세팅 확인
@@ -60,7 +62,7 @@ class RebDataParserTest {
     @DisplayName("REB 데이터 파싱 - 월간 정상 데이터 처리 성공 (해당 월 1일)")
     void parseRebData_monthlyValidData_success() throws Exception {
         // given
-        RebDataRow rebData = createRebDataRow(510085L, "전북>전주시", 51.5, "2003년 11월", "MM");
+        RebDataRow rebData = createRebDataRow(510085L, "전북>전주시", 100001L, "변동률", 51.5, "2003년 11월", "MM");
         List<RebDataRow> rebDataRows = Arrays.asList(rebData);
         
         // when
@@ -85,9 +87,9 @@ class RebDataParserTest {
     @DisplayName("REB 데이터 파싱 - 전국 단위 처리 (region_sido=전국, source_region_id=50001)")
     void parseRebData_nationalData_handledCorrectly() throws Exception {
         // given
-        RebDataRow rebData1 = createRebDataRow(50001L, "부산>해운대구>우동", 98.7, "2025-05-15", "WK");
-        RebDataRow rebData2 = createRebDataRow(50002L, "대구>중구", 102.1, "2025-05-15", "WK");
-        RebDataRow rebData3 = createRebDataRow(12345L, "전국", 100.0, "2025-05-15", "WK"); // 전국 단위 테스트
+        RebDataRow rebData1 = createRebDataRow(50001L, "부산>해운대구>우동", 10001L, "지수", 98.7, "2025-05-15", "WK");
+        RebDataRow rebData2 = createRebDataRow(50002L, "대구>중구", 10001L, "지수", 102.1, "2025-05-15", "WK");
+        RebDataRow rebData3 = createRebDataRow(12345L, "전국", 10001L, "지수", 100.0, "2025-05-15", "WK"); // 전국 단위 테스트
         List<RebDataRow> rebDataRows = Arrays.asList(rebData1, rebData2, rebData3);
         
         // when
@@ -106,10 +108,10 @@ class RebDataParserTest {
     @DisplayName("REB 데이터 파싱 - 필수 필드 누락 시 해당 행 건너뜀")
     void parseRebData_missingRequiredFields_skipsRow() throws Exception {
         // given
-        RebDataRow validData = createRebDataRow(1001L, "서울>강남구", 100.5, "2025-06-01", "WK");
-        RebDataRow invalidData1 = createRebDataRow(null, "서울>강남구", 100.5, "2025-06-01", "WK"); // clsId null
-        RebDataRow invalidData2 = createRebDataRow(1002L, null, 100.5, "2025-06-01", "WK"); // clsFullnm null
-        RebDataRow invalidData3 = createRebDataRow(1003L, "서울>강남구", 100.5, null, "WK"); // wrtimeDesc null
+        RebDataRow validData = createRebDataRow(1001L, "서울>강남구", 10001L, "지수", 100.5, "2025-06-01", "WK");
+        RebDataRow invalidData1 = createRebDataRow(null, "서울>강남구", 10001L, "지수", 100.5, "2025-06-01", "WK"); // clsId null
+        RebDataRow invalidData2 = createRebDataRow(1002L, null, 10001L, "지수", 100.5, "2025-06-01", "WK"); // clsFullnm null
+        RebDataRow invalidData3 = createRebDataRow(1003L, "서울>강남구", null, "지수", 100.5, null, "WK"); // itmId null, wrtimeDesc null
         
         List<RebDataRow> rebDataRows = Arrays.asList(validData, invalidData1, invalidData2, invalidData3);
         
@@ -127,8 +129,8 @@ class RebDataParserTest {
     @DisplayName("REB 데이터 파싱 - 잘못된 날짜 형식 시 해당 행 건너뜀")
     void parseRebData_invalidDateFormat_skipsRow() throws Exception {
         // given
-        RebDataRow validData = createRebDataRow(1001L, "서울>강남구", 100.5, "2025-06-01", "WK");
-        RebDataRow invalidDateData = createRebDataRow(1002L, "서울>서초구", 99.8, "invalid-date", "WK");
+        RebDataRow validData = createRebDataRow(1001L, "서울>강남구", 10001L, "지수", 100.5, "2025-06-01", "WK");
+        RebDataRow invalidDateData = createRebDataRow(1002L, "서울>서초구", 10001L, "지수", 99.8, "invalid-date", "WK");
         
         List<RebDataRow> rebDataRows = Arrays.asList(validData, invalidDateData);
         
@@ -159,7 +161,7 @@ class RebDataParserTest {
     @DisplayName("REB 데이터 파싱 - 수치값 null 허용")
     void parseRebData_nullNumericValue_allowsNull() throws Exception {
         // given
-        RebDataRow rebData = createRebDataRow(1001L, "서울>강남구", null, "2025-06-01", "WK");
+        RebDataRow rebData = createRebDataRow(1001L, "서울>강남구", 10001L, "지수", null, "2025-06-01", "WK");
         List<RebDataRow> rebDataRows = Arrays.asList(rebData);
         
         // when
@@ -177,7 +179,7 @@ class RebDataParserTest {
     @DisplayName("REB 데이터 파싱 - 공백 문자 처리")
     void parseRebData_whitespaceHandling_trimsCorrectly() throws Exception {
         // given
-        RebDataRow rebData = createRebDataRow(1001L, "  서울>강남구  ", 100.5, "  2025-06-01  ", "WK");
+        RebDataRow rebData = createRebDataRow(1001L, "  서울>강남구  ", 10001L, "지수", 100.5, "  2025-06-01  ", "WK");
         List<RebDataRow> rebDataRows = Arrays.asList(rebData);
         
         // when
@@ -191,11 +193,13 @@ class RebDataParserTest {
         assertNotNull(result.get(0).getCollectedAt());
     }
     
-    private RebDataRow createRebDataRow(Long clsId, String clsFullnm, Double dtaVal, String wrtimeDesc, String dtaCycleCd) {
+    private RebDataRow createRebDataRow(Long clsId, String clsFullnm, Long itmId, String itmNm, Double dtaVal, String wrtimeDesc, String dtaCycleCd) {
         RebDataRow rebDataRow = new RebDataRow();
         try {
             setField(rebDataRow, "clsId", clsId);
             setField(rebDataRow, "clsFullnm", clsFullnm);
+            setField(rebDataRow, "itmId", itmId);
+            setField(rebDataRow, "itmNm", itmNm);
             setField(rebDataRow, "dtaVal", dtaVal);
             setField(rebDataRow, "wrtimeDesc", wrtimeDesc);
             setField(rebDataRow, "dtaCycleCd", dtaCycleCd);

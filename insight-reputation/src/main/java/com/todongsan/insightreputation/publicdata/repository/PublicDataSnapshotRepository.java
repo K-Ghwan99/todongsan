@@ -19,8 +19,8 @@ import java.util.Optional;
 @Repository
 public interface PublicDataSnapshotRepository extends JpaRepository<PublicDataSnapshot, Long> {
     
-    Optional<PublicDataSnapshot> findBySourceAndDataTypeAndReferenceDateAndSourceRegionId(
-            PublicDataSource source, PublicDataType dataType, LocalDate referenceDate, String sourceRegionId);
+    Optional<PublicDataSnapshot> findBySourceAndDataTypeAndReferenceDateAndSourceRegionIdAndItmId(
+            PublicDataSource source, PublicDataType dataType, LocalDate referenceDate, String sourceRegionId, String itmId);
     
     List<PublicDataSnapshot> findBySourceAndDataTypeAndReferenceDate(
             PublicDataSource source, PublicDataType dataType, LocalDate referenceDate);
@@ -51,10 +51,11 @@ public interface PublicDataSnapshotRepository extends JpaRepository<PublicDataSn
     @Query(value = """
         INSERT INTO public_data_snapshot 
         (source, data_type, reference_date, region_sido, source_region_id, region_fullpath, 
-         numeric_value, raw_data, collected_at, created_at, updated_at)
+         itm_id, itm_nm, numeric_value, raw_data, collected_at, created_at, updated_at)
         VALUES (:source, :dataType, :referenceDate, :regionSido, :sourceRegionId, :regionFullpath,
-                :numericValue, :rawData, :collectedAt, :createdAt, :updatedAt)
+                :itmId, :itmNm, :numericValue, :rawData, :collectedAt, :createdAt, :updatedAt)
         ON DUPLICATE KEY UPDATE
+            itm_nm = VALUES(itm_nm),
             numeric_value = VALUES(numeric_value),
             region_fullpath = VALUES(region_fullpath),
             raw_data = VALUES(raw_data),
@@ -68,6 +69,8 @@ public interface PublicDataSnapshotRepository extends JpaRepository<PublicDataSn
         @Param("regionSido") String regionSido,
         @Param("sourceRegionId") String sourceRegionId,
         @Param("regionFullpath") String regionFullpath,
+        @Param("itmId") String itmId,
+        @Param("itmNm") String itmNm,
         @Param("numericValue") BigDecimal numericValue,
         @Param("rawData") String rawData,
         @Param("collectedAt") LocalDateTime collectedAt,

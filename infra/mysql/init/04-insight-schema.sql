@@ -77,13 +77,16 @@ CREATE TABLE public_data_snapshot (
     region_sido         VARCHAR(50),
     source_region_id    VARCHAR(50)     NOT NULL,
     region_fullpath     VARCHAR(200),
+    itm_id              VARCHAR(20)     NOT NULL,
+    itm_nm              VARCHAR(100),
     numeric_value       DECIMAL(20,10),
     raw_data            JSON            NOT NULL,
     collected_at        DATETIME        NOT NULL,
     created_at          DATETIME        NOT NULL,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_snapshot (source, data_type, reference_date, source_region_id),
+    UNIQUE KEY uq_snapshot (source, data_type, reference_date, source_region_id, itm_id),
     INDEX idx_source_type_date (source, data_type, reference_date),
     INDEX idx_region_sido (region_sido),
-    INDEX idx_region_fullpath (region_fullpath(100))
+    INDEX idx_region_fullpath (region_fullpath(100)),
+    INDEX idx_itm_id (itm_id)
 );

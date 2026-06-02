@@ -62,9 +62,9 @@ public class RebDataParser {
      */
     private PublicDataSnapshot parseRebDataRow(RebDataRow row) {
         // 필수 필드 검증
-        if (row.getClsId() == null || row.getClsFullnm() == null || row.getWrtimeDesc() == null) {
-            log.debug("필수 필드 누락으로 행 건너뜀: clsId={}, clsFullnm={}, wrtimeDesc={}", 
-                     row.getClsId(), row.getClsFullnm(), row.getWrtimeDesc());
+        if (row.getClsId() == null || row.getClsFullnm() == null || row.getWrtimeDesc() == null || row.getItmId() == null) {
+            log.debug("필수 필드 누락으로 행 건너뜀: clsId={}, clsFullnm={}, wrtimeDesc={}, itmId={}", 
+                     row.getClsId(), row.getClsFullnm(), row.getWrtimeDesc(), row.getItmId());
             return null;
         }
 
@@ -84,13 +84,19 @@ public class RebDataParser {
                 sourceRegionId = "50001";
             }
             
-            // 4. reference_date: wrtimeDesc 파싱 (주간/월간 분기)
+            // 4. itm_id: itmId를 String으로 변환
+            String itmId = String.valueOf(row.getItmId());
+            
+            // 5. itm_nm: itmNm 그대로 사용
+            String itmNm = row.getItmNm();
+            
+            // 6. reference_date: wrtimeDesc 파싱 (주간/월간 분기)
             LocalDate referenceDate = parseReferenceDate(row.getWrtimeDesc(), row.getDtaCycleCd());
             
-            // 5. numeric_value: dtaVal을 BigDecimal로 변환 (null 허용)
+            // 7. numeric_value: dtaVal을 BigDecimal로 변환 (null 허용)
             BigDecimal numericValue = row.getDtaVal() != null ? BigDecimal.valueOf(row.getDtaVal()) : null;
             
-            // 6. raw_data: 원본 JSON 직렬화
+            // 8. raw_data: 원본 JSON 직렬화
             String rawData = objectMapper.writeValueAsString(row);
 
             // ERD 컬럼 전체 매핑하여 PublicDataSnapshot 생성
@@ -101,6 +107,8 @@ public class RebDataParser {
                     .regionSido(regionSido)                         // region_sido
                     .sourceRegionId(sourceRegionId)                 // source_region_id
                     .regionFullpath(regionFullpath)                 // region_fullpath
+                    .itmId(itmId)                                   // itm_id
+                    .itmNm(itmNm)                                   // itm_nm
                     .numericValue(numericValue)                     // numeric_value
                     .rawData(rawData)                               // raw_data (JSON)
                     // collected_at, created_at은 Builder에서 자동 설정

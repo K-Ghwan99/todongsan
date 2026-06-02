@@ -42,7 +42,7 @@ class PublicDataBatchServiceTest {
     @DisplayName("주간 가격지수 수집 - 정상 데이터 처리 성공")
     void collectWeeklyPriceIndex_validData_success() throws Exception {
         // given
-        RebDataRow mockRebData = createMockRebDataRow(1001L, "서울>강남구", 100.5, "2025-06-01", "WK");
+        RebDataRow mockRebData = createMockRebDataRow(1001L, "서울>강남구", 10001L, "지수", 100.5, "2025-06-01", "WK");
         List<RebDataRow> rebDataRows = Arrays.asList(mockRebData);
         
         PublicDataSnapshot mockSnapshot = createMockPublicDataSnapshot(
@@ -52,6 +52,8 @@ class PublicDataBatchServiceTest {
             "서울", 
             "1001", 
             "서울>강남구",
+            "10001",
+            "지수",
             new BigDecimal("100.5")
         );
         List<PublicDataSnapshot> parsedData = Arrays.asList(mockSnapshot);
@@ -67,7 +69,7 @@ class PublicDataBatchServiceTest {
         verify(rebDataParser).parseRebData(rebDataRows);
         verify(repository).upsertSnapshot(
             anyString(), anyString(), any(), anyString(), anyString(), 
-            anyString(), any(), anyString(), any(), any(), any()
+            anyString(), anyString(), anyString(), any(), anyString(), any(), any(), any()
         );
     }
     
@@ -83,14 +85,14 @@ class PublicDataBatchServiceTest {
         // then
         verify(rebApiClient).fetchWeeklyPriceIndex();
         verify(rebDataParser, never()).parseRebData(any());
-        verify(repository, never()).upsertSnapshot(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(repository, never()).upsertSnapshot(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
     
     @Test
     @DisplayName("주간 가격지수 수집 - 파싱 결과 없음")
     void collectWeeklyPriceIndex_emptyParsedData_noStorage() throws Exception {
         // given
-        RebDataRow mockRebData = createMockRebDataRow(1001L, "서울>강남구", 100.5, "2025-06-01", "WK");
+        RebDataRow mockRebData = createMockRebDataRow(1001L, "서울>강남구", 10001L, "지수", 100.5, "2025-06-01", "WK");
         List<RebDataRow> rebDataRows = Arrays.asList(mockRebData);
         
         when(rebApiClient.fetchWeeklyPriceIndex()).thenReturn(rebDataRows);
@@ -102,14 +104,14 @@ class PublicDataBatchServiceTest {
         // then
         verify(rebApiClient).fetchWeeklyPriceIndex();
         verify(rebDataParser).parseRebData(rebDataRows);
-        verify(repository, never()).upsertSnapshot(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(repository, never()).upsertSnapshot(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
     
     @Test
     @DisplayName("월간 가격지수 수집 - 정상 데이터 처리 성공")
     void collectMonthlyPriceIndex_validData_success() throws Exception {
         // given
-        RebDataRow mockRebData = createMockRebDataRow(2001L, "부산>해운대구", 98.7, "2025년 05월", "MM");
+        RebDataRow mockRebData = createMockRebDataRow(2001L, "부산>해운대구", 10001L, "지수", 98.7, "2025년 05월", "MM");
         List<RebDataRow> rebDataRows = Arrays.asList(mockRebData);
         
         PublicDataSnapshot mockSnapshot = createMockPublicDataSnapshot(
@@ -119,6 +121,8 @@ class PublicDataBatchServiceTest {
             "부산", 
             "2001", 
             "부산>해운대구",
+            "10001",
+            "지수",
             new BigDecimal("98.7")
         );
         List<PublicDataSnapshot> parsedData = Arrays.asList(mockSnapshot);
@@ -134,7 +138,7 @@ class PublicDataBatchServiceTest {
         verify(rebDataParser).parseRebData(rebDataRows);
         verify(repository).upsertSnapshot(
             anyString(), anyString(), any(), anyString(), anyString(), 
-            anyString(), any(), anyString(), any(), any(), any()
+            anyString(), anyString(), anyString(), any(), anyString(), any(), any(), any()
         );
     }
     
@@ -142,14 +146,14 @@ class PublicDataBatchServiceTest {
     @DisplayName("월간 가격지수 수집 - 저장 중 일부 실패해도 전체 배치는 계속 진행")
     void collectMonthlyPriceIndex_partialFailure_continuesProcessing() throws Exception {
         // given
-        RebDataRow mockRebData1 = createMockRebDataRow(3001L, "대구>중구", 102.1, "2025년 05월", "MM");
-        RebDataRow mockRebData2 = createMockRebDataRow(3002L, "대구>동구", 101.8, "2025년 05월", "MM");
+        RebDataRow mockRebData1 = createMockRebDataRow(3001L, "대구>중구", 10001L, "지수", 102.1, "2025년 05월", "MM");
+        RebDataRow mockRebData2 = createMockRebDataRow(3002L, "대구>동구", 10002L, "변동률", 101.8, "2025년 05월", "MM");
         List<RebDataRow> rebDataRows = Arrays.asList(mockRebData1, mockRebData2);
         
         PublicDataSnapshot mockSnapshot1 = createMockPublicDataSnapshot(
-            PublicDataSource.REB, PublicDataType.PRICE_INDEX, LocalDate.of(2025, 5, 1), "대구", "3001", "대구>중구", new BigDecimal("102.1"));
+            PublicDataSource.REB, PublicDataType.PRICE_INDEX, LocalDate.of(2025, 5, 1), "대구", "3001", "대구>중구", "10001", "지수", new BigDecimal("102.1"));
         PublicDataSnapshot mockSnapshot2 = createMockPublicDataSnapshot(
-            PublicDataSource.REB, PublicDataType.PRICE_INDEX, LocalDate.of(2025, 5, 1), "대구", "3002", "대구>동구", new BigDecimal("101.8"));
+            PublicDataSource.REB, PublicDataType.PRICE_INDEX, LocalDate.of(2025, 5, 1), "대구", "3002", "대구>동구", "10002", "변동률", new BigDecimal("101.8"));
         List<PublicDataSnapshot> parsedData = Arrays.asList(mockSnapshot1, mockSnapshot2);
         
         when(rebApiClient.fetchMonthlyPriceIndex()).thenReturn(rebDataRows);
@@ -160,7 +164,7 @@ class PublicDataBatchServiceTest {
             .doNothing()
             .when(repository).upsertSnapshot(
                 anyString(), anyString(), any(), anyString(), anyString(),
-                anyString(), any(), anyString(), any(), any(), any()
+                anyString(), anyString(), anyString(), any(), anyString(), any(), any(), any()
             );
         
         // when
@@ -171,16 +175,18 @@ class PublicDataBatchServiceTest {
         verify(rebDataParser).parseRebData(rebDataRows);
         verify(repository, times(2)).upsertSnapshot(
             anyString(), anyString(), any(), anyString(), anyString(),
-            anyString(), any(), anyString(), any(), any(), any()
+            anyString(), anyString(), anyString(), any(), anyString(), any(), any(), any()
         );
     }
     
-    private RebDataRow createMockRebDataRow(Long clsId, String clsFullnm, Double dtaVal, String wrtimeDesc, String dtaCycleCd) {
+    private RebDataRow createMockRebDataRow(Long clsId, String clsFullnm, Long itmId, String itmNm, Double dtaVal, String wrtimeDesc, String dtaCycleCd) {
         RebDataRow rebDataRow = new RebDataRow();
         // 리플렉션으로 필드 설정 (실제로는 생성자나 빌더 패턴 사용 권장)
         try {
             setField(rebDataRow, "clsId", clsId);
             setField(rebDataRow, "clsFullnm", clsFullnm);
+            setField(rebDataRow, "itmId", itmId);
+            setField(rebDataRow, "itmNm", itmNm);
             setField(rebDataRow, "dtaVal", dtaVal);
             setField(rebDataRow, "wrtimeDesc", wrtimeDesc);
             setField(rebDataRow, "dtaCycleCd", dtaCycleCd);
@@ -191,7 +197,8 @@ class PublicDataBatchServiceTest {
     }
     
     private PublicDataSnapshot createMockPublicDataSnapshot(PublicDataSource source, PublicDataType dataType, LocalDate referenceDate, 
-                                                           String regionSido, String sourceRegionId, String regionFullpath, BigDecimal numericValue) {
+                                                           String regionSido, String sourceRegionId, String regionFullpath, 
+                                                           String itmId, String itmNm, BigDecimal numericValue) {
         return PublicDataSnapshot.builder()
             .source(source)
             .dataType(dataType)
@@ -199,6 +206,8 @@ class PublicDataBatchServiceTest {
             .regionSido(regionSido)
             .sourceRegionId(sourceRegionId)
             .regionFullpath(regionFullpath)
+            .itmId(itmId)
+            .itmNm(itmNm)
             .numericValue(numericValue)
             .rawData("{\"test\": \"data\"}")
             .build();
