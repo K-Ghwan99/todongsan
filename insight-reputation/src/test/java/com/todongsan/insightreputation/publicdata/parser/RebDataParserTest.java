@@ -84,24 +84,37 @@ class RebDataParserTest {
     }
     
     @Test
-    @DisplayName("REB 데이터 파싱 - 전국 단위 처리 (region_sido=전국, source_region_id=50001)")
-    void parseRebData_nationalData_handledCorrectly() throws Exception {
+    @DisplayName("REB 데이터 파싱 - 전국/수도권/지방 등 '>' 없는 지역 처리 (각각 고유한 source_region_id)")
+    void parseRebData_nationalLevelData_handledCorrectly() throws Exception {
         // given
         RebDataRow rebData1 = createRebDataRow(50001L, "부산>해운대구>우동", 10001L, "지수", 98.7, "2025-05-15", "WK");
         RebDataRow rebData2 = createRebDataRow(50002L, "대구>중구", 10001L, "지수", 102.1, "2025-05-15", "WK");
-        RebDataRow rebData3 = createRebDataRow(12345L, "전국", 10001L, "지수", 100.0, "2025-05-15", "WK"); // 전국 단위 테스트
-        List<RebDataRow> rebDataRows = Arrays.asList(rebData1, rebData2, rebData3);
+        RebDataRow rebData3 = createRebDataRow(10001L, "전국", 10001L, "지수", 100.0, "2025-05-15", "WK"); // 전국
+        RebDataRow rebData4 = createRebDataRow(20001L, "수도권", 10001L, "지수", 105.0, "2025-05-15", "WK"); // 수도권
+        RebDataRow rebData5 = createRebDataRow(30001L, "지방", 10001L, "지수", 95.0, "2025-05-15", "WK"); // 지방
+        List<RebDataRow> rebDataRows = Arrays.asList(rebData1, rebData2, rebData3, rebData4, rebData5);
         
         // when
         List<PublicDataSnapshot> result = parser.parseRebData(rebDataRows);
         
         // then
-        assertEquals(3, result.size());
+        assertEquals(5, result.size());
         
         assertEquals("부산", result.get(0).getRegionSido());
+        assertEquals("50001", result.get(0).getSourceRegionId());
+        
         assertEquals("대구", result.get(1).getRegionSido());
+        assertEquals("50002", result.get(1).getSourceRegionId());
+        
+        // '>' 없는 지역들은 clsFullnm 그대로 region_sido 사용, sourceRegionId는 각각 고유
         assertEquals("전국", result.get(2).getRegionSido());
-        assertEquals("50001", result.get(2).getSourceRegionId()); // 전국은 50001로 변경됨
+        assertEquals("10001", result.get(2).getSourceRegionId()); // CLS_ID 그대로 사용
+        
+        assertEquals("수도권", result.get(3).getRegionSido());
+        assertEquals("20001", result.get(3).getSourceRegionId()); // CLS_ID 그대로 사용
+        
+        assertEquals("지방", result.get(4).getRegionSido());
+        assertEquals("30001", result.get(4).getSourceRegionId()); // CLS_ID 그대로 사용
     }
     
     @Test

@@ -78,10 +78,10 @@ public class RebDataParser {
             // 3. region_sido 파싱: cls_fullnm의 첫 번째 '>' 이전 값
             String regionSido = parseRegionSido(row.getClsFullnm());
             
-            // 전국 단위 처리: '>' 없으면 전국으로 간주하고 sourceRegionId를 "50001"로 설정
+            // 전국/수도권/지방 등 단위 처리: '>' 없는 지역은 clsFullnm 값 그대로 사용
             if (!row.getClsFullnm().contains(">")) {
-                regionSido = "전국";
-                sourceRegionId = "50001";
+                regionSido = row.getClsFullnm();
+                // sourceRegionId는 이미 String.valueOf(row.getClsId())로 설정되어 각 지역마다 고유함
             }
             
             // 4. itm_id: itmId를 String으로 변환
