@@ -2,6 +2,7 @@ package com.todongsan.insightreputation.reputation.service;
 
 import com.todongsan.insightreputation.global.exception.CustomException;
 import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
+import com.todongsan.insightreputation.reputation.exception.ResidenceChangeCooldownException;
 import com.todongsan.insightreputation.reputation.dto.response.MyReputationResponse;
 import com.todongsan.insightreputation.reputation.dto.response.ReputationResponse;
 import com.todongsan.insightreputation.reputation.entity.Reputation;
@@ -160,7 +161,7 @@ class ReputationServiceTest {
 
         // when & then
         assertThatThrownBy(() -> reputationService.declareResidence(memberId, newSido, newSigu))
-                .isInstanceOf(CustomException.class)
+                .isInstanceOf(ResidenceChangeCooldownException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.REPUTATION_RESIDENCE_CHANGE_COOLDOWN);
         
@@ -211,7 +212,7 @@ class ReputationServiceTest {
 
         // when & then
         assertThatThrownBy(() -> reputationService.declareResidence(memberId, newSido, newSigu))
-                .isInstanceOf(CustomException.class)
+                .isInstanceOf(ResidenceChangeCooldownException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.REPUTATION_RESIDENCE_CHANGE_COOLDOWN);
     }

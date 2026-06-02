@@ -59,7 +59,8 @@ public class Reputation extends BaseEntity {
         this.residenceSido = residenceSido;
         this.residenceSigu = residenceSigu;
         this.residenceDeclaredAt = LocalDateTime.now();
-        this.residenceChangedAt = LocalDateTime.now();
+        // 최초 선언 시 residenceChangedAt은 null (작업지시문 74라인)
+        this.residenceChangedAt = null;
         this.activityScore = 0;
         this.predictionCount = 0;
         this.predictionCorrect = 0;

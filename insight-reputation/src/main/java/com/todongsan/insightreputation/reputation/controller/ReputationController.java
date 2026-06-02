@@ -5,6 +5,8 @@ import com.todongsan.insightreputation.reputation.controller.docs.ReputationCont
 import com.todongsan.insightreputation.reputation.dto.request.ChangeResidenceRequest;
 import com.todongsan.insightreputation.reputation.dto.response.MyReputationResponse;
 import com.todongsan.insightreputation.reputation.dto.response.ReputationResponse;
+import com.todongsan.insightreputation.reputation.dto.response.ResidenceResponse;
+import com.todongsan.insightreputation.reputation.entity.Reputation;
 import com.todongsan.insightreputation.reputation.service.ReputationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -36,11 +38,12 @@ public class ReputationController implements ReputationControllerDocs {
 
     @PutMapping("/me/residence")
     @Override
-    public ApiResponse<Void> changeResidence(
+    public ApiResponse<ResidenceResponse> changeResidence(
             @RequestHeader("X-Member-Id") Long memberId,
             @Valid @RequestBody ChangeResidenceRequest request) {
         
-        reputationService.declareResidence(memberId, request.getSido(), request.getSigu());
-        return ApiResponse.success();
+        Reputation reputation = reputationService.declareResidence(memberId, request.getSido(), request.getSigu());
+        ResidenceResponse response = ResidenceResponse.from(reputation);
+        return ApiResponse.success(response);
     }
 }

@@ -2,6 +2,7 @@ package com.todongsan.insightreputation.reputation.service;
 
 import com.todongsan.insightreputation.global.exception.CustomException;
 import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
+import com.todongsan.insightreputation.reputation.exception.ResidenceChangeCooldownException;
 import com.todongsan.insightreputation.reputation.dto.response.MyReputationResponse;
 import com.todongsan.insightreputation.reputation.dto.response.ReputationResponse;
 import com.todongsan.insightreputation.reputation.entity.Reputation;
@@ -48,7 +49,7 @@ public class ReputationService {
         Reputation existingReputation = reputationRepository.findByMemberId(memberId).orElse(null);
         
         if (existingReputation == null) {
-            // 최초 선언
+            // 최초 선언 - 새 Reputation 생성
             Reputation newReputation = Reputation.builder()
                     .memberId(memberId)
                     .residenceSido(sido)
@@ -57,14 +58,19 @@ public class ReputationService {
             return reputationRepository.save(newReputation);
         } else {
             // 거주지역 변경
-            if (existingReputation.getResidenceChangedAt() != null) {
+            // 작업지시문 60-65라인: residenceChangedAt == null이면 최초 선언(쿨다운 skip)
+            if (existingReputation.getResidenceChangedAt() == null) {
+                // 최초 선언 → 쿨다운 체크 skip
+                existingReputation.changeResidence(sido, sigu);
+            } else {
+                // 변경 → residenceChangedAt + 30일 > NOW() 이면 쿨다운 에러
                 LocalDateTime cooldownEndTime = existingReputation.getResidenceChangedAt().plusDays(RESIDENCE_CHANGE_COOLDOWN_DAYS);
                 if (LocalDateTime.now().isBefore(cooldownEndTime)) {
-                    throw new CustomException(ErrorCode.REPUTATION_RESIDENCE_CHANGE_COOLDOWN);
+                    // 작업지시문 77라인: nextChangeAvailableDate 포함 에러 응답
+                    throw new ResidenceChangeCooldownException(cooldownEndTime);
                 }
+                existingReputation.changeResidence(sido, sigu);
             }
-            
-            existingReputation.changeResidence(sido, sigu);
             return existingReputation;
         }
     }

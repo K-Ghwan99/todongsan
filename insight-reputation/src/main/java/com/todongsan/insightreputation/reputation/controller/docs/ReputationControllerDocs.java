@@ -4,6 +4,7 @@ import com.todongsan.insightreputation.global.response.ApiResponse;
 import com.todongsan.insightreputation.reputation.dto.request.ChangeResidenceRequest;
 import com.todongsan.insightreputation.reputation.dto.response.MyReputationResponse;
 import com.todongsan.insightreputation.reputation.dto.response.ReputationResponse;
+import com.todongsan.insightreputation.reputation.dto.response.ResidenceResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -37,7 +38,7 @@ public interface ReputationControllerDocs {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "REPUTATION_RESIDENCE_CHANGE_COOLDOWN"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "UNAUTHORIZED")
     })
-    ApiResponse<Void> changeResidence(
+    ApiResponse<ResidenceResponse> changeResidence(
         @Parameter(hidden = true) Long memberId,
         ChangeResidenceRequest request
     );
