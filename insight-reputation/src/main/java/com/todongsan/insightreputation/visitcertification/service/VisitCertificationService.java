@@ -4,6 +4,7 @@ import com.todongsan.insightreputation.enums.VisitCertMethod;
 import com.todongsan.insightreputation.global.exception.CustomException;
 import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
 import com.todongsan.insightreputation.visitcertification.dto.VisitCertificationListResponse;
+import com.todongsan.insightreputation.visitcertification.dto.VisitCertificationRequest;
 import com.todongsan.insightreputation.visitcertification.dto.VisitCertificationResponse;
 import com.todongsan.insightreputation.visitcertification.dto.response.VisitCertificationSummary;
 import com.todongsan.insightreputation.visitcertification.entity.VisitCertification;
@@ -58,6 +59,48 @@ public class VisitCertificationService {
         return certifications.stream()
                 .map(VisitCertificationListResponse::from)
                 .toList();
+    }
+
+    /**
+     * 방문 인증을 등록합니다. (통합 메서드)
+     * 
+     * @param memberId 회원 ID
+     * @param request 방문 인증 요청
+     * @return 방문 인증 응답
+     */
+    @Transactional
+    public VisitCertificationResponse registerVisitCertification(Long memberId, VisitCertificationRequest request) {
+        log.info("방문 인증 등록 시작: memberId={}, method={}, sido={}, sigu={}", 
+                memberId, request.getMethod(), request.getSido(), request.getSigu());
+
+        if (request.getMethod() == VisitCertMethod.GPS) {
+            if (request.getData() == null || 
+                request.getData().getLatitude() == null || 
+                request.getData().getLongitude() == null) {
+                throw new IllegalArgumentException("GPS 인증 시 data.latitude와 data.longitude 필드는 필수입니다");
+            }
+            
+            return registerGps(
+                    memberId,
+                    request.getSido(),
+                    request.getSigu(),
+                    request.getData().getLatitude(),
+                    request.getData().getLongitude()
+            );
+        } else if (request.getMethod() == VisitCertMethod.COMMENT) {
+            if (request.getData() == null || request.getData().getCommentId() == null) {
+                throw new IllegalArgumentException("COMMENT 인증 시 data.commentId 필드는 필수입니다");
+            }
+            
+            return registerComment(
+                    memberId,
+                    request.getSido(),
+                    request.getSigu(),
+                    request.getData().getCommentId()
+            );
+        } else {
+            throw new IllegalArgumentException("지원하지 않는 인증 방식입니다: " + request.getMethod());
+        }
     }
 
     /**

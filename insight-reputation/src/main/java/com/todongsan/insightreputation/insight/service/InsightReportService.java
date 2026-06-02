@@ -454,6 +454,37 @@ public class InsightReportService {
     }
     
     /**
+     * Market 리포트 조회
+     * 
+     * @param marketId Market ID
+     * @return 리포트 응답
+     */
+    @Transactional(readOnly = true)
+    public InsightReportResponse getMarketReport(Long marketId) {
+        Optional<InsightReport> reportOpt = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.MARKET, marketId);
+        
+        if (reportOpt.isEmpty()) {
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
+        }
+        
+        InsightReport report = reportOpt.get();
+        
+        // Market 리포트 조회는 완료된 리포트만 반환
+        if (report.getStatus() != InsightReportStatus.DONE) {
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
+        }
+        
+        return InsightReportResponse.builder()
+                .reportId(report.getId())
+                .status(report.getStatus().name())
+                .reportContent(report.getReportContent())
+                .generatedAt(report.getGeneratedAt())
+                .pointCharged(0)  // 조회 시에는 차감 없음
+                .build();
+    }
+    
+    /**
      * Market 리포트 상태 조회
      * 
      * @param marketId Market ID

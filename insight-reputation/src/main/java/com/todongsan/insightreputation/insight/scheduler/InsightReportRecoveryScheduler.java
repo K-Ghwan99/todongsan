@@ -66,4 +66,40 @@ public class InsightReportRecoveryScheduler {
         
         log.info("리포트 회복 스케줄러 완료: 처리된 리포트 수={}", timeoutReports.size());
     }
+
+    /**
+     * FAILED 상태의 리포트 중 재시도 가능한 것들을 PENDING으로 리셋
+     * 매 10분마다 실행 (retry_count < 3인 FAILED 리포트만 재시도)
+     */
+    @Scheduled(fixedRate = 10 * 60 * 1000) // 10분마다 실행
+    @Transactional
+    public void retryFailedReports() {
+        log.debug("실패 리포트 재시도 스케줄러 시작");
+        
+        List<InsightReport> failedReports = insightReportRepository
+                .findByStatusAndRetryCountLessThan(InsightReportStatus.FAILED, (byte) InsightReport.MAX_RETRY_COUNT);
+        
+        if (failedReports.isEmpty()) {
+            log.debug("재시도 대상 실패 리포트 없음");
+            return;
+        }
+        
+        log.info("재시도 가능한 실패 리포트 발견: count={}", failedReports.size());
+        
+        for (InsightReport report : failedReports) {
+            try {
+                // PENDING으로 리셋하여 재처리 가능하도록 설정
+                report.resetForRetry();
+                insightReportRepository.save(report);
+                
+                log.info("실패 리포트 재시도 리셋: reportId={}, retryCount={}", 
+                        report.getId(), report.getRetryCount());
+                
+            } catch (Exception e) {
+                log.error("실패 리포트 재시도 처리 중 오류: reportId={}", report.getId(), e);
+            }
+        }
+        
+        log.info("실패 리포트 재시도 스케줄러 완료: 처리된 리포트 수={}", failedReports.size());
+    }
 }

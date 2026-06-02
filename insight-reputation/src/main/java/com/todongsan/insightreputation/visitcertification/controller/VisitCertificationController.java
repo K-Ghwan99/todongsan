@@ -1,6 +1,5 @@
 package com.todongsan.insightreputation.visitcertification.controller;
 
-import com.todongsan.insightreputation.enums.VisitCertMethod;
 import com.todongsan.insightreputation.global.response.ApiResponse;
 import com.todongsan.insightreputation.visitcertification.controller.docs.VisitCertificationControllerDocs;
 import com.todongsan.insightreputation.visitcertification.dto.VisitCertificationListResponse;
@@ -31,40 +30,7 @@ public class VisitCertificationController implements VisitCertificationControlle
             @RequestHeader("X-Member-Id") Long memberId,
             @Valid @RequestBody VisitCertificationRequest request) {
         
-        log.info("방문 인증 등록 요청: memberId={}, method={}, sido={}, sigu={}", 
-                memberId, request.getMethod(), request.getSido(), request.getSigu());
-
-        VisitCertificationResponse response;
-        
-        if (request.getMethod() == VisitCertMethod.GPS) {
-            if (request.getData() == null || 
-                request.getData().getLatitude() == null || 
-                request.getData().getLongitude() == null) {
-                throw new IllegalArgumentException("GPS 인증 시 data.latitude와 data.longitude 필드는 필수입니다");
-            }
-            
-            response = visitCertificationService.registerGps(
-                    memberId,
-                    request.getSido(),
-                    request.getSigu(),
-                    request.getData().getLatitude(),
-                    request.getData().getLongitude()
-            );
-        } else if (request.getMethod() == VisitCertMethod.COMMENT) {
-            if (request.getData() == null || request.getData().getCommentId() == null) {
-                throw new IllegalArgumentException("COMMENT 인증 시 data.commentId 필드는 필수입니다");
-            }
-            
-            response = visitCertificationService.registerComment(
-                    memberId,
-                    request.getSido(),
-                    request.getSigu(),
-                    request.getData().getCommentId()
-            );
-        } else {
-            throw new IllegalArgumentException("지원하지 않는 인증 방식입니다: " + request.getMethod());
-        }
-
+        VisitCertificationResponse response = visitCertificationService.registerVisitCertification(memberId, request);
         return ApiResponse.success(response);
     }
 
