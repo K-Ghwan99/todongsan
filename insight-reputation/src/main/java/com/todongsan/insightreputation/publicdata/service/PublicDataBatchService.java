@@ -44,12 +44,25 @@ public class PublicDataBatchService {
                 return;
             }
             
-            // 3. 데이터베이스 저장 (saveAll로 간편화, JPA가 내부적으로 upsert 처리)
+            // 3. 데이터베이스 저장 (ON DUPLICATE KEY UPDATE로 멱등성 보장)
             int savedCount = 0;
+            LocalDateTime now = LocalDateTime.now();
             
             for (PublicDataSnapshot snapshot : parsedData) {
                 try {
-                    repository.save(snapshot);
+                    repository.upsertSnapshot(
+                        snapshot.getSource().name(),
+                        snapshot.getDataType().name(),
+                        snapshot.getReferenceDate(),
+                        snapshot.getRegionSido(),
+                        snapshot.getSourceRegionId(),
+                        snapshot.getRegionFullpath(),
+                        snapshot.getNumericValue(),
+                        snapshot.getRawData(),
+                        snapshot.getCollectedAt(),
+                        now,   // createdAt
+                        now    // updatedAt
+                    );
                     savedCount++;
                 } catch (Exception e) {
                     log.error("REB 주간 데이터 저장 실패, 건너뜀: sourceRegionId={}, error={}", 
@@ -89,12 +102,25 @@ public class PublicDataBatchService {
                 return;
             }
             
-            // 3. 데이터베이스 저장
+            // 3. 데이터베이스 저장 (ON DUPLICATE KEY UPDATE로 멱등성 보장)
             int savedCount = 0;
+            LocalDateTime now = LocalDateTime.now();
             
             for (PublicDataSnapshot snapshot : parsedData) {
                 try {
-                    repository.save(snapshot);
+                    repository.upsertSnapshot(
+                        snapshot.getSource().name(),
+                        snapshot.getDataType().name(),
+                        snapshot.getReferenceDate(),
+                        snapshot.getRegionSido(),
+                        snapshot.getSourceRegionId(),
+                        snapshot.getRegionFullpath(),
+                        snapshot.getNumericValue(),
+                        snapshot.getRawData(),
+                        snapshot.getCollectedAt(),
+                        now,   // createdAt
+                        now    // updatedAt
+                    );
                     savedCount++;
                 } catch (Exception e) {
                     log.error("REB 월간 데이터 저장 실패, 건너뜀: sourceRegionId={}, error={}", 

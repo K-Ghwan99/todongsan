@@ -66,9 +66,11 @@ public class RebApiClient {
                     .build()
                     .toUri();
                 
+                log.info("R-ONE API 호출 URL: {}", uri.toString());
                 log.debug("R-ONE API 호출: pIndex={}, pSize={}", pageNo, numOfRows);
                 
                 RebApiResponse response = restTemplate.getForObject(uri, RebApiResponse.class);
+                log.info("R-ONE API 응답 받음: response={}", response != null ? "NOT_NULL" : "NULL");
                 
                 if (response == null) {
                     log.error("R-ONE API 응답 없음: statblId={}, period={}, pIndex={}", statblId, period, pageNo);
@@ -118,8 +120,8 @@ public class RebApiClient {
                 // CustomException은 그대로 재전파
                 throw e;
             } catch (Exception e) {
-                log.error("R-ONE API 호출 중 예상치 못한 오류: statblId={}, period={}, pIndex={}", 
-                         statblId, period, pageNo, e);
+                log.error("R-ONE API 호출 중 예상치 못한 오류: statblId={}, period={}, pIndex={}, errorType={}, message={}", 
+                         statblId, period, pageNo, e.getClass().getSimpleName(), e.getMessage(), e);
                 throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
             }
         }

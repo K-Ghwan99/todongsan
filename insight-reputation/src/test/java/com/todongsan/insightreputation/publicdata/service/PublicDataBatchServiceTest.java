@@ -65,7 +65,10 @@ class PublicDataBatchServiceTest {
         // then
         verify(rebApiClient).fetchWeeklyPriceIndex();
         verify(rebDataParser).parseRebData(rebDataRows);
-        verify(repository).save(any(PublicDataSnapshot.class));
+        verify(repository).upsertSnapshot(
+            anyString(), anyString(), any(), anyString(), anyString(), 
+            anyString(), any(), anyString(), any(), any(), any()
+        );
     }
     
     @Test
@@ -80,7 +83,7 @@ class PublicDataBatchServiceTest {
         // then
         verify(rebApiClient).fetchWeeklyPriceIndex();
         verify(rebDataParser, never()).parseRebData(any());
-        verify(repository, never()).save(any());
+        verify(repository, never()).upsertSnapshot(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
     
     @Test
@@ -99,7 +102,7 @@ class PublicDataBatchServiceTest {
         // then
         verify(rebApiClient).fetchWeeklyPriceIndex();
         verify(rebDataParser).parseRebData(rebDataRows);
-        verify(repository, never()).save(any());
+        verify(repository, never()).upsertSnapshot(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
     
     @Test
@@ -129,7 +132,10 @@ class PublicDataBatchServiceTest {
         // then
         verify(rebApiClient).fetchMonthlyPriceIndex();
         verify(rebDataParser).parseRebData(rebDataRows);
-        verify(repository).save(any(PublicDataSnapshot.class));
+        verify(repository).upsertSnapshot(
+            anyString(), anyString(), any(), anyString(), anyString(), 
+            anyString(), any(), anyString(), any(), any(), any()
+        );
     }
     
     @Test
@@ -149,10 +155,13 @@ class PublicDataBatchServiceTest {
         when(rebApiClient.fetchMonthlyPriceIndex()).thenReturn(rebDataRows);
         when(rebDataParser.parseRebData(rebDataRows)).thenReturn(parsedData);
         
-        // 첫 번째 데이터 저장 실패, 두 번째는 성공
-        when(repository.save(any(PublicDataSnapshot.class)))
-            .thenThrow(new RuntimeException("DB 저장 오류"))
-            .thenReturn(mockSnapshot2); // 두 번째 호출에서는 성공
+        // 첫 번째 데이터 저장 실패, 두 번째는 성공 
+        doThrow(new RuntimeException("DB 저장 오류"))
+            .doNothing()
+            .when(repository).upsertSnapshot(
+                anyString(), anyString(), any(), anyString(), anyString(),
+                anyString(), any(), anyString(), any(), any(), any()
+            );
         
         // when
         batchService.collectMonthlyPriceIndex();
@@ -160,7 +169,10 @@ class PublicDataBatchServiceTest {
         // then
         verify(rebApiClient).fetchMonthlyPriceIndex();
         verify(rebDataParser).parseRebData(rebDataRows);
-        verify(repository, times(2)).save(any(PublicDataSnapshot.class));
+        verify(repository, times(2)).upsertSnapshot(
+            anyString(), anyString(), any(), anyString(), anyString(),
+            anyString(), any(), anyString(), any(), any(), any()
+        );
     }
     
     private RebDataRow createMockRebDataRow(Long clsId, String clsFullnm, Double dtaVal, String wrtimeDesc, String dtaCycleCd) {
