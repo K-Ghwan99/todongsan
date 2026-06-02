@@ -34,7 +34,7 @@ Market 서비스의 에러 처리는 다음 원칙을 따른다.
 public enum MarketStatus {
     PENDING,                  // 검수 대기
     ACTIVE,                   // 예측 참여 가능
-    CLOSED,                   // 예측 마감
+    CLOSED,                   // 결과 확정 완료, 정산 준비 완료
     DATA_PENDING,             // 정산 데이터 수집 대기
     SETTLEMENT_IN_PROGRESS,   // 정산 진행 중
     SETTLED,                  // 정산 완료
@@ -261,6 +261,32 @@ Market DB에는 이미 prediction_id가 있으므로 reference_type/reference_id
 | `MARKET_CLOSED` | 409 | `closeAt`이 현재 시각보다 과거이거나 같음 |
 | `MARKET_INVALID_OPTION` | 400 | 선택지가 2개 미만이거나 `initialVirtualLiquidity`가 0 이하 |
 
+### 관리자 결과 확정
+
+`PATCH /api/v1/admin/markets/{marketId}/result`는 결과 확정까지만 수행한다.
+Member-Point 호출, Prediction 상태 변경, PriceHistory 생성, 정산 계산은 수행하지 않는다.
+
+허용 상태 전이:
+
+```text
+ACTIVE + closeAt <= now → CLOSED
+DATA_PENDING → CLOSED
+```
+
+`CLOSED`는 결과 확정 완료 및 정산 준비 완료 상태를 의미한다.
+
+| ErrorCode | HTTP Status | 설명 |
+|---|---:|---|
+| `MARKET_NOT_FOUND` | 404 | 결과를 확정할 Market이 없음 |
+| `MARKET_INVALID_STATUS` | 409 | 결과 확정 가능한 상태가 아님 |
+| `MARKET_OPTION_NOT_FOUND` | 404 | 해당 Market의 선택지가 아님 |
+| `MARKET_WINNING_OPTION_NOT_FOUND` | 409 | NUMERIC_RANGE 결과와 매칭되는 정답 선택지가 없음 |
+| `MARKET_INVALID_SETTLEMENT_DATA` | 409 | NUMERIC_RANGE 결과가 여러 선택지와 매칭되거나 요청 option과 계산 option이 다름 |
+| `VALIDATION_FAILED` | 400 | AnswerType별 필수 결과 값 누락 |
+
+정답 option이 없으면 결과 확정에 실패한다.
+정답 option은 있지만 해당 option의 정답자가 없는 경우에는 결과 확정에 성공하고, 후속 정산 API에서 처리한다.
+
 ## 8. 포인트 차감 연동 실패 시나리오
 
 현재 2차 구현에서는 실제 Member-Point HTTP 연동 없이 `MemberPointClient` 내부 예외 모델로 아래 상태 전이를 처리한다.
@@ -385,7 +411,7 @@ Idempotency-Key로 Member-Point 처리 이력 조회
 ### 10-1. 정산 처리 흐름
 
 ```text
-1. CLOSED 또는 DATA_PENDING 상태의 Market을 정산 대상으로 조회
+1. CLOSED 상태의 Market을 정산 대상으로 조회
 2. DB Atomic Update로 SETTLEMENT_IN_PROGRESS 획득
 3. 정산 데이터 확인
 4. 정답 선택지 계산
@@ -407,7 +433,7 @@ Idempotency-Key로 Member-Point 처리 이력 조회
 UPDATE market
 SET status = 'SETTLEMENT_IN_PROGRESS'
 WHERE id = :marketId
-  AND status IN ('CLOSED', 'DATA_PENDING');
+  AND status = 'CLOSED';
 ```
 
 처리 기준:
