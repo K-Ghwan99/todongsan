@@ -20,7 +20,7 @@ public class PointHistory extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 회원 ID (FK 없이 BIGINT로만 보관)
+    // 회원 ID (JPA 관계 없이 BIGINT로만 보관)
     @Column(nullable = false)
     private Long memberId;
 
@@ -49,7 +49,7 @@ public class PointHistory extends BaseEntity {
     private Long referenceId;
 
     // 멱등성 키 (중복 처리 방지)
-    @Column(unique = true, length = 100)
+    @Column(nullable = false, unique = true, length = 100)
     private String idempotencyKey;
 
     // 요청 해시 (SHA-256, 충돌 감지)
