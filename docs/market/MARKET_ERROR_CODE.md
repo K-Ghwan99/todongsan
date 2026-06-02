@@ -133,7 +133,8 @@ UNIQUE (market_id, member_id)
 
 ## 5. Decimal 응답 정책
 
-Market 서비스에서 소수점 정밀도가 중요한 값은 JSON Number가 아니라 String으로 응답한다.
+Market 서비스에서 소수점 정밀도가 중요한 값은 응답 DTO에서 `BigDecimal`로 유지하고,
+`@JsonSerialize(using = ToStringSerializer.class)`를 사용하여 JSON Number가 아니라 String으로 응답한다.
 
 대상 필드:
 

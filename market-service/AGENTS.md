@@ -467,7 +467,8 @@ Insight-Reputation 내부 조회는 반드시 `SETTLED` Market만 허용한다.
 }
 ```
 
-Decimal 필드는 JSON Number가 아니라 JSON String으로 응답한다.
+Decimal 필드는 응답 DTO에서 `BigDecimal`로 유지한다.
+JSON 직렬화 시 `@JsonSerialize(using = ToStringSerializer.class)`를 사용하여 JSON Number가 아니라 JSON String으로 응답한다.
 
 예시:
 

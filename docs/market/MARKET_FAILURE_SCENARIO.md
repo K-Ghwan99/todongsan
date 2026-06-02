@@ -352,7 +352,8 @@ SETTLED
 
 ### 3-9. Decimal 데이터는 String으로 응답한다
 
-가격, 계약 수량, 포인트 금액, 정산 금액 등 소수점 정밀도가 중요한 값은 JSON Number가 아니라 String으로 응답한다.
+가격, 계약 수량, 포인트 금액, 정산 금액 등 소수점 정밀도가 중요한 값은 응답 DTO에서 `BigDecimal`로 유지한다.
+JSON 직렬화 시 `@JsonSerialize(using = ToStringSerializer.class)`를 사용하여 JSON Number가 아니라 String으로 응답한다.
 
 대상 예시:
 

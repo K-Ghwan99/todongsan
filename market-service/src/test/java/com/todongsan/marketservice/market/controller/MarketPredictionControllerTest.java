@@ -16,6 +16,7 @@ import com.todongsan.marketservice.market.client.MemberPointClient;
 import com.todongsan.marketservice.market.client.PointSpendCommand;
 import com.todongsan.marketservice.market.client.exception.MemberPointExternalException;
 import com.todongsan.marketservice.market.client.exception.MemberPointTimeoutException;
+import com.todongsan.marketservice.market.client.exception.MemberPointUnavailableException;
 import com.todongsan.marketservice.market.client.exception.PointInsufficientException;
 import com.todongsan.marketservice.market.dto.request.CreatePredictionRequest;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
@@ -342,6 +343,22 @@ class MarketPredictionControllerTest {
                 .andExpect(jsonPath("$.data.contractQuantity").value(nullValue()));
 
         assertPredictionStateWithoutPriceConfirmation("POINT_UNKNOWN", "MEMBER_POINT_EXTERNAL_ERROR");
+    }
+
+    @Test
+    void createPredictionMarksPredictionUnknownWhenPointServiceIsUnavailable() throws Exception {
+        insertActiveMarketWithOptions();
+        doThrow(new MemberPointUnavailableException("MEMBER_POINT_UNAVAILABLE"))
+                .when(memberPointClient)
+                .spend(any(PointSpendCommand.class));
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("POINT_UNKNOWN"))
+                .andExpect(jsonPath("$.data.priceSnapshot").value(nullValue()))
+                .andExpect(jsonPath("$.data.contractQuantity").value(nullValue()));
+
+        assertPredictionStateWithoutPriceConfirmation("POINT_UNKNOWN", "MEMBER_POINT_UNAVAILABLE");
     }
 
     @Test
