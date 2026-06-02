@@ -355,4 +355,13 @@
           AND status = 'POINT_PENDING'
     </update>
 
+    <update id="updatePendingPredictionStatus">
+        UPDATE market_prediction
+        SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'POINT_PENDING'
+    </update>
+
 </mapper>

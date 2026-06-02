@@ -186,6 +186,7 @@ Market DB에는 이미 prediction_id가 있으므로 reference_type/reference_id
 | `MARKET_NOT_ACTIVE` | 409 | Market이 예측 참여 가능한 상태가 아님 | X | Prediction 생성 안 함 |
 | `MARKET_CLOSED` | 409 | 이미 마감된 Market | X | Prediction 생성 안 함 |
 | `MARKET_ALREADY_PREDICTED` | 409 | 사용자가 이미 해당 Market에 예측 참여함 | X | Prediction 생성 안 함 |
+| `MARKET_PREDICTION_NOT_FOUND` | 404 | 사용자의 해당 Market 예측을 찾을 수 없음 | X | 없음 |
 | `MARKET_OPTION_NOT_FOUND` | 404 | 선택지를 찾을 수 없음 | X | Prediction 생성 안 함 |
 | `MARKET_INVALID_BET_AMOUNT` | 400 | 예측 참여 포인트 금액이 유효하지 않음 | X | Prediction 생성 안 함 |
 | `MARKET_PRICE_UPDATE_CONFLICT` | 409 | 가격 확정 트랜잭션 중 락 타임아웃, 데드락, 갱신 충돌 발생 | O | POINT_PENDING/POINT_UNKNOWN 유지 후 상태 대사 |
@@ -254,6 +255,9 @@ Market DB에는 이미 prediction_id가 있으므로 reference_type/reference_id
 | `MARKET_INVALID_OPTION` | 400 | 선택지가 2개 미만이거나 `initialVirtualLiquidity`가 0 이하 |
 
 ## 8. 포인트 차감 연동 실패 시나리오
+
+현재 2차 구현에서는 실제 Member-Point HTTP 연동 없이 `MemberPointClient` 내부 예외 모델로 아래 상태 전이를 처리한다.
+Scheduler 대사와 Member-Point 거래 상태 조회 API 연동은 아직 구현하지 않는다.
 
 ### 8-1. 포인트 부족
 
@@ -508,6 +512,7 @@ public enum MarketErrorCode implements ErrorCode {
     MARKET_NOT_ACTIVE("MARKET_NOT_ACTIVE", "예측 참여 가능한 상태의 Market이 아닙니다.", HttpStatus.CONFLICT),
     MARKET_CLOSED("MARKET_CLOSED", "이미 마감된 Market입니다.", HttpStatus.CONFLICT),
     MARKET_ALREADY_PREDICTED("MARKET_ALREADY_PREDICTED", "이미 예측 참여한 Market입니다.", HttpStatus.CONFLICT),
+    MARKET_PREDICTION_NOT_FOUND("MARKET_PREDICTION_NOT_FOUND", "내 예측을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
     MARKET_OPTION_NOT_FOUND("MARKET_OPTION_NOT_FOUND", "Market 선택지를 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
     MARKET_INVALID_BET_AMOUNT("MARKET_INVALID_BET_AMOUNT", "예측 참여 포인트 금액이 유효하지 않습니다.", HttpStatus.BAD_REQUEST),
     MARKET_PRICE_UPDATE_CONFLICT("MARKET_PRICE_UPDATE_CONFLICT", "Market 가격 확정 트랜잭션 중 동시성 충돌이 발생했습니다.", HttpStatus.CONFLICT),

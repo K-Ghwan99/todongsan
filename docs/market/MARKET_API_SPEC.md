@@ -467,8 +467,9 @@ Content-Type: application/json
 
 예측 참여는 외부 HTTP 호출과 DB 가격 확정 트랜잭션을 분리한다.
 
-> 현재 1차 구현에서는 Member-Point 실제 HTTP 연동 없이 Fake 성공 응답으로 처리한다.
-> 추후 실제 Member-Point 연동 시 동일한 transaction boundary를 유지한다.
+> 현재 2차 구현에서도 Member-Point 실제 HTTP 연동은 하지 않는다.
+> `MemberPointClient` 내부 예외 모델을 통해 명확한 실패는 `FAILED`, 타임아웃·외부 오류·응답 불명확은 `POINT_UNKNOWN`으로 처리한다.
+> 추후 실제 Member-Point 연동 시에도 동일한 transaction boundary를 유지한다.
 
 ```text
 [트랜잭션 A]
@@ -656,6 +657,15 @@ GET /api/v1/markets/{marketId}/predictions/me
 ```
 
 `POINT_UNKNOWN`, `POINT_PENDING` 상태를 클라이언트가 확인하기 위한 API이다.
+
+### Headers
+
+| 이름 | 필수 | 설명 |
+|---|---:|---|
+| `X-Member-Id` | O | 임시 회원 식별자. 추후 Gateway/Auth 연동 시 인증 정보에서 주입 |
+| `Idempotency-Key` | X | 읽기 API이므로 사용하지 않음 |
+
+`X-Member-Id`는 MVP 단계의 임시 인증 정책이다.
 
 ### Response
 
