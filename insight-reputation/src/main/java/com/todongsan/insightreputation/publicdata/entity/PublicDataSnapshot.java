@@ -18,12 +18,13 @@ import java.time.LocalDateTime;
     name = "public_data_snapshot",
     uniqueConstraints = @UniqueConstraint(
         name = "uq_snapshot", 
-        columnNames = {"source", "data_type", "reference_date", "source_region_id"}
+        columnNames = {"source", "data_type", "reference_date", "source_region_id", "itm_id"}
     ),
     indexes = {
         @Index(name = "idx_source_type_date", columnList = "source, data_type, reference_date"),
         @Index(name = "idx_region_sido", columnList = "region_sido"),
-        @Index(name = "idx_region_fullpath", columnList = "region_fullpath(100)")
+        @Index(name = "idx_region_fullpath", columnList = "region_fullpath(100)"),
+        @Index(name = "idx_itm_id", columnList = "itm_id")
     }
 )
 @Getter
@@ -54,6 +55,12 @@ public class PublicDataSnapshot extends BaseEntity {
     @Column(name = "region_fullpath", length = 200)
     private String regionFullpath;
 
+    @Column(name = "itm_id", nullable = false, length = 20)
+    private String itmId;
+
+    @Column(name = "itm_nm", length = 100)
+    private String itmNm;
+
     @Column(name = "numeric_value", precision = 20, scale = 10)
     private BigDecimal numericValue;
 
@@ -66,21 +73,24 @@ public class PublicDataSnapshot extends BaseEntity {
     @Builder
     public PublicDataSnapshot(PublicDataSource source, PublicDataType dataType, LocalDate referenceDate,
                              String regionSido, String sourceRegionId, String regionFullpath,
-                             BigDecimal numericValue, String rawData) {
+                             String itmId, String itmNm, BigDecimal numericValue, String rawData) {
         this.source = source;
         this.dataType = dataType;
         this.referenceDate = referenceDate;
         this.regionSido = regionSido;
         this.sourceRegionId = sourceRegionId;
         this.regionFullpath = regionFullpath;
+        this.itmId = itmId;
+        this.itmNm = itmNm;
         this.numericValue = numericValue;
         this.rawData = rawData;
         this.collectedAt = LocalDateTime.now();
     }
 
-    public void updateSnapshot(String regionSido, String regionFullpath, BigDecimal numericValue, String rawData) {
+    public void updateSnapshot(String regionSido, String regionFullpath, String itmNm, BigDecimal numericValue, String rawData) {
         this.regionSido = regionSido;
         this.regionFullpath = regionFullpath;
+        this.itmNm = itmNm;
         this.numericValue = numericValue;
         this.rawData = rawData;
         this.collectedAt = LocalDateTime.now();

@@ -1,0 +1,22 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Build
+build/
+target/
+*.jar
+*.war
+
+# Environment variables
+.env
+
+
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
