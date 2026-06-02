@@ -4,27 +4,22 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.math.BigDecimal;
-
 @Getter
 @NoArgsConstructor
 public class RebDataRow {
     
-    @JsonProperty("cls_id")
-    private String clsId;           // 지역 고유 코드
+    @JsonProperty("CLS_ID")
+    private Long clsId;             // 지역 고유 코드 (숫자 타입)
     
-    @JsonProperty("cls_fullnm")
-    private String clsFullnm;       // 지역 전체 경로 (예: 서울>강북지역>도심권>종로구)
+    @JsonProperty("CLS_FULLNM")
+    private String clsFullnm;       // 지역 전체 경로 (예: 경기>경부1권>과천시)
     
-    @JsonProperty("dta_val")
-    private BigDecimal dtaVal;      // 수치값
+    @JsonProperty("DTA_VAL")
+    private Double dtaVal;          // 수치값 (null 가능)
     
-    @JsonProperty("wrttime_desc")
-    private String wrttimeDesc;     // 기준일 (예: 2025.05.12)
+    @JsonProperty("WRTTIME_DESC")
+    private String wrtimeDesc;      // 주간: "2012-05-07", 월간: "2003년 11월"
     
-    @JsonProperty("statbl_id")
-    private String statblId;        // 통계표 ID
-    
-    @JsonProperty("period")
-    private String period;          // 주기 (WK, MM)
+    @JsonProperty("DTACYCLE_CD")
+    private String dtaCycleCd;      // "WK" 또는 "MM" - WRTTIME_DESC 파싱 분기에 사용
 }

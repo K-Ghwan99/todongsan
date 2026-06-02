@@ -24,10 +24,10 @@ public class RebApiClient {
 
     private final RestTemplate restTemplate;
     
-    @Value("${reb.api.key:4178fe4edf654e8dad253d7d45db2ce4}")
+    @Value("${reb.api.key}")
     private String apiKey;
     
-    @Value("${reb.api.base-url:https://www.r-one.co.kr/rone/resis/common/statisticsViewer/SttsApiTblData.do}")
+    @Value("${reb.api.base-url}")
     private String baseUrl;
     
     // 통계표 ID
@@ -55,64 +55,70 @@ public class RebApiClient {
         
         while (hasMoreData) {
             try {
-                // API 호출 URL 구성
+                // API 호출 URL 구성 (문서 기준 정확한 파라미터명 사용)
                 URI uri = UriComponentsBuilder.fromHttpUrl(baseUrl)
-                    .queryParam("ServiceKey", apiKey)
+                    .queryParam("Key", apiKey)
+                    .queryParam("Type", "json")
                     .queryParam("STATBL_ID", statblId)
-                    .queryParam("period", period)
-                    .queryParam("pageNo", pageNo)
-                    .queryParam("numOfRows", numOfRows)
+                    .queryParam("DTACYCLE_CD", period)
+                    .queryParam("pIndex", pageNo)
+                    .queryParam("pSize", numOfRows)
                     .build()
                     .toUri();
                 
-                log.debug("R-ONE API 호출: pageNo={}, numOfRows={}", pageNo, numOfRows);
+                log.debug("R-ONE API 호출: pIndex={}, pSize={}", pageNo, numOfRows);
                 
                 RebApiResponse response = restTemplate.getForObject(uri, RebApiResponse.class);
                 
-                if (response == null || response.getResultInfo() == null) {
-                    log.error("R-ONE API 응답 없음: statblId={}, period={}, pageNo={}", statblId, period, pageNo);
+                if (response == null) {
+                    log.error("R-ONE API 응답 없음: statblId={}, period={}, pIndex={}", statblId, period, pageNo);
                     throw new CustomException(ErrorCode.EXTERNAL_SERVICE_BAD_RESPONSE);
                 }
                 
                 // 응답 코드 확인
-                String resultCode = response.getResultInfo().getResultCode();
-                if (!"00".equals(resultCode)) {
-                    log.error("R-ONE API 오류 응답: resultCode={}, resultMsg={}, statblId={}, period={}", 
-                             resultCode, response.getResultInfo().getResultMsg(), statblId, period);
+                String resultCode = response.getResultCode();
+                if ("INFO-200".equals(resultCode)) {
+                    // 마지막 페이지 도달 - 정상적인 종료 신호
+                    log.info("R-ONE API 마지막 페이지 도달: pIndex={}, statblId={}, period={}", pageNo, statblId, period);
+                    hasMoreData = false;
+                    break;
+                } else if (!"INFO-000".equals(resultCode)) {
+                    log.error("R-ONE API 오류 응답: resultCode={}, statblId={}, period={}", 
+                             resultCode, statblId, period);
                     throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
                 }
                 
-                List<RebDataRow> currentPageData = response.getBody();
+                List<RebDataRow> currentPageData = response.getRows();
                 if (currentPageData == null || currentPageData.isEmpty()) {
-                    log.info("R-ONE API 더 이상 데이터 없음: pageNo={}", pageNo);
+                    log.info("R-ONE API 더 이상 데이터 없음: pIndex={}", pageNo);
                     hasMoreData = false;
                 } else {
                     allData.addAll(currentPageData);
                     
                     // 다음 페이지 존재 여부 확인
-                    Integer totalCount = response.getResultInfo().getTotalCount();
+                    Integer totalCount = response.getTotalCount();
                     int currentTotal = (pageNo - 1) * numOfRows + currentPageData.size();
                     hasMoreData = (totalCount != null && currentTotal < totalCount);
                     
-                    log.debug("R-ONE API 페이지 처리 완료: pageNo={}, currentPageSize={}, totalCollected={}, hasMore={}", 
+                    log.debug("R-ONE API 페이지 처리 완료: pIndex={}, currentPageSize={}, totalCollected={}, hasMore={}", 
                              pageNo, currentPageData.size(), allData.size(), hasMoreData);
                     
                     pageNo++;
                 }
                 
             } catch (HttpClientErrorException e) {
-                log.error("R-ONE API HTTP 오류: statblId={}, period={}, pageNo={}, status={}, message={}", 
+                log.error("R-ONE API HTTP 오류: statblId={}, period={}, pIndex={}, status={}, message={}", 
                          statblId, period, pageNo, e.getStatusCode(), e.getMessage());
                 throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
             } catch (ResourceAccessException e) {
-                log.error("R-ONE API 연결 오류: statblId={}, period={}, pageNo={}, message={}", 
+                log.error("R-ONE API 연결 오류: statblId={}, period={}, pIndex={}, message={}", 
                          statblId, period, pageNo, e.getMessage());
                 throw new CustomException(ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE);
             } catch (CustomException e) {
                 // CustomException은 그대로 재전파
                 throw e;
             } catch (Exception e) {
-                log.error("R-ONE API 호출 중 예상치 못한 오류: statblId={}, period={}, pageNo={}", 
+                log.error("R-ONE API 호출 중 예상치 못한 오류: statblId={}, period={}, pIndex={}", 
                          statblId, period, pageNo, e);
                 throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
             }

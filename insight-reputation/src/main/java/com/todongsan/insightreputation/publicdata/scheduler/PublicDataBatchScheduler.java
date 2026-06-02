@@ -17,9 +17,9 @@ public class PublicDataBatchScheduler {
     
     /**
      * REB 주간 매매가격지수 배치 수집
-     * 매주 금요일 오전 10시 실행 (한국부동산원 목요일 공표 후)
+     * 매주 목요일 오전 10시 실행
      */
-    @Scheduled(cron = "${scheduler.reb.weekly.cron:0 0 10 * * FRI}", zone = "Asia/Seoul")
+    @Scheduled(cron = "${scheduler.reb.weekly.cron:0 0 10 * * THU}", zone = "Asia/Seoul")
     public void scheduleWeeklyPriceIndexCollection() {
         log.info("=== REB 주간 매매가격지수 배치 스케줄러 시작 ===");
         
@@ -34,9 +34,9 @@ public class PublicDataBatchScheduler {
     
     /**
      * REB 월간 매매가격지수 배치 수집
-     * 매월 16일 오전 10시 실행 (한국부동산원 15일 공표 후)
+     * 매월 15일 오전 10시 실행
      */
-    @Scheduled(cron = "${scheduler.reb.monthly.cron:0 0 10 16 * ?}", zone = "Asia/Seoul")
+    @Scheduled(cron = "${scheduler.reb.monthly.cron:0 0 10 15 * ?}", zone = "Asia/Seoul")
     public void scheduleMonthlyPriceIndexCollection() {
         log.info("=== REB 월간 매매가격지수 배치 스케줄러 시작 ===");
         

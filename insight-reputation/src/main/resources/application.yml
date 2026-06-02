@@ -37,3 +37,8 @@ logging:
     org.hibernate.SQL: INFO
     org.hibernate.type: INFO
     com.todongsan.insightreputation: DEBUG
+
+reb:
+  api:
+    key: ${REB_API_KEY}
+    base-url: ${REB_API_BASE_URL}

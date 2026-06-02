@@ -4,13 +4,15 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.todongsan.insightreputation.enums.PublicDataSource;
 import com.todongsan.insightreputation.enums.PublicDataType;
-import com.todongsan.insightreputation.publicdata.dto.ParsedDataRow;
 import com.todongsan.insightreputation.publicdata.dto.RebDataRow;
+import com.todongsan.insightreputation.publicdata.entity.PublicDataSnapshot;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,25 +24,28 @@ public class RebDataParser {
 
     private final ObjectMapper objectMapper;
     
-    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd");
+    // 주간 날짜 형식: "2012-05-07"
+    private static final DateTimeFormatter WEEKLY_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    
+    // 월간 날짜 형식: "2003년 11월"
+    private static final DateTimeFormatter MONTHLY_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy년 MM월");
 
     /**
-     * REB 원본 데이터를 ParsedDataRow로 변환
+     * REB 원본 데이터를 PublicDataSnapshot으로 변환
      * 
      * @param rebDataRows REB API 응답 데이터
-     * @param dataType 데이터 타입
      * @return 파싱된 데이터 목록
      */
-    public List<ParsedDataRow> parseRebData(List<RebDataRow> rebDataRows, PublicDataType dataType) {
-        List<ParsedDataRow> parsedData = new ArrayList<>();
+    public List<PublicDataSnapshot> parseRebData(List<RebDataRow> rebDataRows) {
+        List<PublicDataSnapshot> parsedData = new ArrayList<>();
         
-        log.info("REB 데이터 파싱 시작: inputSize={}, dataType={}", rebDataRows.size(), dataType);
+        log.info("REB 데이터 파싱 시작: inputSize={}", rebDataRows.size());
         
         for (RebDataRow row : rebDataRows) {
             try {
-                ParsedDataRow parsed = parseRebDataRow(row, dataType);
-                if (parsed != null) {
-                    parsedData.add(parsed);
+                PublicDataSnapshot snapshot = parseRebDataRow(row);
+                if (snapshot != null) {
+                    parsedData.add(snapshot);
                 }
             } catch (Exception e) {
                 log.warn("REB 데이터 행 파싱 실패, 건너뜀: clsId={}, clsFullnm={}, error={}", 
@@ -53,43 +58,52 @@ public class RebDataParser {
     }
 
     /**
-     * REB 데이터 단일 행 파싱
+     * REB 데이터 단일 행을 PublicDataSnapshot으로 파싱 (ERD 컬럼 전체 매핑)
      */
-    private ParsedDataRow parseRebDataRow(RebDataRow row, PublicDataType dataType) {
+    private PublicDataSnapshot parseRebDataRow(RebDataRow row) {
         // 필수 필드 검증
-        if (row.getClsId() == null || row.getClsFullnm() == null || row.getWrttimeDesc() == null) {
-            log.debug("필수 필드 누락으로 행 건너뜀: clsId={}, clsFullnm={}, wrttimeDesc={}", 
-                     row.getClsId(), row.getClsFullnm(), row.getWrttimeDesc());
+        if (row.getClsId() == null || row.getClsFullnm() == null || row.getWrtimeDesc() == null) {
+            log.debug("필수 필드 누락으로 행 건너뜀: clsId={}, clsFullnm={}, wrtimeDesc={}", 
+                     row.getClsId(), row.getClsFullnm(), row.getWrtimeDesc());
             return null;
         }
 
         try {
-            // 1. region_sido 파싱: cls_fullnm의 첫 번째 '>' 이전 값
-            String regionSido = parseRegionSido(row.getClsFullnm());
+            // 1. source_region_id: clsId를 String으로 변환
+            String sourceRegionId = String.valueOf(row.getClsId());
             
-            // 2. source_region_id: cls_id 그대로 사용
-            String sourceRegionId = row.getClsId();
-            
-            // 3. region_fullpath: cls_fullnm 그대로 사용
+            // 2. region_fullpath: cls_fullnm 그대로 사용
             String regionFullpath = row.getClsFullnm();
             
-            // 4. reference_date: wrttime_desc 파싱 (YYYY.MM.DD → YYYY-MM-DD)
-            LocalDate referenceDate = parseReferenceDate(row.getWrttimeDesc());
+            // 3. region_sido 파싱: cls_fullnm의 첫 번째 '>' 이전 값
+            String regionSido = parseRegionSido(row.getClsFullnm());
             
-            // 5. numeric_value: dta_val (null 허용)
+            // 전국 단위 처리: '>' 없으면 전국으로 간주하고 sourceRegionId를 "50001"로 설정
+            if (!row.getClsFullnm().contains(">")) {
+                regionSido = "전국";
+                sourceRegionId = "50001";
+            }
+            
+            // 4. reference_date: wrtimeDesc 파싱 (주간/월간 분기)
+            LocalDate referenceDate = parseReferenceDate(row.getWrtimeDesc(), row.getDtaCycleCd());
+            
+            // 5. numeric_value: dtaVal을 BigDecimal로 변환 (null 허용)
+            BigDecimal numericValue = row.getDtaVal() != null ? BigDecimal.valueOf(row.getDtaVal()) : null;
             
             // 6. raw_data: 원본 JSON 직렬화
             String rawData = objectMapper.writeValueAsString(row);
 
-            return ParsedDataRow.builder()
-                    .source(PublicDataSource.REB)
-                    .dataType(dataType)
-                    .referenceDate(referenceDate)
-                    .regionSido(regionSido)
-                    .sourceRegionId(sourceRegionId)
-                    .regionFullpath(regionFullpath)
-                    .numericValue(row.getDtaVal())
-                    .rawData(rawData)
+            // ERD 컬럼 전체 매핑하여 PublicDataSnapshot 생성
+            return PublicDataSnapshot.builder()
+                    .source(PublicDataSource.REB)                    // source: 'REB' 고정
+                    .dataType(PublicDataType.PRICE_INDEX)           // data_type: 'PRICE_INDEX' 고정
+                    .referenceDate(referenceDate)                   // reference_date
+                    .regionSido(regionSido)                         // region_sido
+                    .sourceRegionId(sourceRegionId)                 // source_region_id
+                    .regionFullpath(regionFullpath)                 // region_fullpath
+                    .numericValue(numericValue)                     // numeric_value
+                    .rawData(rawData)                               // raw_data (JSON)
+                    // collected_at, created_at은 Builder에서 자동 설정
                     .build();
             
         } catch (JsonProcessingException e) {
@@ -124,18 +138,31 @@ public class RebDataParser {
     }
 
     /**
-     * wrttime_desc를 LocalDate로 변환
-     * 예: "2025.05.12" → 2025-05-12
+     * wrtimeDesc를 LocalDate로 변환 (주간/월간 분기 처리)
+     * 주간 (DTACYCLE_CD = "WK"): "2012-05-07" → 2012-05-07
+     * 월간 (DTACYCLE_CD = "MM"): "2003년 11월" → 2003-11-01 (해당 월 1일)
      */
-    private LocalDate parseReferenceDate(String wrttimeDesc) {
-        if (wrttimeDesc == null || wrttimeDesc.trim().isEmpty()) {
-            throw new IllegalArgumentException("wrttime_desc가 비어있음");
+    private LocalDate parseReferenceDate(String wrtimeDesc, String dtaCycleCd) {
+        if (wrtimeDesc == null || wrtimeDesc.trim().isEmpty()) {
+            throw new IllegalArgumentException("wrtimeDesc가 비어있음");
         }
         
+        String trimmed = wrtimeDesc.trim();
+        
         try {
-            return LocalDate.parse(wrttimeDesc.trim(), DATE_FORMATTER);
+            if ("WK".equals(dtaCycleCd)) {
+                // 주간: "2012-05-07" 형식
+                return LocalDate.parse(trimmed, WEEKLY_DATE_FORMATTER);
+            } else if ("MM".equals(dtaCycleCd)) {
+                // 월간: "2003년 11월" 형식 → 해당 월 1일로 변환
+                java.time.YearMonth yearMonth = java.time.YearMonth.parse(trimmed, MONTHLY_DATE_FORMATTER);
+                return yearMonth.atDay(1);
+            } else {
+                // 기본값으로 주간 형식 시도
+                return LocalDate.parse(trimmed, WEEKLY_DATE_FORMATTER);
+            }
         } catch (Exception e) {
-            throw new IllegalArgumentException("wrttime_desc 파싱 실패: " + wrttimeDesc, e);
+            throw new IllegalArgumentException("wrtimeDesc 파싱 실패: " + wrtimeDesc + ", dtaCycleCd: " + dtaCycleCd, e);
         }
     }
 }
