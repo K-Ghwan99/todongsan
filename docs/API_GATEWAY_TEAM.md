@@ -49,7 +49,7 @@
 - `spring-cloud-starter-gateway` 의존성 추가 (WebFlux 기반)
 - `JwtAuthenticationFilter` (GlobalFilter) 구현
 - `application.yml`에 각 서비스 라우팅 설정 작성
-- 공개 경로 / 보호 경로 구분 목록 관리 (3-1 참고)
+- 공개 경로 / 보호 경로 구분 목록 관리 (4절 참고)
 
 ### 모든 서비스 담당자 공통
 
@@ -91,16 +91,16 @@
 
 ### 보호 경로 (JWT 검증 필수)
 
-위 두 분류에 해당하지 않는 모든 경로:
+위 두 분류(공개 경로 / 내부 API)에 해당하지 않는 모든 경로. 예시:
 - `GET /api/v1/members/me`
 - `PATCH /api/v1/members/me`
 - `DELETE /api/v1/members/me`
 - `POST /api/v1/members/logout`
 - `GET /api/v1/points/balance`
 - `GET /api/v1/points/history`
-- `GET /api/v1/battles/**`
-- `GET /api/v1/markets/**`
-- `GET /api/v1/insights/**`
+- `/api/v1/battles/**` (GET, POST 등 모든 메서드)
+- `/api/v1/markets/**` (GET, POST 등 모든 메서드)
+- `/api/v1/insights/**` (GET, POST 등 모든 메서드)
 
 ---
 
