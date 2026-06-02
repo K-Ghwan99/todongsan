@@ -45,6 +45,7 @@
             close_at,
             settle_due_at,
             total_pool,
+            initial_virtual_liquidity,
             created_at,
             updated_at
         FROM market
@@ -136,5 +137,222 @@
             AND history.option_id = #{optionId}
         </if>
     </select>
+
+    <insert id="insertMarket" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO market (
+            title,
+            description,
+            category,
+            answer_type,
+            metric_unit,
+            judge_data_source,
+            judge_criteria,
+            judge_date,
+            status,
+            close_at,
+            settle_due_at,
+            total_pool,
+            fee_rate,
+            fee_amount,
+            settlement_pool,
+            initial_virtual_liquidity,
+            price_model,
+            created_by,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{title},
+            #{description},
+            #{category},
+            #{answerType},
+            #{metricUnit},
+            #{judgeDataSource},
+            #{judgeCriteria},
+            #{judgeDate},
+            #{status},
+            #{closeAt},
+            #{settleDueAt},
+            #{totalPool},
+            #{feeRate},
+            #{feeAmount},
+            #{settlementPool},
+            #{initialVirtualLiquidity},
+            #{priceModel},
+            #{createdBy},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <insert id="insertMarketOptions">
+        INSERT INTO market_option (
+            market_id,
+            option_code,
+            option_text,
+            display_order,
+            range_min,
+            range_max,
+            min_inclusive,
+            max_inclusive,
+            virtual_pool_amount,
+            real_pool_amount,
+            total_contract_quantity,
+            current_price,
+            prediction_count,
+            is_result,
+            created_at,
+            updated_at
+        ) VALUES
+        <foreach collection="options" item="option" separator=",">
+            (
+                #{option.marketId},
+                #{option.optionCode},
+                #{option.optionText},
+                #{option.displayOrder},
+                #{option.rangeMin},
+                #{option.rangeMax},
+                #{option.minInclusive},
+                #{option.maxInclusive},
+                #{option.virtualPoolAmount},
+                #{option.realPoolAmount},
+                #{option.totalContractQuantity},
+                #{option.currentPrice},
+                #{option.predictionCount},
+                #{option.isResult},
+                #{option.createdAt},
+                #{option.updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <update id="activatePendingMarket">
+        UPDATE market
+        SET status = 'ACTIVE',
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND status = 'PENDING'
+          AND close_at > #{updatedAt}
+          AND initial_virtual_liquidity > 0
+          AND deleted_at IS NULL
+    </update>
+
+    <select id="selectOptionById" resultType="com.todongsan.marketservice.market.entity.MarketOption">
+        SELECT *
+        FROM market_option
+        WHERE id = #{optionId}
+    </select>
+
+    <select id="selectPredictionByMarketIdAndMemberId" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND member_id = #{memberId}
+    </select>
+
+    <select id="selectPredictionById" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE id = #{predictionId}
+    </select>
+
+    <insert id="insertPrediction" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO market_prediction (
+            market_id,
+            option_id,
+            member_id,
+            point_amount,
+            status,
+            point_spend_idempotency_key,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{marketId},
+            #{optionId},
+            #{memberId},
+            #{pointAmount},
+            #{status},
+            #{pointSpendIdempotencyKey},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <select id="lockMarketById" resultType="com.todongsan.marketservice.market.entity.Market">
+        SELECT *
+        FROM market
+        WHERE id = #{marketId}
+          AND deleted_at IS NULL
+        FOR UPDATE
+    </select>
+
+    <select id="lockOptionsByMarketId" resultType="com.todongsan.marketservice.market.entity.MarketOption">
+        SELECT *
+        FROM market_option
+        WHERE market_id = #{marketId}
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <update id="updateMarketTotalPool">
+        UPDATE market
+        SET total_pool = total_pool + #{pointAmount},
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="updateMarketOptionPoolsAndPrice">
+        UPDATE market_option
+        SET real_pool_amount = #{realPoolAmount},
+            total_contract_quantity = #{totalContractQuantity},
+            current_price = #{currentPrice},
+            prediction_count = #{predictionCount},
+            updated_at = #{updatedAt}
+        WHERE id = #{id}
+          AND market_id = #{marketId}
+    </update>
+
+    <insert id="insertPriceHistoryRows">
+        INSERT INTO market_price_history (
+            market_id,
+            option_id,
+            prediction_id,
+            price_before,
+            price_after,
+            real_pool_before,
+            real_pool_after,
+            contract_quantity_before,
+            contract_quantity_after,
+            event_type,
+            created_at,
+            updated_at
+        ) VALUES
+        <foreach collection="histories" item="history" separator=",">
+            (
+                #{history.marketId},
+                #{history.optionId},
+                #{history.predictionId},
+                #{history.priceBefore},
+                #{history.priceAfter},
+                #{history.realPoolBefore},
+                #{history.realPoolAfter},
+                #{history.contractQuantityBefore},
+                #{history.contractQuantityAfter},
+                #{history.eventType},
+                #{history.createdAt},
+                #{history.updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <update id="updatePredictionConfirmed">
+        UPDATE market_prediction
+        SET price_snapshot = #{priceSnapshot},
+            contract_quantity = #{contractQuantity},
+            status = 'CONFIRMED',
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'POINT_PENDING'
+    </update>
 
 </mapper>

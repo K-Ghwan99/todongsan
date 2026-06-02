@@ -431,13 +431,25 @@ POST /api/v1/markets/{marketId}/predictions
 
 | 이름 | 필수 | 설명 |
 |---|---:|---|
-| `Authorization` | O | JWT Access Token |
+| `X-Member-Id` | O | 임시 회원 식별자. 추후 Gateway/Auth 연동 시 인증 정보에서 주입 |
 | `Idempotency-Key` | O | 예측 참여 포인트 차감 멱등성 키 |
+| `Authorization` | 추후 | JWT Access Token. 현재 1차 구현에서는 사용하지 않음 |
+
+`X-Member-Id`는 MVP 단계의 임시 인증 정책이다.
 
 Idempotency-Key 예시:
 
 ```text
 MARKET_PREDICTION_SPEND:market:1:member:10
+```
+
+요청 예시:
+
+```http
+POST /api/v1/markets/1/predictions
+X-Member-Id: 10
+Idempotency-Key: MARKET_PREDICTION_SPEND:market:1:member:10
+Content-Type: application/json
 ```
 
 ### Request
@@ -454,6 +466,9 @@ MARKET_PREDICTION_SPEND:market:1:member:10
 ### 처리 흐름
 
 예측 참여는 외부 HTTP 호출과 DB 가격 확정 트랜잭션을 분리한다.
+
+> 현재 1차 구현에서는 Member-Point 실제 HTTP 연동 없이 Fake 성공 응답으로 처리한다.
+> 추후 실제 Member-Point 연동 시 동일한 transaction boundary를 유지한다.
 
 ```text
 [트랜잭션 A]
@@ -687,23 +702,36 @@ POST /api/v1/admin/markets
 {
   "title": "이번 주 OO구 아파트 가격 변동률은?",
   "description": "한국부동산원 데이터를 기준으로 정산합니다.",
-  "closeAt": "2026-06-01T18:00:00",
-  "resultAnnounceAt": "2026-06-04T18:00:00",
+  "category": "PRICE_INDEX",
   "answerType": "NUMERIC_RANGE",
+  "metricUnit": "PERCENT",
+  "judgeDataSource": "한국부동산원",
+  "judgeCriteria": "지정된 판정일의 변동률 기준",
+  "judgeDate": "2026-06-30",
+  "closeAt": "2026-06-20T23:59:59",
+  "settleDueAt": "2026-07-01T23:59:59",
+  "feeRate": "5.00",
+  "createdBy": 1,
   "options": [
     {
-      "content": "0.0% 미만",
-      "lowerBound": null,
-      "upperBound": "0.0000",
-      "lowerInclusive": false,
-      "upperInclusive": false
+      "optionCode": "A",
+      "optionText": "0.0% 이상 ~ 0.3% 미만",
+      "displayOrder": 1,
+      "rangeMin": "0.0000",
+      "rangeMax": "0.3000",
+      "minInclusive": true,
+      "maxInclusive": false,
+      "virtualPoolAmount": "100.00"
     },
     {
-      "content": "0.0% 이상 ~ 0.3% 미만",
-      "lowerBound": "0.0000",
-      "upperBound": "0.3000",
-      "lowerInclusive": true,
-      "upperInclusive": false
+      "optionCode": "B",
+      "optionText": "0.3% 이상 ~ 0.6% 미만",
+      "displayOrder": 2,
+      "rangeMin": "0.3000",
+      "rangeMax": "0.6000",
+      "minInclusive": true,
+      "maxInclusive": false,
+      "virtualPoolAmount": "100.00"
     }
   ]
 }
@@ -716,7 +744,10 @@ POST /api/v1/admin/markets
 2. 선택지 범위가 서로 겹치면 안 된다.
 3. 선택지 범위 사이에 빈 구간이 있으면 안 된다.
 4. 경계값 포함 여부가 명확해야 한다.
-5. 실제 정산 값은 정확히 하나의 선택지에만 매칭되어야 한다.
+5. 선택지 범위가 커버하는 값에 대해서는 실제 정산 값이 정확히 하나의 선택지에만 매칭되어야 한다.
+   단, 유한 구간만으로 구성된 Market에서 실제 정산 값이 모든 선택지 범위 밖에 있으면 결과 확정 시 `MARKET_WINNING_OPTION_NOT_FOUND`로 처리한다.
+6. Market 생성 시 초기 가격은 선택지별 virtualPoolAmount 비율로 계산한다.
+7. virtualPoolAmount는 Market 생성 후 변경하지 않는다.
 ```
 
 ### 발생 가능한 ErrorCode
@@ -727,6 +758,70 @@ POST /api/v1/admin/markets
 | `VALIDATION_FAILED` | 400 | 요청 값 검증 실패 |
 | `MARKET_INVALID_OPTION` | 400 | 선택지 구성 오류 |
 | `MARKET_INVALID_OPTION_RANGE` | 400 | 선택지 범위 오류 |
+| `MARKET_INVALID_FEE_RATE` | 400 | 수수료율 범위 오류 |
+
+#### NUMERIC_RANGE 열린 구간 정책
+
+```text
+rangeMin = null은 -무한대에서 시작하는 구간을 의미한다.
+rangeMax = null은 +무한대까지 이어지는 구간을 의미한다.
+rangeMin과 rangeMax가 모두 null인 구간은 허용하지 않는다.
+rangeMin = null인 구간과 rangeMax = null인 구간은 각각 최대 1개만 허용한다.
+rangeMin과 rangeMax에는 음수 값을 사용할 수 있다.
+정렬된 인접 구간 사이에는 빈 구간이나 겹침이 없어야 한다.
+인접 경계값은 정확히 하나의 구간에만 포함되어야 한다.
+첫 구간이 -무한대에서 시작하거나 마지막 구간이 +무한대까지 이어져야 하는 것은 아니다.
+```
+
+### 7-1. 관리자 Market 활성화
+
+```http
+PATCH /api/v1/admin/markets/{marketId}/activate
+```
+
+생성 직후 `PENDING` 상태인 Market을 예측 참여 가능한 `ACTIVE` 상태로 전환한다.
+
+허용 상태 전이:
+
+```text
+PENDING → ACTIVE
+```
+
+활성화 검증:
+
+```text
+1. Market이 존재해야 한다.
+2. 현재 상태가 PENDING이어야 한다.
+3. closeAt이 현재 시각보다 미래여야 한다.
+4. 선택지가 최소 2개 이상 존재해야 한다.
+5. initialVirtualLiquidity가 0보다 커야 한다.
+6. 활성화 API는 Member-Point Service를 호출하지 않는다.
+7. 활성화 API는 가격을 재계산하지 않고 기존 MarketOption currentPrice를 유지한다.
+```
+
+### Response
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "marketId": 1,
+    "status": "ACTIVE"
+  },
+  "timestamp": "2026-06-02T15:30:00"
+}
+```
+
+### 발생 가능한 ErrorCode
+
+| ErrorCode | HTTP Status | 설명 |
+|---|---:|---|
+| `MARKET_NOT_FOUND` | 404 | Market 없음 |
+| `MARKET_INVALID_STATUS` | 409 | PENDING 상태가 아님 |
+| `MARKET_CLOSED` | 409 | 활성화 전에 마감 시각이 지남 |
+| `MARKET_INVALID_OPTION` | 400 | 선택지 수 또는 초기 가상 유동성이 유효하지 않음 |
 
 ---
 

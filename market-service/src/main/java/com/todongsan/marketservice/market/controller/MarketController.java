@@ -1,9 +1,12 @@
 package com.todongsan.marketservice.market.controller;
 
 import com.todongsan.marketservice.global.response.ApiResponse;
+import com.todongsan.marketservice.market.dto.request.CreatePredictionRequest;
+import com.todongsan.marketservice.market.dto.response.CreatePredictionResponse;
 import com.todongsan.marketservice.market.dto.response.MarketDetailResponse;
 import com.todongsan.marketservice.market.dto.response.MarketListResponse;
 import com.todongsan.marketservice.market.dto.response.MarketPriceHistoryResponse;
+import com.todongsan.marketservice.market.service.MarketPredictionService;
 import com.todongsan.marketservice.market.service.MarketService;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import jakarta.validation.constraints.Max;
@@ -12,6 +15,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MarketController {
 
     private final MarketService marketService;
+    private final MarketPredictionService marketPredictionService;
 
     @GetMapping
     public ApiResponse<MarketListResponse> getMarkets(
@@ -49,5 +56,20 @@ public class MarketController {
             @RequestParam(required = false) @Min(1) Long optionId
     ) {
         return ApiResponse.ok(marketService.getPriceHistory(marketId, page, size, optionId));
+    }
+
+    @PostMapping("/{marketId}/predictions")
+    public ApiResponse<CreatePredictionResponse> createPrediction(
+            @PathVariable @Min(1) long marketId,
+            @RequestHeader(value = "X-Member-Id", required = false) Long memberId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody CreatePredictionRequest request
+    ) {
+        return ApiResponse.ok(marketPredictionService.createPrediction(
+                marketId,
+                memberId,
+                idempotencyKey,
+                request
+        ));
     }
 }
