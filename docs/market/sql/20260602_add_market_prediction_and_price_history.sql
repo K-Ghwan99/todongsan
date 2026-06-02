@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS market_prediction (
     expected_multiplier_snapshot            DECIMAL(18,8),
     status                                  VARCHAR(30)     NOT NULL DEFAULT 'POINT_PENDING',
     point_spend_idempotency_key             VARCHAR(150)    NOT NULL UNIQUE,
+    attempt_no                              INT             NOT NULL DEFAULT 1,
     settled_amount                          DECIMAL(10,2),
     refund_amount                           DECIMAL(10,2),
     fail_reason                             VARCHAR(255),
@@ -36,6 +37,21 @@ CREATE TABLE IF NOT EXISTS market_prediction (
     CONSTRAINT chk_market_prediction_point_amount
         CHECK (point_amount >= 10 AND point_amount <= 500)
 );
+
+SET @add_market_prediction_attempt_no = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE market_prediction ADD COLUMN attempt_no INT NOT NULL DEFAULT 1 AFTER point_spend_idempotency_key',
+        'SELECT 1'
+    )
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'market_prediction'
+      AND COLUMN_NAME = 'attempt_no'
+);
+PREPARE add_market_prediction_attempt_no FROM @add_market_prediction_attempt_no;
+EXECUTE add_market_prediction_attempt_no;
+DEALLOCATE PREPARE add_market_prediction_attempt_no;
 
 CREATE TABLE IF NOT EXISTS market_price_history (
     id                              BIGINT          NOT NULL AUTO_INCREMENT,

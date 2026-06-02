@@ -97,11 +97,16 @@ referenceId = predictionId
 
 | 작업 | Idempotency-Key |
 |---|---|
-| 예측 참여 포인트 차감 | `MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}` |
+| 예측 참여 API 요청 헤더 | `MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}` |
+| 예측 참여 포인트 차감 | `MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}:attempt:{attemptNo}` |
 | 정산 보상 지급 | `MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{memberId}` |
 | 무효 처리 환불 | `MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}` |
 
 예측 참여 포인트 차감 키에는 `optionId`를 포함하지 않는다.
+클라이언트는 재시도 여부와 관계없이 attempt suffix가 없는 API 요청 헤더 키를 전달한다.
+Market Service는 명확한 실패(`FAILED`) 후 재시도할 때 attemptNo를 증가시키고, Member-Point 차감 요청과 `market_prediction.point_spend_idempotency_key`에는 attempt별 키를 사용한다.
+Prediction row와 `referenceId = predictionId`는 재사용한다.
+`POINT_PENDING`, `POINT_UNKNOWN`, `CONFIRMED`, `SETTLED`, `REFUND_PENDING`, `REFUND_UNKNOWN`, `REFUNDED` 상태에서는 재시도하지 않고 `MARKET_ALREADY_PREDICTED`를 반환한다.
 
 이유:
 
@@ -476,33 +481,39 @@ Content-Type: application/json
 1. Market 조회
 2. Market ACTIVE 상태 검증
 3. 선택지 검증
-4. 중복 참여 검증
-5. Prediction POINT_PENDING 저장
+4. `(market_id, member_id)` 기준 기존 Prediction row 락 조회
+5. 기존 Prediction이 없으면 POINT_PENDING Prediction 저장
+   - attemptNo = 1
    - pointAmount 저장
    - selectedOptionId 저장
    - memberId 저장
    - priceSnapshot, contractQuantity는 아직 NULL 가능
-6. 트랜잭션 A 커밋
+6. 기존 Prediction이 FAILED이면 같은 row를 POINT_PENDING으로 변경
+   - 요청의 pointAmount, selectedOptionId로 갱신
+   - priceSnapshot, contractQuantity, 예상값 snapshot, failReason 초기화
+   - attemptNo 증가
+7. 기존 Prediction이 FAILED 이외 상태이면 MARKET_ALREADY_PREDICTED
+8. 트랜잭션 A 커밋
 
 [트랜잭션 밖]
-7. Member-Point 포인트 차감 API 호출
+9. Member-Point 포인트 차감 API 호출
    - type = SPEND_MARKET
    - referenceType = MARKET_PREDICTION
    - referenceId = predictionId
-   - idempotencyKey = MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}
+   - idempotencyKey = MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}:attempt:{attemptNo}
 
 [트랜잭션 B]
-8. 포인트 차감 성공 시 새 트랜잭션 시작
-9. Market row 비관적 락 획득
-10. 해당 Market의 모든 MarketOption row를 optionId 오름차순으로 비관적 락 획득
-11. 현재 선택지 가격 기준으로 priceSnapshot 확정
-12. contractQuantity 계산
-13. 선택한 option의 realPoolAmount, totalContractQuantity 증가
-14. 전체 선택지 currentPrice 재계산
-15. PriceHistory 저장
-16. Prediction CONFIRMED 변경
-17. 트랜잭션 B 커밋
-18. 응답 반환
+10. 포인트 차감 성공 시 새 트랜잭션 시작
+11. Market row 비관적 락 획득
+12. 해당 Market의 모든 MarketOption row를 optionId 오름차순으로 비관적 락 획득
+13. 현재 선택지 가격 기준으로 priceSnapshot 확정
+14. contractQuantity 계산
+15. 선택한 option의 realPoolAmount, totalContractQuantity 증가
+16. 전체 선택지 currentPrice 재계산
+17. PriceHistory 저장
+18. Prediction CONFIRMED 변경
+19. 트랜잭션 B 커밋
+20. 응답 반환
 ```
 
 ---
@@ -511,7 +522,7 @@ Content-Type: application/json
 
 ```http
 POST /api/v1/points/spend
-Idempotency-Key: MARKET_PREDICTION_SPEND:market:1:member:10
+Idempotency-Key: MARKET_PREDICTION_SPEND:market:1:member:10:attempt:1
 ```
 
 ```json

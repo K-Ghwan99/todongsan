@@ -53,7 +53,7 @@ public class MarketPredictionService {
                     prediction.getPointAmount(),
                     REFERENCE_TYPE,
                     prediction.getId(),
-                    idempotencyKey
+                    prediction.getPointSpendIdempotencyKey()
             ));
         } catch (PointInsufficientException e) {
             transactionService.markPredictionFailed(prediction.getId(), failureReason(e, "POINT_INSUFFICIENT"));

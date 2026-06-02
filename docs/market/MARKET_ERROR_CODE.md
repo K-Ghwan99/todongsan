@@ -68,30 +68,32 @@ public enum PredictionStatus {
 1. Market 조회
 2. Market ACTIVE 상태 검증
 3. 선택지 검증
-4. 중복 참여 검증
-5. Prediction을 POINT_PENDING 상태로 먼저 저장
-6. 트랜잭션 A 커밋
+4. `(market_id, member_id)` 기준 기존 Prediction row 락 조회
+5. 기존 Prediction이 없으면 attemptNo = 1인 POINT_PENDING Prediction 저장
+6. 기존 Prediction이 FAILED이면 같은 row를 POINT_PENDING으로 변경하고 attemptNo 증가
+7. 기존 Prediction이 FAILED 이외 상태이면 MARKET_ALREADY_PREDICTED
+8. 트랜잭션 A 커밋
 
 [트랜잭션 밖]
-7. Member-Point 서비스에 포인트 차감 요청
+9. Member-Point 서비스에 포인트 차감 요청
    - type = SPEND_MARKET
    - referenceType = MARKET_PREDICTION
    - referenceId = predictionId
-   - idempotencyKey = MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}
+   - idempotencyKey = MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}:attempt:{attemptNo}
 
 [트랜잭션 B]
-8. 포인트 차감 성공 시 새 트랜잭션 시작
-9. Market row 비관적 락 획득
-10. 해당 Market의 모든 MarketOption row를 optionId 오름차순으로 비관적 락 획득
-11. priceSnapshot, contractQuantity 확정
-12. pool 갱신, 전체 선택지 가격 재계산, PriceHistory 저장
-13. Prediction CONFIRMED 변경
-14. 트랜잭션 B 커밋
+10. 포인트 차감 성공 시 새 트랜잭션 시작
+11. Market row 비관적 락 획득
+12. 해당 Market의 모든 MarketOption row를 optionId 오름차순으로 비관적 락 획득
+13. priceSnapshot, contractQuantity 확정
+14. pool 갱신, 전체 선택지 가격 재계산, PriceHistory 저장
+15. Prediction CONFIRMED 변경
+16. 트랜잭션 B 커밋
 
 [실패/불명확]
-15. 명확한 실패 시 Prediction FAILED
-16. 타임아웃, 5xx, 응답 불명확 시 Prediction POINT_UNKNOWN
-17. 3분 이상 POINT_PENDING에 머무른 Prediction도 Scheduler 대사 대상으로 포함
+17. 명확한 실패 시 Prediction FAILED
+18. 타임아웃, 5xx, 응답 불명확 시 Prediction POINT_UNKNOWN
+19. 3분 이상 POINT_PENDING에 머무른 Prediction도 Scheduler 대사 대상으로 포함
 ```
 
 ---
@@ -100,11 +102,15 @@ public enum PredictionStatus {
 
 | 작업 | Idempotency-Key |
 |---|---|
-| 예측 참여 포인트 차감 | `MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}` |
+| 예측 참여 API 요청 헤더 | `MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}` |
+| 예측 참여 포인트 차감 | `MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}:attempt:{attemptNo}` |
 | 정산 보상 지급 | `MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{memberId}` |
 | 무효 처리 환불 | `MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}` |
 
 예측 참여 포인트 차감 키에는 `optionId`를 포함하지 않는다.
+클라이언트가 전달하는 요청 헤더 키에는 attempt suffix를 포함하지 않는다.
+명확한 실패(`FAILED`) 후 재시도하면 같은 Prediction row와 `referenceId = predictionId`를 재사용하고, attemptNo를 증가시킨 새 Point 차감 키를 사용한다.
+`POINT_PENDING`, `POINT_UNKNOWN`, `CONFIRMED`, `SETTLED`, `REFUND_PENDING`, `REFUND_UNKNOWN`, `REFUNDED` 상태에서는 재시도하지 않고 `MARKET_ALREADY_PREDICTED`를 반환한다.
 
 ```text
 같은 사용자가 같은 Market에서 서로 다른 선택지를 동시에 요청하더라도,
@@ -185,7 +191,7 @@ Market DB에는 이미 prediction_id가 있으므로 reference_type/reference_id
 | `MARKET_NOT_FOUND` | 404 | Market을 찾을 수 없음 | X | 없음 |
 | `MARKET_NOT_ACTIVE` | 409 | Market이 예측 참여 가능한 상태가 아님 | X | Prediction 생성 안 함 |
 | `MARKET_CLOSED` | 409 | 이미 마감된 Market | X | Prediction 생성 안 함 |
-| `MARKET_ALREADY_PREDICTED` | 409 | 사용자가 이미 해당 Market에 예측 참여함 | X | Prediction 생성 안 함 |
+| `MARKET_ALREADY_PREDICTED` | 409 | 사용자가 이미 해당 Market에 예측 참여했거나 FAILED 이외 상태라 재시도할 수 없음 | X | Prediction 생성/변경 안 함 |
 | `MARKET_PREDICTION_NOT_FOUND` | 404 | 사용자의 해당 Market 예측을 찾을 수 없음 | X | 없음 |
 | `MARKET_OPTION_NOT_FOUND` | 404 | 선택지를 찾을 수 없음 | X | Prediction 생성 안 함 |
 | `MARKET_INVALID_BET_AMOUNT` | 400 | 예측 참여 포인트 금액이 유효하지 않음 | X | Prediction 생성 안 함 |
@@ -269,7 +275,8 @@ Member-Point → POINT_INSUFFICIENT 반환
 
 ```text
 PredictionStatus = FAILED
-Retry = X
+Retry = O, FAILED 상태에서만 기존 Prediction row 재사용
+attemptNo 증가 후 새 point_spend_idempotency_key 생성
 HTTP Status = 409
 ```
 
