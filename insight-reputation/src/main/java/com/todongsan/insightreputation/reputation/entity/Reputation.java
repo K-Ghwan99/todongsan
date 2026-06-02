@@ -69,7 +69,7 @@ public class Reputation extends BaseEntity {
     }
 
     public void updateActivityScore(Integer score) {
-        this.activityScore = score;
+        this.activityScore += score;  // 누적 방식으로 변경
     }
 
     public void updatePredictionStats(Integer count, Integer correct) {

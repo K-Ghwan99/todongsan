@@ -15,12 +15,9 @@ public class ReputationResponse {
     private Integer activityScore;
     private Integer predictionCount;
     private BigDecimal predictionAccuracy;
-    private String residenceSido;
-    private String residenceSigu;
-    private LocalDateTime residenceDeclaredAt;
-    private LocalDateTime residenceChangedAt;
     private Integer activityCount;
     private LocalDateTime activityConfirmedAt;
+    // Note: Sensitive fields like residenceSido, residenceSigu, predictionCorrect are excluded for other members
     
     public static ReputationResponse from(Reputation reputation) {
         return ReputationResponse.builder()
@@ -28,10 +25,6 @@ public class ReputationResponse {
                 .activityScore(reputation.getActivityScore())
                 .predictionCount(reputation.getPredictionCount())
                 .predictionAccuracy(reputation.getPredictionAccuracy())
-                .residenceSido(reputation.getResidenceSido())
-                .residenceSigu(reputation.getResidenceSigu())
-                .residenceDeclaredAt(reputation.getResidenceDeclaredAt())
-                .residenceChangedAt(reputation.getResidenceChangedAt())
                 .activityCount(reputation.getActivityCount())
                 .activityConfirmedAt(reputation.getActivityConfirmedAt())
                 .build();
