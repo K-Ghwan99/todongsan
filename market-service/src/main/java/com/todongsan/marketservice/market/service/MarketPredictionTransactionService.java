@@ -137,6 +137,34 @@ public class MarketPredictionTransactionService {
         );
     }
 
+    @Transactional
+    public MarketPrediction markPredictionFailed(long predictionId, String failReason) {
+        return updatePendingPredictionStatus(predictionId, PredictionStatus.FAILED, failReason);
+    }
+
+    @Transactional
+    public MarketPrediction markPredictionUnknown(long predictionId, String failReason) {
+        return updatePendingPredictionStatus(predictionId, PredictionStatus.POINT_UNKNOWN, failReason);
+    }
+
+    private MarketPrediction updatePendingPredictionStatus(
+            long predictionId,
+            PredictionStatus status,
+            String failReason
+    ) {
+        int updatedRows = marketMapper.updatePendingPredictionStatus(
+                predictionId,
+                status,
+                failReason,
+                LocalDateTime.now()
+        );
+        MarketPrediction prediction = marketMapper.selectPredictionById(predictionId);
+        if (prediction == null || (updatedRows != 1 && prediction.getStatus() != status)) {
+            throw priceUpdateConflict();
+        }
+        return prediction;
+    }
+
     private Market getMarket(long marketId) {
         Market market = marketMapper.selectMarketById(marketId);
         if (market == null) {

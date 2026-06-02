@@ -5,6 +5,7 @@ import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
 import com.todongsan.marketservice.market.entity.MarketPriceHistory;
 import com.todongsan.marketservice.market.type.MarketStatus;
+import com.todongsan.marketservice.market.type.PredictionStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -80,6 +81,13 @@ public interface MarketMapper {
             @Param("predictionId") long predictionId,
             @Param("priceSnapshot") BigDecimal priceSnapshot,
             @Param("contractQuantity") BigDecimal contractQuantity,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updatePendingPredictionStatus(
+            @Param("predictionId") long predictionId,
+            @Param("status") PredictionStatus status,
+            @Param("failReason") String failReason,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 }

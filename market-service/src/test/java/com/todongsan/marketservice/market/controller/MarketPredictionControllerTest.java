@@ -1,14 +1,21 @@
 package com.todongsan.marketservice.market.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.todongsan.marketservice.market.client.MemberPointClient;
 import com.todongsan.marketservice.market.client.PointSpendCommand;
+import com.todongsan.marketservice.market.client.exception.MemberPointExternalException;
+import com.todongsan.marketservice.market.client.exception.MemberPointTimeoutException;
+import com.todongsan.marketservice.market.client.exception.PointInsufficientException;
 import com.todongsan.marketservice.market.dto.request.CreatePredictionRequest;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
 import com.todongsan.marketservice.market.service.MarketPredictionTransactionService;
@@ -33,6 +40,7 @@ class MarketPredictionControllerTest {
     private static final long MARKET_ID = 1L;
     private static final long MEMBER_ID = 10L;
     private static final String IDEMPOTENCY_KEY = "MARKET_PREDICTION_SPEND:market:1:member:10";
+    private static final LocalDateTime PREDICTION_CREATED_AT = LocalDateTime.of(2026, 6, 2, 15, 30, 0);
 
     @Autowired
     private MockMvc mockMvc;
@@ -145,6 +153,62 @@ class MarketPredictionControllerTest {
         )).isNull();
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_price_history", Integer.class))
                 .isZero();
+    }
+
+    @Test
+    void createPredictionMarksPredictionFailedWhenPointIsInsufficient() throws Exception {
+        insertActiveMarketWithOptions();
+        doThrow(new PointInsufficientException("POINT_INSUFFICIENT"))
+                .when(memberPointClient)
+                .spend(any(PointSpendCommand.class));
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errorCode").value("POINT_INSUFFICIENT"));
+
+        assertPredictionStateWithoutPriceConfirmation("FAILED", "POINT_INSUFFICIENT");
+    }
+
+    @Test
+    void createPredictionMarksPredictionUnknownWhenPointSpendTimesOut() throws Exception {
+        insertActiveMarketWithOptions();
+        doThrow(new MemberPointTimeoutException("MEMBER_POINT_TIMEOUT"))
+                .when(memberPointClient)
+                .spend(any(PointSpendCommand.class));
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("예측 참여 처리 상태를 확인 중입니다."))
+                .andExpect(jsonPath("$.data.pointAmount").value("100.00"))
+                .andExpect(jsonPath("$.data.priceSnapshot").value(nullValue()))
+                .andExpect(jsonPath("$.data.contractQuantity").value(nullValue()))
+                .andExpect(jsonPath("$.data.status").value("POINT_UNKNOWN"));
+
+        assertPredictionStateWithoutPriceConfirmation("POINT_UNKNOWN", "MEMBER_POINT_TIMEOUT");
+        mockMvc.perform(get("/api/v1/markets/{marketId}/predictions/me", MARKET_ID)
+                        .header("X-Member-Id", MEMBER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("POINT_UNKNOWN"))
+                .andExpect(jsonPath("$.data.priceSnapshot").value(nullValue()))
+                .andExpect(jsonPath("$.data.contractQuantity").value(nullValue()));
+    }
+
+    @Test
+    void createPredictionMarksPredictionUnknownWhenPointServiceReturnsExternalError() throws Exception {
+        insertActiveMarketWithOptions();
+        doThrow(new MemberPointExternalException("MEMBER_POINT_EXTERNAL_ERROR"))
+                .when(memberPointClient)
+                .spend(any(PointSpendCommand.class));
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("POINT_UNKNOWN"))
+                .andExpect(jsonPath("$.data.priceSnapshot").value(nullValue()))
+                .andExpect(jsonPath("$.data.contractQuantity").value(nullValue()));
+
+        assertPredictionStateWithoutPriceConfirmation("POINT_UNKNOWN", "MEMBER_POINT_EXTERNAL_ERROR");
     }
 
     @Test
@@ -276,6 +340,98 @@ class MarketPredictionControllerTest {
         expectPredictionError(MARKET_ID, MEMBER_ID, "WRONG_KEY", 1L, "100.00", 400, "VALIDATION_FAILED");
     }
 
+    @Test
+    void getMyPredictionReturnsConfirmedPrediction() throws Exception {
+        insertActiveMarketWithOptions();
+        insertPrediction(
+                100L,
+                MEMBER_ID,
+                "100.00",
+                "0.50000000",
+                "200.00000000",
+                "CONFIRMED",
+                PREDICTION_CREATED_AT,
+                PREDICTION_CREATED_AT.plusSeconds(1)
+        );
+
+        mockMvc.perform(get("/api/v1/markets/{marketId}/predictions/me", MARKET_ID)
+                        .header("X-Member-Id", MEMBER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.predictionId").value(100))
+                .andExpect(jsonPath("$.data.marketId").value(MARKET_ID))
+                .andExpect(jsonPath("$.data.selectedOptionId").value(1))
+                .andExpect(jsonPath("$.data.pointAmount").value("100.00"))
+                .andExpect(jsonPath("$.data.priceSnapshot").value("0.50000000"))
+                .andExpect(jsonPath("$.data.contractQuantity").value("200.00000000"))
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.createdAt").value("2026-06-02T15:30:00"))
+                .andExpect(jsonPath("$.data.updatedAt").value("2026-06-02T15:30:01"));
+    }
+
+    @Test
+    void getMyPredictionReturnsPointPendingWithNullCalculatedValues() throws Exception {
+        insertActiveMarketWithOptions();
+        insertPrediction(
+                100L,
+                MEMBER_ID,
+                "100.00",
+                null,
+                null,
+                "POINT_PENDING",
+                PREDICTION_CREATED_AT,
+                PREDICTION_CREATED_AT
+        );
+
+        mockMvc.perform(get("/api/v1/markets/{marketId}/predictions/me", MARKET_ID)
+                        .header("X-Member-Id", MEMBER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.priceSnapshot").value(nullValue()))
+                .andExpect(jsonPath("$.data.contractQuantity").value(nullValue()))
+                .andExpect(jsonPath("$.data.status").value("POINT_PENDING"));
+    }
+
+    @Test
+    void getMyPredictionRejectsMissingMemberId() throws Exception {
+        insertActiveMarketWithOptions();
+
+        mockMvc.perform(get("/api/v1/markets/{marketId}/predictions/me", MARKET_ID))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void getMyPredictionRejectsMissingMarket() throws Exception {
+        mockMvc.perform(get("/api/v1/markets/{marketId}/predictions/me", MARKET_ID)
+                        .header("X-Member-Id", MEMBER_ID))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("MARKET_NOT_FOUND"));
+    }
+
+    @Test
+    void getMyPredictionRejectsMissingPrediction() throws Exception {
+        insertActiveMarketWithOptions();
+
+        expectMyPredictionNotFound(MEMBER_ID);
+    }
+
+    @Test
+    void getMyPredictionDoesNotReturnAnotherMembersPrediction() throws Exception {
+        insertActiveMarketWithOptions();
+        insertPrediction(
+                100L,
+                MEMBER_ID,
+                "100.00",
+                "0.50000000",
+                "200.00000000",
+                "CONFIRMED",
+                PREDICTION_CREATED_AT,
+                PREDICTION_CREATED_AT.plusSeconds(1)
+        );
+
+        expectMyPredictionNotFound(99L);
+    }
+
     private void insertActiveMarketWithOptions() {
         insertMarket(MARKET_ID, "ACTIVE", LocalDateTime.now().plusDays(1));
         insertOptions(MARKET_ID);
@@ -319,6 +475,68 @@ class MarketPredictionControllerTest {
                 LocalDateTime.now(),
                 LocalDateTime.now()
         );
+    }
+
+    private void insertPrediction(
+            long predictionId,
+            long memberId,
+            String pointAmount,
+            String priceSnapshot,
+            String contractQuantity,
+            String predictionStatus,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO market_prediction (
+                    id, market_id, option_id, member_id, point_amount, price_snapshot, contract_quantity,
+                    status, point_spend_idempotency_key, created_at, updated_at
+                ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                predictionId,
+                MARKET_ID,
+                memberId,
+                pointAmount,
+                priceSnapshot,
+                contractQuantity,
+                predictionStatus,
+                "MARKET_PREDICTION_SPEND:market:%d:member:%d".formatted(MARKET_ID, memberId),
+                createdAt,
+                updatedAt
+        );
+    }
+
+    private void expectMyPredictionNotFound(long memberId) throws Exception {
+        mockMvc.perform(get("/api/v1/markets/{marketId}/predictions/me", MARKET_ID)
+                        .header("X-Member-Id", memberId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("MARKET_PREDICTION_NOT_FOUND"));
+    }
+
+    private void assertPredictionStateWithoutPriceConfirmation(String predictionStatus, String failReason) {
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_prediction", String.class))
+                .isEqualTo(predictionStatus);
+        assertThat(jdbcTemplate.queryForObject("SELECT fail_reason FROM market_prediction", String.class))
+                .isEqualTo(failReason);
+        assertThat(jdbcTemplate.queryForObject("SELECT price_snapshot FROM market_prediction", String.class))
+                .isNull();
+        assertThat(jdbcTemplate.queryForObject("SELECT contract_quantity FROM market_prediction", String.class))
+                .isNull();
+        assertThat(jdbcTemplate.queryForObject("SELECT total_pool FROM market", String.class)).isEqualTo("0.00");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT real_pool_amount FROM market_option ORDER BY id",
+                String.class
+        )).containsExactly("0.00", "0.00");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT total_contract_quantity FROM market_option ORDER BY id",
+                String.class
+        )).containsExactly("0.00000000", "0.00000000");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT current_price FROM market_option ORDER BY id",
+                String.class
+        )).containsExactly("0.50000000", "0.50000000");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_price_history", Integer.class))
+                .isZero();
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder predictionRequest(

@@ -5,10 +5,13 @@ import com.todongsan.marketservice.market.dto.request.CreatePredictionRequest;
 import com.todongsan.marketservice.market.dto.response.CreatePredictionResponse;
 import com.todongsan.marketservice.market.dto.response.MarketDetailResponse;
 import com.todongsan.marketservice.market.dto.response.MarketListResponse;
+import com.todongsan.marketservice.market.dto.response.MarketPredictionResponse;
 import com.todongsan.marketservice.market.dto.response.MarketPriceHistoryResponse;
+import com.todongsan.marketservice.market.service.MarketPredictionQueryService;
 import com.todongsan.marketservice.market.service.MarketPredictionService;
 import com.todongsan.marketservice.market.service.MarketService;
 import com.todongsan.marketservice.market.type.MarketStatus;
+import com.todongsan.marketservice.market.type.PredictionStatus;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MarketController {
 
     private final MarketService marketService;
+    private final MarketPredictionQueryService marketPredictionQueryService;
     private final MarketPredictionService marketPredictionService;
 
     @GetMapping
@@ -65,11 +69,23 @@ public class MarketController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody CreatePredictionRequest request
     ) {
-        return ApiResponse.ok(marketPredictionService.createPrediction(
+        CreatePredictionResponse response = marketPredictionService.createPrediction(
                 marketId,
                 memberId,
                 idempotencyKey,
                 request
-        ));
+        );
+        if (response.getStatus() == PredictionStatus.POINT_UNKNOWN) {
+            return ApiResponse.ok(response, "예측 참여 처리 상태를 확인 중입니다.");
+        }
+        return ApiResponse.ok(response);
+    }
+
+    @GetMapping("/{marketId}/predictions/me")
+    public ApiResponse<MarketPredictionResponse> getMyPrediction(
+            @PathVariable @Min(1) long marketId,
+            @RequestHeader(value = "X-Member-Id", required = false) Long memberId
+    ) {
+        return ApiResponse.ok(marketPredictionQueryService.getMyPrediction(marketId, memberId));
     }
 }
