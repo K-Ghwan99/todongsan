@@ -3,7 +3,11 @@ package com.todongsan.insightreputation.reputation.service;
 import com.todongsan.insightreputation.global.exception.CustomException;
 import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
 import com.todongsan.insightreputation.reputation.exception.ResidenceChangeCooldownException;
+import com.todongsan.insightreputation.reputation.dto.request.ActivityUpdateRequest;
+import com.todongsan.insightreputation.reputation.dto.request.PredictionUpdateRequest;
+import com.todongsan.insightreputation.reputation.dto.response.ActivityUpdateResponse;
 import com.todongsan.insightreputation.reputation.dto.response.MyReputationResponse;
+import com.todongsan.insightreputation.reputation.dto.response.PredictionUpdateResponse;
 import com.todongsan.insightreputation.reputation.dto.response.ReputationResponse;
 import com.todongsan.insightreputation.reputation.entity.Reputation;
 import com.todongsan.insightreputation.reputation.repository.ReputationRepository;
@@ -91,5 +95,99 @@ public class ReputationService {
     public void updatePredictionStats(Long memberId, Integer count, Integer correct) {
         Reputation reputation = getReputationByMemberId(memberId);
         reputation.updatePredictionStats(count, correct);
+    }
+
+    /**
+     * 활동 점수 업데이트 (내부 API)
+     * 타 서비스(Battle)에서 호출되는 내부 연계 API
+     * 
+     * @param request 활동 업데이트 요청
+     * @return 활동 업데이트 응답
+     */
+    @Transactional
+    public ActivityUpdateResponse updateActivity(ActivityUpdateRequest request) {
+        Reputation reputation = reputationRepository.findByMemberId(request.getMemberId())
+                .orElseThrow(() -> new CustomException(ErrorCode.RESOURCE_NOT_FOUND));
+
+        // 활동 타입별 점수 가져오기
+        int scoreToAdd = getActivityScore(request.getActivityType());
+        
+        // 활동 점수 증가
+        reputation.updateActivityScore(scoreToAdd);
+
+        // 거주지역 일치 여부 확인 및 activityCount 처리
+        boolean isResidenceMatched = isResidenceMatched(reputation, request.getRegion());
+        boolean shouldIncrementCount = isResidenceMatched && 
+                                     reputation.getActivityConfirmedAt() == null;
+
+        if (shouldIncrementCount) {
+            reputation.incrementActivityCount();
+        }
+
+        return ActivityUpdateResponse.builder()
+                .memberId(reputation.getMemberId())
+                .activityScore(reputation.getActivityScore())
+                .activityCount(reputation.getActivityCount())
+                .activityConfirmed(reputation.getActivityConfirmedAt() != null)
+                .build();
+    }
+
+    /**
+     * 예측 정확도 업데이트 (내부 API)
+     * 타 서비스(Market)에서 호출되는 내부 연계 API
+     * 
+     * @param request 예측 업데이트 요청
+     * @return 예측 업데이트 응답
+     */
+    @Transactional
+    public PredictionUpdateResponse updatePrediction(PredictionUpdateRequest request) {
+        Reputation reputation = reputationRepository.findByMemberId(request.getMemberId())
+                .orElseThrow(() -> new CustomException(ErrorCode.RESOURCE_NOT_FOUND));
+
+        // 예측 카운트 증가
+        int newPredictionCount = reputation.getPredictionCount() + 1;
+        
+        // 정답일 경우 정답 카운트 증가
+        int newPredictionCorrect = reputation.getPredictionCorrect();
+        if (Boolean.TRUE.equals(request.getIsCorrect())) {
+            newPredictionCorrect += 1;
+        }
+
+        // 정확도 계산 (소수점 버림)
+        double predictionAccuracy = 0.0;
+        if (newPredictionCount > 0) {
+            predictionAccuracy = Math.floor((double) newPredictionCorrect / newPredictionCount * 100 * 100) / 100;
+        }
+
+        // 동일 트랜잭션으로 모든 필드 업데이트
+        reputation.updatePredictionStats(newPredictionCount, newPredictionCorrect);
+        reputation.updatePredictionAccuracy(predictionAccuracy);
+
+        return PredictionUpdateResponse.builder()
+                .memberId(reputation.getMemberId())
+                .predictionCount(newPredictionCount)
+                .predictionCorrect(newPredictionCorrect)
+                .predictionAccuracy(predictionAccuracy)
+                .build();
+    }
+
+    /**
+     * 활동 타입별 점수 반환
+     */
+    private int getActivityScore(String activityType) {
+        return switch (activityType) {
+            case "VOTE" -> 10;
+            case "COMMENT" -> 2;
+            case "BATTLE_APPROVED" -> 20;
+            default -> throw new CustomException(ErrorCode.INVALID_REQUEST);
+        };
+    }
+
+    /**
+     * 거주지역과 활동지역 일치 여부 확인
+     */
+    private boolean isResidenceMatched(Reputation reputation, ActivityUpdateRequest.RegionDto activityRegion) {
+        return reputation.getResidenceSido().equals(activityRegion.getSido()) &&
+               reputation.getResidenceSigu().equals(activityRegion.getSigu());
     }
 }

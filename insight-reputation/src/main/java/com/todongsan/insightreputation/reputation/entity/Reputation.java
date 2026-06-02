@@ -105,4 +105,8 @@ public class Reputation extends BaseEntity {
             }
         }
     }
+
+    public void updatePredictionAccuracy(double accuracy) {
+        this.predictionAccuracy = BigDecimal.valueOf(accuracy);
+    }
 }
