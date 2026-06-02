@@ -2,7 +2,11 @@ package com.todongsan.marketservice.market.repository;
 
 import com.todongsan.marketservice.market.entity.Market;
 import com.todongsan.marketservice.market.entity.MarketOption;
+import com.todongsan.marketservice.market.entity.MarketPrediction;
+import com.todongsan.marketservice.market.entity.MarketPriceHistory;
 import com.todongsan.marketservice.market.type.MarketStatus;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
@@ -36,5 +40,46 @@ public interface MarketMapper {
     long countPriceHistory(
             @Param("marketId") long marketId,
             @Param("optionId") Long optionId
+    );
+
+    void insertMarket(MarketInsertRow market);
+
+    void insertMarketOptions(@Param("options") List<MarketOptionInsertRow> options);
+
+    int activatePendingMarket(
+            @Param("marketId") long marketId,
+            @Param("updatedAt") java.time.LocalDateTime updatedAt
+    );
+
+    MarketOption selectOptionById(@Param("optionId") long optionId);
+
+    MarketPrediction selectPredictionByMarketIdAndMemberId(
+            @Param("marketId") long marketId,
+            @Param("memberId") long memberId
+    );
+
+    MarketPrediction selectPredictionById(@Param("predictionId") long predictionId);
+
+    void insertPrediction(MarketPrediction prediction);
+
+    Market lockMarketById(@Param("marketId") long marketId);
+
+    List<MarketOption> lockOptionsByMarketId(@Param("marketId") long marketId);
+
+    void updateMarketTotalPool(
+            @Param("marketId") long marketId,
+            @Param("pointAmount") BigDecimal pointAmount,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    void updateMarketOptionPoolsAndPrice(MarketOption option);
+
+    void insertPriceHistoryRows(@Param("histories") List<MarketPriceHistory> histories);
+
+    int updatePredictionConfirmed(
+            @Param("predictionId") long predictionId,
+            @Param("priceSnapshot") BigDecimal priceSnapshot,
+            @Param("contractQuantity") BigDecimal contractQuantity,
+            @Param("updatedAt") LocalDateTime updatedAt
     );
 }

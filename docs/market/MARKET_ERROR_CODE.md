@@ -207,6 +207,7 @@ Market DB에는 이미 prediction_id가 있으므로 reference_type/reference_id
 |---|---:|---|---:|---|
 | `MARKET_INVALID_OPTION` | 400 | 선택지 구성이 유효하지 않음 | X | Market 생성/승인 실패 |
 | `MARKET_INVALID_OPTION_RANGE` | 400 | 선택지 범위가 유효하지 않음 | X | Market 생성/승인 실패 |
+| `MARKET_INVALID_FEE_RATE` | 400 | 수수료율이 0 이상 100 이하가 아님 | X | Market 생성 실패 |
 | `MARKET_WINNING_OPTION_NOT_FOUND` | 409 | 정산 결과와 매칭되는 정답 선택지를 찾을 수 없음 | X | 관리자 확인 대상 |
 
 선택지 검증 규칙:
@@ -217,10 +218,40 @@ Market DB에는 이미 prediction_id가 있으므로 reference_type/reference_id
 3. 선택지 범위가 서로 겹치면 안 된다.
 4. 선택지 범위 사이에 빈 구간이 있으면 안 된다.
 5. 경계값 포함 여부가 명확해야 한다.
-6. 실제 정산 값은 반드시 하나의 선택지에만 매칭되어야 한다.
+6. 선택지 범위가 커버하는 값에 대해서는 실제 정산 값이 정확히 하나의 선택지에만 매칭되어야 한다.
+   단, 유한 구간만으로 구성된 Market에서 실제 정산 값이 모든 선택지 범위 밖에 있으면 `MARKET_WINNING_OPTION_NOT_FOUND`로 처리한다.
+```
+
+`MARKET_INVALID_OPTION`에는 다음 선택지 구성 오류도 포함한다.
+
+```text
+- virtualPoolAmount가 0 이하
 ```
 
 ---
+
+`MARKET_INVALID_OPTION_RANGE`에는 다음 열린 구간 오류도 포함한다.
+
+```text
+- rangeMin과 rangeMax가 모두 null
+- rangeMin = null인 시작 열린 구간이 2개 이상
+- rangeMax = null인 종료 열린 구간이 2개 이상
+- rangeMin >= rangeMax
+- 인접 경계값을 두 구간이 모두 포함
+- 인접 경계값을 어느 구간도 포함하지 않음
+- 정렬된 인접 구간 사이에 빈 구간 존재
+```
+
+### 관리자 Market 활성화
+
+`PATCH /api/v1/admin/markets/{marketId}/activate`는 기존 ErrorCode를 재사용한다.
+
+| ErrorCode | HTTP Status | 설명 |
+|---|---:|---|
+| `MARKET_NOT_FOUND` | 404 | 활성화할 Market이 없음 |
+| `MARKET_INVALID_STATUS` | 409 | MarketStatus가 `PENDING`이 아님 |
+| `MARKET_CLOSED` | 409 | `closeAt`이 현재 시각보다 과거이거나 같음 |
+| `MARKET_INVALID_OPTION` | 400 | 선택지가 2개 미만이거나 `initialVirtualLiquidity`가 0 이하 |
 
 ## 8. 포인트 차감 연동 실패 시나리오
 
@@ -483,6 +514,7 @@ public enum MarketErrorCode implements ErrorCode {
 
     MARKET_INVALID_OPTION("MARKET_INVALID_OPTION", "Market 선택지 구성이 유효하지 않습니다.", HttpStatus.BAD_REQUEST),
     MARKET_INVALID_OPTION_RANGE("MARKET_INVALID_OPTION_RANGE", "Market 선택지 범위가 유효하지 않습니다.", HttpStatus.BAD_REQUEST),
+    MARKET_INVALID_FEE_RATE("MARKET_INVALID_FEE_RATE", "Market 수수료율이 유효하지 않습니다.", HttpStatus.BAD_REQUEST),
     MARKET_WINNING_OPTION_NOT_FOUND("MARKET_WINNING_OPTION_NOT_FOUND", "정산 결과와 매칭되는 정답 선택지를 찾을 수 없습니다.", HttpStatus.CONFLICT),
 
     MARKET_SETTLEMENT_DATA_NOT_FOUND("MARKET_SETTLEMENT_DATA_NOT_FOUND", "정산에 필요한 데이터를 찾을 수 없습니다.", HttpStatus.CONFLICT),

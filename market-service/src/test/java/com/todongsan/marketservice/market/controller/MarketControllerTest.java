@@ -25,17 +25,21 @@ class MarketControllerTest {
     @BeforeEach
     void setUp() {
         jdbcTemplate.update("DELETE FROM market_price_history");
+        jdbcTemplate.update("DELETE FROM market_prediction");
         jdbcTemplate.update("DELETE FROM market_option");
         jdbcTemplate.update("DELETE FROM market");
 
         jdbcTemplate.update("""
                 INSERT INTO market (
-                    id, title, description, status, close_at, settle_due_at,
-                    total_pool, created_at, updated_at
+                    id, title, description, category, answer_type, judge_data_source,
+                    judge_criteria, judge_date, status, close_at, settle_due_at,
+                    total_pool, created_by, created_at, updated_at
                 ) VALUES (
                     1, '이번 주 OO구 아파트 가격 변동률은?', '한국부동산원 데이터를 기준으로 정산합니다.',
+                    'PRICE_INDEX', 'NUMERIC_RANGE', '한국부동산원', '공식 데이터 기준',
+                    '2026-06-04',
                     'ACTIVE', '2026-06-01 18:00:00', '2026-06-04 18:00:00',
-                    25000.00, '2026-05-29 15:00:00', '2026-05-29 15:00:00'
+                    25000.00, 1, '2026-05-29 15:00:00', '2026-05-29 15:00:00'
                 )
                 """);
         jdbcTemplate.update("""
@@ -119,11 +123,13 @@ class MarketControllerTest {
     void getPriceHistoryExcludesHistoryRowWhenOptionBelongsToDifferentMarket() throws Exception {
         jdbcTemplate.update("""
                 INSERT INTO market (
-                    id, title, description, status, close_at, settle_due_at,
-                    total_pool, created_at, updated_at
+                    id, title, description, category, answer_type, judge_data_source,
+                    judge_criteria, judge_date, status, close_at, settle_due_at,
+                    total_pool, created_by, created_at, updated_at
                 ) VALUES (
-                    2, '다른 Market', NULL, 'ACTIVE', '2026-06-01 18:00:00', NULL,
-                    0.00, '2026-05-29 15:00:00', '2026-05-29 15:00:00'
+                    2, '다른 Market', NULL, 'PRICE_INDEX', 'YES_NO', '한국부동산원',
+                    '공식 데이터 기준', '2026-06-04', 'ACTIVE', '2026-06-01 18:00:00', NULL,
+                    0.00, 1, '2026-05-29 15:00:00', '2026-05-29 15:00:00'
                 )
                 """);
         jdbcTemplate.update("""
