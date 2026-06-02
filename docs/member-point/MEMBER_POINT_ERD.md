@@ -29,6 +29,8 @@ CREATE TABLE member (
     residence_sido       VARCHAR(50),
     residence_sigu       VARCHAR(50),
     residence_changed_at DATETIME,
+    age_group            VARCHAR(10),                                 -- 연령대 (10대/20대/30대/40대/50대 이상/UNKNOWN)
+    gender               VARCHAR(10),                                 -- 성별 (MALE/FEMALE/UNKNOWN)
     oauth_provider       VARCHAR(20)     NOT NULL,
     oauth_id             VARCHAR(255)    NOT NULL,
     deleted_at           DATETIME,
@@ -100,6 +102,8 @@ erDiagram
         VARCHAR residence_sido
         VARCHAR residence_sigu
         DATETIME residence_changed_at "거주지 변경 쿨다운용"
+        VARCHAR age_group "10대/20대/30대/40대/50대이상/UNKNOWN"
+        VARCHAR gender "MALE/FEMALE/UNKNOWN"
         VARCHAR oauth_provider
         VARCHAR oauth_id
         DATETIME deleted_at
@@ -207,6 +211,8 @@ public enum PointReferenceType {
 | reference_id | reference_type과 함께 사용, 해당 도메인 객체의 ID |
 | request_hash | SHA-256(memberId + type + amount + referenceType + referenceId) |
 | 거주지 변경 | 30일마다 1회 (residence_changed_at으로 추적) |
+| age_group | 카카오 birthyear 기반 계산, 미제공 시 UNKNOWN |
+| gender | 카카오 gender 기반 저장 (male→MALE, female→FEMALE, 미제공→UNKNOWN) |
 | soft delete | deleted_at 설정, 물리 삭제 금지 |
 | 토큰 저장 | access_token, refresh_token 암호화 필수 |
 
@@ -307,3 +313,4 @@ referenceType = INSIGHT_REPORT,    referenceId = 42  → Report 42
 | v5 | `request_hash` 생성 규칙 변경 (referenceType 포함) |
 | v5 | `point_balance` Atomic UPDATE 동시성 제어 정책 추가 |
 | v5 | 탈퇴 회원 정산/환불 허용 정책 추가 |
+| v6 | `member.age_group`, `member.gender` 컬럼 추가 (Insight 배치 조회 응답용) |

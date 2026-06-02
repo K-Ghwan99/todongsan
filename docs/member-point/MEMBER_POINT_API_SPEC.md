@@ -398,7 +398,16 @@ Authorization: Bearer {JWT}
 |---|---|---|---|
 | page | int | N | 페이지 번호 (default: 0) |
 | size | int | N | 페이지 크기 (default: 20) |
-| type | String | N | EARN / SPEND / SETTLE 필터 |
+| type | String | N | 필터 (미입력 시 전체 조회) |
+
+**type 필터 값**
+
+| 값 | 조회 대상 | 설명 |
+|---|---|---|
+| `EARN` | `EARN_*` 전체 | 활동 보상으로 적립된 내역 |
+| `SPEND` | `SPEND_*` 전체 | 차감된 내역 |
+| `SETTLE` | `SETTLE_*` 전체 | Market 정산 보상 내역 |
+| `REFUND` | `REFUND_*` 전체 | 환불 내역 (Market 무효 환불, AI 리포트 생성 실패 환불) |
 
 **Response 200**
 ```json
