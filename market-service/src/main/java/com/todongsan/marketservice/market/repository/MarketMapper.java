@@ -59,9 +59,23 @@ public interface MarketMapper {
             @Param("memberId") long memberId
     );
 
+    MarketPrediction lockPredictionByMarketIdAndMemberId(
+            @Param("marketId") long marketId,
+            @Param("memberId") long memberId
+    );
+
     MarketPrediction selectPredictionById(@Param("predictionId") long predictionId);
 
     void insertPrediction(MarketPrediction prediction);
+
+    int retryFailedPrediction(
+            @Param("predictionId") long predictionId,
+            @Param("optionId") long optionId,
+            @Param("pointAmount") BigDecimal pointAmount,
+            @Param("pointSpendIdempotencyKey") String pointSpendIdempotencyKey,
+            @Param("attemptNo") int attemptNo,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
 
     Market lockMarketById(@Param("marketId") long marketId);
 

@@ -232,6 +232,7 @@ CREATE TABLE market_option (
 사용자의 예측 참여 기록을 저장한다.
 
 `POINT_PENDING` 상태로 먼저 생성된 뒤, Member-Point 포인트 차감 성공 후 가격 확정 트랜잭션에서 `price_snapshot`, `contract_quantity`가 확정된다.
+명확한 실패(`FAILED`) 후 재시도할 때는 같은 row를 재사용하고 `attempt_no`를 증가시킨다.
 
 ```sql
 CREATE TABLE market_prediction (
@@ -262,7 +263,10 @@ CREATE TABLE market_prediction (
 
     point_spend_idempotency_key             VARCHAR(150)    NOT NULL UNIQUE,
     -- Member-Point SPEND_MARKET 차감 요청 멱등성 키
-    -- MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}
+    -- MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}:attempt:{attemptNo}
+
+    attempt_no                              INT             NOT NULL DEFAULT 1,
+    -- FAILED 재시도 횟수 식별값. 최초 요청은 1
 
     settled_amount                          DECIMAL(10,2),
     refund_amount                           DECIMAL(10,2),
@@ -637,6 +641,7 @@ erDiagram
         decimal expected_multiplier_snapshot
         varchar status "POINT_PENDING, CONFIRMED, FAILED, POINT_UNKNOWN, SETTLED, REFUND_PENDING, REFUND_UNKNOWN, REFUNDED"
         varchar point_spend_idempotency_key UK
+        int attempt_no
         decimal settled_amount
         decimal refund_amount
         varchar fail_reason
@@ -775,6 +780,7 @@ ON market_refund_detail(idempotency_key);
 
 - [ ] `market_prediction.price_snapshot`은 NULL 허용한다.
 - [ ] `market_prediction.contract_quantity`는 NULL 허용한다.
+- [ ] `FAILED` 재시도는 기존 `market_prediction` row를 재사용하고 `attempt_no`를 증가시킨다.
 - [ ] `POINT_PENDING` 생성 트랜잭션과 가격 확정 트랜잭션을 분리한다.
 - [ ] DB 락을 잡은 상태로 Member-Point HTTP API를 호출하지 않는다.
 - [ ] 가격 확정 트랜잭션에서 Market row를 먼저 비관적 락 조회한다.

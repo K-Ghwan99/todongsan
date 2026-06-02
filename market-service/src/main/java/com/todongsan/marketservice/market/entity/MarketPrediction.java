@@ -31,6 +31,7 @@ public class MarketPrediction {
     private PredictionStatus status;
 
     private String pointSpendIdempotencyKey;
+    private Integer attemptNo;
 
     private BigDecimal settledAmount;
     private BigDecimal refundAmount;

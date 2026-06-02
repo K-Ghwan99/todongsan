@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -15,6 +16,7 @@ import com.todongsan.marketservice.market.client.MemberPointClient;
 import com.todongsan.marketservice.market.client.PointSpendCommand;
 import com.todongsan.marketservice.market.client.exception.MemberPointExternalException;
 import com.todongsan.marketservice.market.client.exception.MemberPointTimeoutException;
+import com.todongsan.marketservice.market.client.exception.MemberPointUnavailableException;
 import com.todongsan.marketservice.market.client.exception.PointInsufficientException;
 import com.todongsan.marketservice.market.dto.request.CreatePredictionRequest;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
@@ -40,6 +42,8 @@ class MarketPredictionControllerTest {
     private static final long MARKET_ID = 1L;
     private static final long MEMBER_ID = 10L;
     private static final String IDEMPOTENCY_KEY = "MARKET_PREDICTION_SPEND:market:1:member:10";
+    private static final String FIRST_ATTEMPT_KEY = IDEMPOTENCY_KEY + ":attempt:1";
+    private static final String SECOND_ATTEMPT_KEY = IDEMPOTENCY_KEY + ":attempt:2";
     private static final LocalDateTime PREDICTION_CREATED_AT = LocalDateTime.of(2026, 6, 2, 15, 30, 0);
 
     @Autowired
@@ -90,7 +94,9 @@ class MarketPredictionControllerTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT point_spend_idempotency_key FROM market_prediction",
                 String.class
-        )).isEqualTo(IDEMPOTENCY_KEY);
+        )).isEqualTo(FIRST_ATTEMPT_KEY);
+        assertThat(jdbcTemplate.queryForObject("SELECT attempt_no FROM market_prediction", Integer.class))
+                .isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT total_pool FROM market", String.class)).isEqualTo("100.00");
         assertThat(jdbcTemplate.queryForList(
                 "SELECT real_pool_amount FROM market_option ORDER BY id",
@@ -123,7 +129,7 @@ class MarketPredictionControllerTest {
                 new BigDecimal("100.00"),
                 "MARKET_PREDICTION",
                 predictionId,
-                IDEMPOTENCY_KEY
+                FIRST_ATTEMPT_KEY
         ));
     }
 
@@ -151,6 +157,16 @@ class MarketPredictionControllerTest {
                 String.class,
                 prediction.getId()
         )).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT point_spend_idempotency_key FROM market_prediction WHERE id = ?",
+                String.class,
+                prediction.getId()
+        )).isEqualTo(FIRST_ATTEMPT_KEY);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT attempt_no FROM market_prediction WHERE id = ?",
+                Integer.class,
+                prediction.getId()
+        )).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_price_history", Integer.class))
                 .isZero();
     }
@@ -168,6 +184,109 @@ class MarketPredictionControllerTest {
                 .andExpect(jsonPath("$.errorCode").value("POINT_INSUFFICIENT"));
 
         assertPredictionStateWithoutPriceConfirmation("FAILED", "POINT_INSUFFICIENT");
+    }
+
+    @Test
+    void createPredictionRetriesFailedPredictionWithSameIdAndNextAttemptKey() throws Exception {
+        insertActiveMarketWithOptions();
+        doThrow(new PointInsufficientException("POINT_INSUFFICIENT"))
+                .doNothing()
+                .when(memberPointClient)
+                .spend(any(PointSpendCommand.class));
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("POINT_INSUFFICIENT"));
+        assertPredictionStateWithoutPriceConfirmation("FAILED", "POINT_INSUFFICIENT");
+        Long predictionId = jdbcTemplate.queryForObject("SELECT id FROM market_prediction", Long.class);
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.predictionId").value(predictionId))
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_prediction", Integer.class))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT attempt_no FROM market_prediction", Integer.class))
+                .isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT point_spend_idempotency_key FROM market_prediction",
+                String.class
+        )).isEqualTo(SECOND_ATTEMPT_KEY);
+        assertThat(jdbcTemplate.queryForObject("SELECT total_pool FROM market", String.class))
+                .isEqualTo("100.00");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_price_history", Integer.class))
+                .isEqualTo(2);
+
+        ArgumentCaptor<PointSpendCommand> commandCaptor = ArgumentCaptor.forClass(PointSpendCommand.class);
+        verify(memberPointClient, times(2)).spend(commandCaptor.capture());
+        assertThat(commandCaptor.getAllValues())
+                .extracting(PointSpendCommand::referenceId)
+                .containsExactly(predictionId, predictionId);
+        assertThat(commandCaptor.getAllValues())
+                .extracting(PointSpendCommand::idempotencyKey)
+                .containsExactly(FIRST_ATTEMPT_KEY, SECOND_ATTEMPT_KEY);
+    }
+
+    @Test
+    void createPredictionRetriesFailedPredictionWithChangedOptionAndAmount() throws Exception {
+        insertActiveMarketWithOptions();
+        doThrow(new PointInsufficientException("POINT_INSUFFICIENT"))
+                .doNothing()
+                .when(memberPointClient)
+                .spend(any(PointSpendCommand.class));
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isConflict());
+        Long predictionId = jdbcTemplate.queryForObject("SELECT id FROM market_prediction", Long.class);
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 2L, "300.00"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.predictionId").value(predictionId))
+                .andExpect(jsonPath("$.data.selectedOptionId").value(2))
+                .andExpect(jsonPath("$.data.pointAmount").value("300.00"))
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT option_id FROM market_prediction", Long.class))
+                .isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject("SELECT point_amount FROM market_prediction", String.class))
+                .isEqualTo("300.00");
+        assertThat(jdbcTemplate.queryForObject("SELECT attempt_no FROM market_prediction", Integer.class))
+                .isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT point_spend_idempotency_key FROM market_prediction",
+                String.class
+        )).isEqualTo(SECOND_ATTEMPT_KEY);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT real_pool_amount FROM market_option ORDER BY id",
+                String.class
+        )).containsExactly("0.00", "300.00");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_price_history", Integer.class))
+                .isEqualTo(2);
+    }
+
+    @Test
+    void createPredictionRejectsFailedRetryAfterMarketClose() throws Exception {
+        insertActiveMarketWithOptions();
+        doThrow(new PointInsufficientException("POINT_INSUFFICIENT"))
+                .when(memberPointClient)
+                .spend(any(PointSpendCommand.class));
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isConflict());
+        jdbcTemplate.update("UPDATE market SET close_at = ? WHERE id = ?", LocalDateTime.now().minusSeconds(1), MARKET_ID);
+
+        expectPredictionError(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 2L, "300.00", 409, "MARKET_CLOSED");
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_prediction", String.class))
+                .isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForObject("SELECT attempt_no FROM market_prediction", Integer.class))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT point_spend_idempotency_key FROM market_prediction",
+                String.class
+        )).isEqualTo(FIRST_ATTEMPT_KEY);
+        verify(memberPointClient).spend(any(PointSpendCommand.class));
     }
 
     @Test
@@ -196,6 +315,21 @@ class MarketPredictionControllerTest {
     }
 
     @Test
+    void createPredictionRejectsRetryWhilePointStatusIsUnknown() throws Exception {
+        insertActiveMarketWithOptions();
+        doThrow(new MemberPointTimeoutException("MEMBER_POINT_TIMEOUT"))
+                .when(memberPointClient)
+                .spend(any(PointSpendCommand.class));
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("POINT_UNKNOWN"));
+
+        expectPredictionError(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 2L, "300.00", 409, "MARKET_ALREADY_PREDICTED");
+        verify(memberPointClient).spend(any(PointSpendCommand.class));
+    }
+
+    @Test
     void createPredictionMarksPredictionUnknownWhenPointServiceReturnsExternalError() throws Exception {
         insertActiveMarketWithOptions();
         doThrow(new MemberPointExternalException("MEMBER_POINT_EXTERNAL_ERROR"))
@@ -209,6 +343,22 @@ class MarketPredictionControllerTest {
                 .andExpect(jsonPath("$.data.contractQuantity").value(nullValue()));
 
         assertPredictionStateWithoutPriceConfirmation("POINT_UNKNOWN", "MEMBER_POINT_EXTERNAL_ERROR");
+    }
+
+    @Test
+    void createPredictionMarksPredictionUnknownWhenPointServiceIsUnavailable() throws Exception {
+        insertActiveMarketWithOptions();
+        doThrow(new MemberPointUnavailableException("MEMBER_POINT_UNAVAILABLE"))
+                .when(memberPointClient)
+                .spend(any(PointSpendCommand.class));
+
+        mockMvc.perform(predictionRequest(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("POINT_UNKNOWN"))
+                .andExpect(jsonPath("$.data.priceSnapshot").value(nullValue()))
+                .andExpect(jsonPath("$.data.contractQuantity").value(nullValue()));
+
+        assertPredictionStateWithoutPriceConfirmation("POINT_UNKNOWN", "MEMBER_POINT_UNAVAILABLE");
     }
 
     @Test
@@ -500,7 +650,7 @@ class MarketPredictionControllerTest {
                 priceSnapshot,
                 contractQuantity,
                 predictionStatus,
-                "MARKET_PREDICTION_SPEND:market:%d:member:%d".formatted(MARKET_ID, memberId),
+                "MARKET_PREDICTION_SPEND:market:%d:member:%d:attempt:1".formatted(MARKET_ID, memberId),
                 createdAt,
                 updatedAt
         );
@@ -522,6 +672,12 @@ class MarketPredictionControllerTest {
                 .isNull();
         assertThat(jdbcTemplate.queryForObject("SELECT contract_quantity FROM market_prediction", String.class))
                 .isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT point_spend_idempotency_key FROM market_prediction",
+                String.class
+        )).isEqualTo(FIRST_ATTEMPT_KEY);
+        assertThat(jdbcTemplate.queryForObject("SELECT attempt_no FROM market_prediction", Integer.class))
+                .isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT total_pool FROM market", String.class)).isEqualTo("0.00");
         assertThat(jdbcTemplate.queryForList(
                 "SELECT real_pool_amount FROM market_option ORDER BY id",

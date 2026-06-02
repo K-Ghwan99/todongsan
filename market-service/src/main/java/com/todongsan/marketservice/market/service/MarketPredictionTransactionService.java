@@ -44,21 +44,52 @@ public class MarketPredictionTransactionService {
         validateMarketForPrediction(market, now);
         MarketOption option = getMarketOption(marketId, request.getMarketOptionId());
         validatePointAmount(request.getPointAmount());
-        if (marketMapper.selectPredictionByMarketIdAndMemberId(marketId, memberId) != null) {
-            throw new CustomException(MarketErrorCode.MARKET_ALREADY_PREDICTED);
+        MarketPrediction prediction = marketMapper.lockPredictionByMarketIdAndMemberId(marketId, memberId);
+        if (prediction != null) {
+            return retryFailedPrediction(prediction, option, request, idempotencyKey, now);
         }
 
-        MarketPrediction prediction = new MarketPrediction();
+        prediction = new MarketPrediction();
         prediction.setMarketId(marketId);
         prediction.setOptionId(option.getId());
         prediction.setMemberId(memberId);
         prediction.setPointAmount(request.getPointAmount());
         prediction.setStatus(PredictionStatus.POINT_PENDING);
-        prediction.setPointSpendIdempotencyKey(idempotencyKey);
+        prediction.setAttemptNo(1);
+        prediction.setPointSpendIdempotencyKey(pointSpendIdempotencyKey(idempotencyKey, prediction.getAttemptNo()));
         prediction.setCreatedAt(now);
         prediction.setUpdatedAt(now);
         marketMapper.insertPrediction(prediction);
         return prediction;
+    }
+
+    private MarketPrediction retryFailedPrediction(
+            MarketPrediction prediction,
+            MarketOption option,
+            CreatePredictionRequest request,
+            String idempotencyKey,
+            LocalDateTime now
+    ) {
+        if (prediction.getStatus() != PredictionStatus.FAILED) {
+            throw new CustomException(MarketErrorCode.MARKET_ALREADY_PREDICTED);
+        }
+        int nextAttemptNo = prediction.getAttemptNo() + 1;
+        int updatedRows = marketMapper.retryFailedPrediction(
+                prediction.getId(),
+                option.getId(),
+                request.getPointAmount(),
+                pointSpendIdempotencyKey(idempotencyKey, nextAttemptNo),
+                nextAttemptNo,
+                now
+        );
+        if (updatedRows != 1) {
+            throw new CustomException(MarketErrorCode.MARKET_ALREADY_PREDICTED);
+        }
+        return marketMapper.selectPredictionById(prediction.getId());
+    }
+
+    private String pointSpendIdempotencyKey(String idempotencyKey, int attemptNo) {
+        return "%s:attempt:%d".formatted(idempotencyKey, attemptNo);
     }
 
     @Transactional

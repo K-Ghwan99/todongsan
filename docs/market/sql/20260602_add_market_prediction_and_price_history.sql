@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS market_prediction (
     expected_multiplier_snapshot            DECIMAL(18,8),
     status                                  VARCHAR(30)     NOT NULL DEFAULT 'POINT_PENDING',
     point_spend_idempotency_key             VARCHAR(150)    NOT NULL UNIQUE,
+    attempt_no                              INT             NOT NULL DEFAULT 1,
     settled_amount                          DECIMAL(10,2),
     refund_amount                           DECIMAL(10,2),
     fail_reason                             VARCHAR(255),
