@@ -1,0 +1,32 @@
+package com.todongsan.battle_service.battle.dto.request;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
+
+@Getter
+@NoArgsConstructor
+public class BattleCreateRequest {
+
+    @NotBlank
+    @Size(max = 255)
+    private String title;
+
+    @NotBlank
+    @Size(max = 100)
+    private String optionA;
+
+    @NotBlank
+    @Size(max = 100)
+    private String optionB;
+
+    @NotNull
+    private LocalDateTime startAt;
+
+    @NotNull
+    private LocalDateTime endAt;
+}
