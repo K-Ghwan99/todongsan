@@ -23,6 +23,15 @@ public class ApiResponse<T> {
                 .build();
     }
 
+    public static <T> ApiResponse<T> ok(T data, String message) {
+        return ApiResponse.<T>builder()
+                .success(true)
+                .message(message)
+                .data(data)
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
     public static ApiResponse<Void> fail(ErrorCode errorCode) {
         return ApiResponse.<Void>builder()
                 .success(false)

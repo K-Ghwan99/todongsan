@@ -249,6 +249,14 @@
           AND member_id = #{memberId}
     </select>
 
+    <select id="lockPredictionByMarketIdAndMemberId" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND member_id = #{memberId}
+        FOR UPDATE
+    </select>
+
     <select id="selectPredictionById" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
         SELECT *
         FROM market_prediction
@@ -263,6 +271,7 @@
             point_amount,
             status,
             point_spend_idempotency_key,
+            attempt_no,
             created_at,
             updated_at
         ) VALUES (
@@ -272,10 +281,28 @@
             #{pointAmount},
             #{status},
             #{pointSpendIdempotencyKey},
+            #{attemptNo},
             #{createdAt},
             #{updatedAt}
         )
     </insert>
+
+    <update id="retryFailedPrediction">
+        UPDATE market_prediction
+        SET option_id = #{optionId},
+            point_amount = #{pointAmount},
+            price_snapshot = NULL,
+            contract_quantity = NULL,
+            expected_payout_per_contract_snapshot = NULL,
+            expected_multiplier_snapshot = NULL,
+            status = 'POINT_PENDING',
+            point_spend_idempotency_key = #{pointSpendIdempotencyKey},
+            attempt_no = #{attemptNo},
+            fail_reason = NULL,
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'FAILED'
+    </update>
 
     <select id="lockMarketById" resultType="com.todongsan.marketservice.market.entity.Market">
         SELECT *
@@ -350,6 +377,15 @@
         SET price_snapshot = #{priceSnapshot},
             contract_quantity = #{contractQuantity},
             status = 'CONFIRMED',
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'POINT_PENDING'
+    </update>
+
+    <update id="updatePendingPredictionStatus">
+        UPDATE market_prediction
+        SET status = #{status},
+            fail_reason = #{failReason},
             updated_at = #{updatedAt}
         WHERE id = #{predictionId}
           AND status = 'POINT_PENDING'

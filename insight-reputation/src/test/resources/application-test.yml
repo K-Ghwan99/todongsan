@@ -1,0 +1,36 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+    show-sql: false
+  sql:
+    init:
+      mode: never
+
+server:
+  port: 0
+
+logging:
+  level:
+    org.springframework.web: INFO
+    org.hibernate.SQL: INFO
+    com.todongsan.insightreputation: DEBUG
+    wiremock: DEBUG
+
+client:
+  battle:
+    base-url: http://localhost:8089
+  member-point:
+    base-url: http://localhost:8089
+
+claude:
+  api:
+    key: test-key
+    url: http://localhost:8089/claude
+    model: test-model

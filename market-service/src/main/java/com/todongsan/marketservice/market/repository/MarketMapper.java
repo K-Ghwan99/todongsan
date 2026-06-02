@@ -5,6 +5,7 @@ import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
 import com.todongsan.marketservice.market.entity.MarketPriceHistory;
 import com.todongsan.marketservice.market.type.MarketStatus;
+import com.todongsan.marketservice.market.type.PredictionStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -58,9 +59,23 @@ public interface MarketMapper {
             @Param("memberId") long memberId
     );
 
+    MarketPrediction lockPredictionByMarketIdAndMemberId(
+            @Param("marketId") long marketId,
+            @Param("memberId") long memberId
+    );
+
     MarketPrediction selectPredictionById(@Param("predictionId") long predictionId);
 
     void insertPrediction(MarketPrediction prediction);
+
+    int retryFailedPrediction(
+            @Param("predictionId") long predictionId,
+            @Param("optionId") long optionId,
+            @Param("pointAmount") BigDecimal pointAmount,
+            @Param("pointSpendIdempotencyKey") String pointSpendIdempotencyKey,
+            @Param("attemptNo") int attemptNo,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
 
     Market lockMarketById(@Param("marketId") long marketId);
 
@@ -80,6 +95,13 @@ public interface MarketMapper {
             @Param("predictionId") long predictionId,
             @Param("priceSnapshot") BigDecimal priceSnapshot,
             @Param("contractQuantity") BigDecimal contractQuantity,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updatePendingPredictionStatus(
+            @Param("predictionId") long predictionId,
+            @Param("status") PredictionStatus status,
+            @Param("failReason") String failReason,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 }

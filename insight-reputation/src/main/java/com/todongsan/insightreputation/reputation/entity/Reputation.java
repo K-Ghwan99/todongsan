@@ -59,7 +59,8 @@ public class Reputation extends BaseEntity {
         this.residenceSido = residenceSido;
         this.residenceSigu = residenceSigu;
         this.residenceDeclaredAt = LocalDateTime.now();
-        this.residenceChangedAt = LocalDateTime.now();
+        // 최초 선언 시 residenceChangedAt은 null (작업지시문 74라인)
+        this.residenceChangedAt = null;
         this.activityScore = 0;
         this.predictionCount = 0;
         this.predictionCorrect = 0;
@@ -68,7 +69,7 @@ public class Reputation extends BaseEntity {
     }
 
     public void updateActivityScore(Integer score) {
-        this.activityScore = score;
+        this.activityScore += score;  // 누적 방식으로 변경
     }
 
     public void updatePredictionStats(Integer count, Integer correct) {
@@ -76,9 +77,13 @@ public class Reputation extends BaseEntity {
         this.predictionCorrect = correct;
         
         if (count > 0) {
-            this.predictionAccuracy = new BigDecimal(correct)
+            // CLAUDE.md 요구사항: FLOOR(correct/count * 100 * 100) / 100 (버림)
+            BigDecimal accuracy = new BigDecimal(correct)
                     .multiply(new BigDecimal("100"))
-                    .divide(new BigDecimal(count), 2, BigDecimal.ROUND_DOWN);
+                    .multiply(new BigDecimal("100"))
+                    .divide(new BigDecimal(count), 0, BigDecimal.ROUND_DOWN)
+                    .divide(new BigDecimal("100"), 2, BigDecimal.ROUND_DOWN);
+            this.predictionAccuracy = accuracy;
         } else {
             this.predictionAccuracy = BigDecimal.ZERO;
         }
@@ -99,5 +104,9 @@ public class Reputation extends BaseEntity {
                 this.activityConfirmedAt = LocalDateTime.now();
             }
         }
+    }
+
+    public void updatePredictionAccuracy(double accuracy) {
+        this.predictionAccuracy = BigDecimal.valueOf(accuracy);
     }
 }

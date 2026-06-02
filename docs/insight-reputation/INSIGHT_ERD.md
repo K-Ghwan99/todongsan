@@ -1,18 +1,21 @@
-# docs/insight-reputation/ERD_ver4.md
+# docs/insight-reputation/ERD_ver5.md
 
 > Insight-Reputation Service의 데이터베이스 설계 문서  
-> v4: source_region_id NOT NULL 추가, insight_report processing_started_at/retry_count 추가, public_data_snapshot numeric_value/region_fullpath 컬럼 승격, activity_count 상한 처리 명시, 방문 인증 이력 정책 명시
+> v5: public_data_snapshot에 itm_id/itm_nm 컬럼 추가, UNIQUE KEY에 itm_id 포함
 
 ---
 
-## 변경 내역 (ERD_ver3.md → ERD_ver4.md)
+## 변경 내역 (ERD_ver4.md → ERD_ver5.md)
 
 | 테이블 | 변경 내용 |
 |---|---|
-| `public_data_snapshot` | `source_region_id NOT NULL` 추가. `numeric_value DECIMAL(20,10)`, `region_fullpath VARCHAR(200)` 컬럼 승격 추가 |
-| `insight_report` | `processing_started_at DATETIME`, `retry_count TINYINT NOT NULL DEFAULT 0` 추가 |
-| `reputation` | `activity_count` 상한 처리 정책 비즈니스 제약에 명시 |
-| `visit_certification` | 방문 인증 이력 정책 비즈니스 제약에 명시 |
+| `public_data_snapshot` | `itm_id VARCHAR(20) NOT NULL` 추가. `itm_nm VARCHAR(100)` 추가. UNIQUE KEY에 `itm_id` 포함 |
+
+**변경 배경:**  
+R-ONE API는 동일 지역 + 날짜에 항목을 여러 개 반환한다 (지수, 변동률 등).  
+기존 UNIQUE KEY `(source, data_type, reference_date, source_region_id)`만으로는 항목 구분이 불가능하여  
+배치 재실행 시 어떤 항목이 저장됐는지 보장할 수 없었다.  
+`itm_id`를 UNIQUE KEY에 포함시켜 항목 단위로 정확하게 식별한다.
 
 ---
 
@@ -118,45 +121,70 @@ CREATE TABLE public_data_snapshot (
     region_sido         VARCHAR(50),                        -- 시/도 파싱값. CLS_FULLNM 첫 번째 값 (예: 서울, 경기). 전국 단위면 '전국'
     source_region_id    VARCHAR(50)     NOT NULL,           -- 소스별 지역 고유 코드. REB: cls_id, MOLIT: 법정동코드 앞 5자리. 전국 단위: '50001'
     region_fullpath     VARCHAR(200),                       -- 지역 전체 경로. REB: cls_fullnm (예: 서울>강북지역>도심권>종로구). LIKE 쿼리용 인덱스 적용
+    itm_id              VARCHAR(20)     NOT NULL,           -- 항목 ID. REB: itm_id (예: 10001=지수, 10002=변동률). 소스별 항목 구분
+    itm_nm              VARCHAR(100),                       -- 항목명. REB: itm_nm (예: 지수, 변동률). 가독성용
     numeric_value       DECIMAL(20,10),                     -- 핵심 수치값. REB: dta_val. NULL 허용 (비수치 데이터 소스 대비)
     raw_data            JSON            NOT NULL,           -- API 원본 응답 전체. 소스별 구조 상이
     collected_at        DATETIME        NOT NULL,           -- 수집 시점
     created_at          DATETIME        NOT NULL,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_snapshot (source, data_type, reference_date, source_region_id),
+    UNIQUE KEY uq_snapshot (source, data_type, reference_date, source_region_id, itm_id),
     INDEX idx_source_type_date (source, data_type, reference_date),
     INDEX idx_region_sido (region_sido),
-    INDEX idx_region_fullpath (region_fullpath(100))        -- prefix 인덱스. LIKE '서울%' 쿼리 최적화
+    INDEX idx_region_fullpath (region_fullpath(100)),       -- prefix 인덱스. LIKE '서울%' 쿼리 최적화
+    INDEX idx_itm_id (itm_id)                              -- 항목별 필터링 조회용
 );
 ```
 
-> **REB 소스 적재 예시**
+> **REB 소스 적재 예시 (지수)**
 > ```
 > source           = 'REB'
 > data_type        = 'PRICE_INDEX'
 > reference_date   = '2025-05-12'
-> region_sido      = '서울'               ← cls_fullnm 첫 번째 값 파싱
-> source_region_id = '50043'              ← cls_id
-> region_fullpath  = '서울>강북지역>도심권>종로구'  ← cls_fullnm 그대로
-> numeric_value    = 95.2273702404922     ← dta_val
+> region_sido      = '서울'
+> source_region_id = '50043'
+> region_fullpath  = '서울>강북지역>도심권>종로구'
+> itm_id           = '10001'              ← ITM_ID
+> itm_nm           = '지수'               ← ITM_NM
+> numeric_value    = 95.2273702404922     ← DTA_VAL
 > raw_data         = { 원본 JSON 전체 }
 > ```
 
-> **변동률 계산 쿼리 예시**
+> **REB 소스 적재 예시 (변동률)**
+> ```
+> source           = 'REB'
+> data_type        = 'PRICE_INDEX'
+> reference_date   = '2025-05-12'
+> region_sido      = '서울'
+> source_region_id = '50043'
+> region_fullpath  = '서울>강북지역>도심권>종로구'
+> itm_id           = '10002'              ← ITM_ID
+> itm_nm           = '변동률'             ← ITM_NM
+> numeric_value    = 0.03                 ← DTA_VAL
+> raw_data         = { 원본 JSON 전체 }
+> ```
+
+> **AI 분석용 조회 쿼리 예시 (지수 + 변동률 조합)**
 > ```sql
-> SELECT this_week.source_region_id,
->        this_week.region_fullpath,
->        this_week.numeric_value - last_week.numeric_value AS diff
-> FROM   public_data_snapshot this_week
-> JOIN   public_data_snapshot last_week
->   ON   this_week.source = last_week.source
->   AND  this_week.data_type = last_week.data_type
->   AND  this_week.source_region_id = last_week.source_region_id
-> WHERE  this_week.reference_date = '2025-05-12'
->   AND  last_week.reference_date = '2025-05-05'
->   AND  this_week.source = 'REB'
->   AND  this_week.data_type = 'PRICE_INDEX'
->   AND  this_week.region_fullpath LIKE '서울%';
+> SELECT
+>     idx.source_region_id,
+>     idx.region_fullpath,
+>     idx.reference_date,
+>     idx.numeric_value  AS price_index,
+>     chg.numeric_value  AS change_rate
+> FROM   public_data_snapshot idx
+> LEFT JOIN public_data_snapshot chg
+>   ON   idx.source = chg.source
+>   AND  idx.data_type = chg.data_type
+>   AND  idx.source_region_id = chg.source_region_id
+>   AND  idx.reference_date = chg.reference_date
+>   AND  chg.itm_id = '10002'
+> WHERE  idx.source = 'REB'
+>   AND  idx.data_type = 'PRICE_INDEX'
+>   AND  idx.itm_id = '10001'
+>   AND  idx.reference_date >= DATE_SUB('2025-05-12', INTERVAL 4 WEEK)
+>   AND  idx.region_fullpath LIKE '서울%'
+> ORDER BY idx.reference_date DESC;
 > ```
 
 ---
@@ -221,6 +249,8 @@ erDiagram
         VARCHAR region_sido "시/도 파싱값"
         VARCHAR source_region_id "소스별 지역 고유 코드 NOT NULL"
         VARCHAR region_fullpath "지역 전체 경로. LIKE 쿼리용"
+        VARCHAR itm_id "항목 ID NOT NULL. UNIQUE KEY 구성"
+        VARCHAR itm_nm "항목명. 지수/변동률 등"
         DECIMAL numeric_value "핵심 수치값. NULL 허용"
         JSON raw_data "API 원본 응답"
         DATETIME collected_at
@@ -306,10 +336,12 @@ public enum PublicDataType {
 [배치 스케줄러] (주간/월간 주기)
   → R-ONE API 호출 (STATBL_ID별 페이지네이션)
   → public_data_snapshot INSERT (ON DUPLICATE KEY UPDATE)
+  → itm_id별로 지수/변동률 각각 적재
 
 [AI 분석 트리거] (Battle 종료 / Market 정산)
   → insight_report PENDING INSERT
-  → public_data_snapshot 조회 (region_fullpath/region_sido 필터링, numeric_value 활용)
+  → public_data_snapshot 조회
+      (region_fullpath/region_sido 필터링, itm_id로 지수/변동률 구분)
   → Battle/Market 원본 데이터 조회 (REST)
   → insight_report PROCESSING 업데이트 + processing_started_at 기록
   → Claude API 호출 (수집 데이터 + 원본 데이터 프롬프트 조합)
@@ -329,7 +361,7 @@ MVP에서는 MCP를 직접 구현하지 않으며, Insight-Reputation Service가
 - `reputation.member_id`: UNIQUE 제약 (회원당 1개 Reputation)
 - `visit_certification`: `(member_id, sido, sigu)` UNIQUE (지역당 1건 유지, 재인증 시 UPDATE)
 - `insight_report`: `(type, reference_id)` UNIQUE (중복 리포트 방지)
-- `public_data_snapshot`: `(source, data_type, reference_date, source_region_id)` UNIQUE (배치 재실행 시 `ON DUPLICATE KEY UPDATE numeric_value = VALUES(numeric_value), region_fullpath = VALUES(region_fullpath), raw_data = VALUES(raw_data), collected_at = VALUES(collected_at)`)
+- `public_data_snapshot`: `(source, data_type, reference_date, source_region_id, itm_id)` UNIQUE (배치 재실행 시 `ON DUPLICATE KEY UPDATE numeric_value = VALUES(numeric_value), region_fullpath = VALUES(region_fullpath), itm_nm = VALUES(itm_nm), raw_data = VALUES(raw_data), collected_at = VALUES(collected_at)`)
 
 ### 7-2. 방문 인증 제약
 
@@ -371,7 +403,7 @@ MVP에서는 MCP를 직접 구현하지 않으며, Insight-Reputation Service가
 - REB 월간 데이터: 매월 15일 공표 후 배치 실행
 - 배치 재실행 시 `ON DUPLICATE KEY UPDATE`로 안전 처리 (멱등성 보장)
 - 한 번 적재된 데이터는 삭제하지 않는다 (이력 보존)
-- REB 소스: `region_fullpath = cls_fullnm`, `numeric_value = dta_val`, `source_region_id = cls_id`로 매핑하여 적재
+- REB 소스: `region_fullpath = cls_fullnm`, `numeric_value = dta_val`, `source_region_id = cls_id`, `itm_id = itm_id`, `itm_nm = itm_nm`으로 매핑하여 적재
 
 ### 7-8. AI 분석 제약
 
