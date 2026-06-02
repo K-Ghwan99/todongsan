@@ -40,6 +40,18 @@ public class InsightReportController implements InsightReportControllerDocs {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
     
+    @GetMapping("/battles/{battleId}/report")
+    @Override
+    public ResponseEntity<ApiResponse<InsightReportResponse>> getBattleReport(
+            @PathVariable Long battleId) {
+        
+        log.info("Battle 리포트 조회: battleId={}", battleId);
+        
+        InsightReportResponse response = insightReportService.getBattleReport(battleId);
+        
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
     @GetMapping("/battles/{battleId}/report/status")
     @Override
     public ResponseEntity<ApiResponse<InsightReportStatusResponse>> getBattleReportStatus(

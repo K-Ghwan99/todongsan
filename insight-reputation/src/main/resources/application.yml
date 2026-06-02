@@ -42,3 +42,15 @@ reb:
   api:
     key: ${REB_API_KEY}
     base-url: ${REB_API_BASE_URL}
+
+claude:
+  api:
+    key: ${CLAUDE_API_KEY}
+    url: ${CLAUDE_API_URL}
+    model: ${CLAUDE_MODEL}
+
+client:
+  battle:
+    base-url: ${BATTLE_SERVICE_BASE_URL:http://battle-service}
+  member-point:
+    base-url: ${MEMBER_POINT_SERVICE_BASE_URL:http://member-point-service}

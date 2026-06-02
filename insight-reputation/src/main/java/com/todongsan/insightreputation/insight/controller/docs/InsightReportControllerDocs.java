@@ -70,6 +70,25 @@ public interface InsightReportControllerDocs {
     );
 
     @Operation(
+        summary = "Battle AI 분석 리포트 조회",
+        description = "완료된 Battle AI 분석 리포트를 조회한다. " +
+                     "DONE 상태의 리포트만 조회 가능하며, 포인트 차감 없이 결과를 반환한다."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200", 
+            description = "리포트 조회 성공"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404", 
+            description = "INSIGHT_REPORT_NOT_FOUND (완료된 리포트가 존재하지 않음)"
+        )
+    })
+    ResponseEntity<ApiResponse<InsightReportResponse>> getBattleReport(
+        @Parameter(description = "Battle ID", example = "123") Long battleId
+    );
+
+    @Operation(
         summary = "Market AI 정보 요약 생성 요청", 
         description = "정산 완료된 Market에 대해 AI 정보 요약을 생성한다. " +
                      "80포인트가 차감되며, 기존 완료 리포트가 있는 경우 즉시 반환한다. " +

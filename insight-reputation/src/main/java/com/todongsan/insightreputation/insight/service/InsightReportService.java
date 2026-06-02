@@ -132,6 +132,32 @@ public class InsightReportService {
     }
     
     /**
+     * Battle 리포트 조회
+     * 
+     * @param battleId Battle ID
+     * @return 리포트 응답
+     */
+    @Transactional(readOnly = true)
+    public InsightReportResponse getBattleReport(Long battleId) {
+        Optional<InsightReport> reportOpt = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.BATTLE, battleId);
+        
+        if (reportOpt.isEmpty()) {
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
+        }
+        
+        InsightReport report = reportOpt.get();
+        
+        return InsightReportResponse.builder()
+                .reportId(report.getId())
+                .status(report.getStatus().name())
+                .reportContent(report.getReportContent())
+                .generatedAt(report.getGeneratedAt())
+                .pointCharged(0)  // 조회 시에는 Point 차감 없음
+                .build();
+    }
+
+    /**
      * 리포트 상태 조회
      * 
      * @param battleId Battle ID
