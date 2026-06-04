@@ -100,7 +100,8 @@ referenceId = predictionId
 |---|---|
 | 예측 참여 API 요청 헤더 | `MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}` |
 | 예측 참여 포인트 차감 | `MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}:attempt:{attemptNo}` |
-| 정산 보상 지급 | `MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{memberId}` |
+| 정산 batch 요청 추적 | `MARKET_SETTLEMENT_BATCH:market:{marketId}:settlement:{settlementId}:attempt:{attemptNo}` |
+| 정산 보상 지급 item | `MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{memberId}` |
 | 무효 처리 환불 | `MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}` |
 
 예측 참여 포인트 차감 키에는 `optionId`를 포함하지 않는다.
@@ -116,7 +117,21 @@ Prediction row와 `referenceId = predictionId`는 재사용한다.
 optionId를 키에 포함하면 서로 다른 요청으로 인식되어 포인트가 중복 차감될 수 있다.
 ```
 
-정산/환불은 Market batch 단위가 아니라 Prediction item 단위로 멱등성을 보장한다.
+정산은 Member-Point batch 요청 전체를 추적하기 위한 Header `Idempotency-Key`와 실제 유저별 중복 지급을 방지하는 `items[].idempotencyKey`를 함께 사용한다.
+
+```text
+Header Idempotency-Key:
+- Member-Point 정산 batch 요청 전체를 추적하기 위한 필수 헤더다.
+- 실제 유저별 중복 지급 방지 기준은 아니다.
+- 부분 실패 후 실패 item만 재시도할 경우 새 Header Idempotency-Key를 사용할 수 있다.
+
+items[].idempotencyKey:
+- 유저 1명, 즉 Prediction 1건의 정산 지급 멱등성 키다.
+- 실제 중복 지급 방지는 이 키를 기준으로 한다.
+- 같은 Prediction에 대한 재시도에서는 항상 같은 item.idempotencyKey를 사용한다.
+```
+
+환불은 Market batch 단위가 아니라 Prediction item 단위로 멱등성을 보장한다.
 
 ---
 
@@ -933,28 +948,46 @@ NUMERIC_RANGE:
 ## 9. 관리자 정산 실행
 
 ```http
-POST /api/v1/admin/markets/{marketId}/settle
+POST /api/v1/admin/markets/{marketId}/settlements
 ```
 
-정산은 결과 확정 이후 실행한다.
+정산 실행 결과로 `market_settlement` 리소스가 생성되므로 복수형 리소스 endpoint를 사용한다.
+
+정산은 결과 확정 이후 실행한다. 정산 시작 조건은 `Market.status = CLOSED`이다.
+
+`CLOSED`는 단순 시간 마감 상태가 아니라 다음 의미다.
+
+```text
+CLOSED = 결과 확정 완료 + 정산 준비 완료 상태
+```
+
+상태 전이:
+
+```text
+CLOSED
+→ SETTLEMENT_IN_PROGRESS
+→ SETTLED
+```
 
 ### 처리 흐름
 
 ```text
 1. Market 조회
-2. Market 상태 검증
+2. Market.status = CLOSED 검증
 3. Atomic Update로 SETTLEMENT_IN_PROGRESS 획득
-4. 정산 대상 Prediction 조회
+4. CONFIRMED Prediction 조회
 5. 정산 금액 계산
-6. market_settlement_detail 생성
-7. Member-Point 정산 batch API 호출
+6. market_settlement 생성
+7. 승자 Prediction에 대해서만 market_settlement_detail 생성
+8. 승자가 있으면 Member-Point 정산 batch API 호출
+   - Header Idempotency-Key는 batch 요청 전체 추적용 필수 헤더다.
    - 각 item은 predictionId 기준 idempotencyKey를 가진다.
    - 각 item은 referenceType=MARKET_PREDICTION, referenceId=predictionId를 가진다.
-8. results[]를 기준으로 성공/실패 detail 상태 반영
-9. 성공 건 Prediction SETTLED
-10. 실패 건 재시도 대상으로 기록
-11. 모든 지급 성공 시 Market SETTLED
-12. 일부 실패 시 SETTLEMENT_IN_PROGRESS 유지
+9. results[]를 기준으로 성공/실패/불명확 detail 상태 반영
+10. 패자 Prediction은 status = SETTLED, settledAmount = 0.00 처리
+11. 성공한 승자 Prediction은 status = SETTLED, settledAmount = 지급액 처리
+12. 모든 승자 detail이 SUCCESS이면 Market SETTLED
+13. 일부 detail이 FAILED 또는 UNKNOWN이면 SETTLEMENT_IN_PROGRESS 유지
 ```
 
 ### Atomic Update
@@ -963,20 +996,122 @@ POST /api/v1/admin/markets/{marketId}/settle
 UPDATE market
 SET status = 'SETTLEMENT_IN_PROGRESS'
 WHERE id = :marketId
-AND status = 'CLOSED';
+  AND status = 'CLOSED';
 ```
 
+`affected row = 1`이면 정산 시작 권한을 획득한다.
 `affected row = 0`이면 이미 정산 중이거나 정산 가능한 상태가 아니므로 중단한다.
+
+### 정산 대상과 보상 대상
+
+```text
+정산 생명주기 종료 대상:
+- 해당 Market의 모든 CONFIRMED Prediction
+
+보상 지급 대상:
+- CONFIRMED 이면서 option_id = market.result_option_id 인 Prediction
+```
+
+패자 처리:
+
+```text
+패자는 Member-Point 지급 대상이 아니다.
+패자는 market_settlement_detail을 생성하지 않는다.
+패자 Prediction은 status = SETTLED, settledAmount = 0.00 으로 처리한다.
+```
+
+승자 처리:
+
+```text
+승자는 market_settlement_detail을 생성한다.
+승자는 Member-Point batch 정산 지급 item으로 전송한다.
+성공 시 Prediction status = SETTLED, settledAmount = 지급액으로 처리한다.
+```
+
+### 정산 금액 계산
+
+```text
+totalPool = CONFIRMED Prediction의 pointAmount 합
+
+feeAmount = floor2(totalPool * feeRate / 100)
+
+settlementPool = totalPool - feeAmount
+
+winningContractQuantity =
+  정답 option을 선택한 CONFIRMED Prediction의 contractQuantity 합
+
+payoutPerContract =
+  winningContractQuantity > 0
+    ? settlementPool / winningContractQuantity
+    : 0
+
+각 승자 settledAmount =
+  floor2(winner.contractQuantity * payoutPerContract)
+
+profitAmount =
+  settledAmount - originalPointAmount
+
+burnedPointAmount =
+  settlementPool - sum(승자 settledAmount)
+```
+
+`floor2`는 Java 기준 아래 처리를 의미한다.
+
+```java
+setScale(2, RoundingMode.DOWN)
+```
+
+정산 지급 금액은 소수점 둘째 자리까지 사용한다. 셋째 자리 이하는 버림 처리하며 반올림하지 않는다. 소수점 버림으로 인해 남은 잔여 금액은 `burnedPointAmount`에 기록한다.
+
+예시:
+
+```text
+33.339 → 33.33
+33.335 → 33.33
+33.330 → 33.33
+```
+
+### 승자 없는 경우
+
+정답 option 없음:
+
+```text
+결과 확정 실패
+```
+
+정답자는 없음:
+
+```text
+결과 확정 성공
+정산 API도 실패하지 않음
+```
+
+승자 없는 정산 처리:
+
+```text
+Member-Point 정산 batch API 호출 없음
+market_settlement 생성
+market_settlement_detail 생성 0건
+winningContractQuantity = 0
+payoutPerContract = 0
+burnedPointAmount = settlementPool
+모든 CONFIRMED Prediction은 status = SETTLED, settledAmount = 0.00
+Market.status = SETTLED
+market_settlement.status = COMPLETED
+```
 
 ### Member-Point 정산 요청 예시
 
 ```http
 POST /api/v1/points/settlements
+Idempotency-Key: MARKET_SETTLEMENT_BATCH:market:7:settlement:1:attempt:1
+Content-Type: application/json
 ```
 
 ```json
 {
   "marketId": 7,
+  "settlementId": "settle-market-7-settlement-1-attempt-1",
   "items": [
     {
       "predictionId": 1001,
@@ -998,6 +1133,20 @@ POST /api/v1/points/settlements
     }
   ]
 }
+```
+
+Header와 item key의 역할 차이:
+
+```text
+Header Idempotency-Key:
+- Member-Point 정산 batch 요청 전체를 추적하기 위한 필수 헤더다.
+- 실제 유저별 중복 지급 방지 기준은 아니다.
+- 부분 실패 후 실패 item만 재시도할 경우 새 Header Idempotency-Key를 사용할 수 있다.
+
+items[].idempotencyKey:
+- 유저 1명, 즉 Prediction 1건의 정산 지급 멱등성 키다.
+- 실제 중복 지급 방지는 이 키를 기준으로 한다.
+- 같은 Prediction에 대한 재시도에서는 항상 같은 item.idempotencyKey를 사용한다.
 ```
 
 ### Member-Point 정산 응답 예시
@@ -1038,7 +1187,12 @@ POST /api/v1/points/settlements
 |---|---|
 | `PROCESSED` | detail `SUCCESS`, Prediction `SETTLED` |
 | `ALREADY_PROCESSED` | 성공으로 간주. detail `SUCCESS`, Prediction `SETTLED` |
-| `FAILED` | detail `FAILED`, 다음 Scheduler 재시도 대상 |
+| `FAILED` | detail `FAILED`, Market `SETTLEMENT_IN_PROGRESS` 유지 |
+| batch timeout | 요청 대상 detail `UNKNOWN`, Market `SETTLEMENT_IN_PROGRESS` 유지 |
+
+모든 승자 detail이 `SUCCESS`이면 `Market.status = SETTLED`로 전환한다.
+일부 detail이 `FAILED` 또는 `UNKNOWN`이면 `Market.status = SETTLEMENT_IN_PROGRESS`를 유지한다.
+실패 또는 `UNKNOWN` detail은 후속 재시도 API 또는 Scheduler의 대상이 된다.
 
 ### 발생 가능한 ErrorCode
 
@@ -1048,10 +1202,11 @@ POST /api/v1/points/settlements
 | `MARKET_INVALID_STATUS` | 409 | 정산 가능한 상태가 아님 |
 | `MARKET_ALREADY_SETTLED` | 409 | 이미 정산 완료 |
 | `MARKET_NO_PREDICTIONS` | 409 | 정산 대상 없음 |
-| `MARKET_INVALID_SETTLEMENT` | 409 | 정산 조건 미충족 |
-| `MARKET_SETTLEMENT_FAILED` | 500 | 정산 실패 |
+| `MARKET_INVALID_SETTLEMENT_DATA` | 409 | resultOptionId 없음 등 정산 전제 데이터 비정상 |
 | `EXTERNAL_SERVICE_TIMEOUT` | 504 | 포인트 지급 요청 타임아웃 |
 | `EXTERNAL_SERVICE_ERROR` | 502 | 포인트 서비스 오류 |
+
+부분 실패는 전체 API 실패로 단정하지 않는다. 성공한 item은 확정하고 실패한 item만 재시도 대상으로 남긴다.
 
 ---
 
