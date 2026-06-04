@@ -52,4 +52,11 @@ public class AdminMarketController {
     ) {
         return ApiResponse.ok(adminMarketService.settleMarket(marketId));
     }
+
+    @PostMapping("/{marketId}/settlements/retry")
+    public ApiResponse<SettleMarketResponse> retryMarketSettlement(
+            @PathVariable long marketId
+    ) {
+        return ApiResponse.ok(adminMarketService.retryMarketSettlement(marketId));
+    }
 }

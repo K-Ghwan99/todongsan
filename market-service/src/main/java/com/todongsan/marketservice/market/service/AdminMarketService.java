@@ -137,6 +137,10 @@ public class AdminMarketService {
         return marketSettlementService.settleMarket(marketId);
     }
 
+    public SettleMarketResponse retryMarketSettlement(long marketId) {
+        return marketSettlementService.retryMarketSettlement(marketId);
+    }
+
     private Market getMarket(long marketId) {
         Market market = marketMapper.selectMarketById(marketId);
         if (market == null) {

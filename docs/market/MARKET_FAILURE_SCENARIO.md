@@ -369,7 +369,8 @@ SETTLED
 ### 3-9. Decimal 데이터는 String으로 응답한다
 
 가격, 계약 수량, 포인트 금액, 정산 금액 등 소수점 정밀도가 중요한 값은 응답 DTO에서 `BigDecimal`로 유지한다.
-JSON 직렬화 시 `@JsonSerialize(using = ToStringSerializer.class)`를 사용하여 JSON Number가 아니라 String으로 응답한다.
+JSON 직렬화 시 기본적으로 JSON Number가 아니라 String으로 응답한다.
+scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimalPlainStringSerializer`를 사용한다.
 
 대상 예시:
 
@@ -855,6 +856,42 @@ Header Idempotency-Key는 새로운 batch 요청 추적용 키를 사용할 수 
 | 관련 ErrorCode | 없음 |
 
 이미 처리된 item 재시도는 성공으로 간주한다.
+
+---
+
+### 8-8-1. 관리자 정산 재시도 API
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | `POST /api/v1/admin/markets/{marketId}/settlements/retry` |
+| 대상 Market | `SETTLEMENT_IN_PROGRESS` |
+| 대상 settlement | `IN_PROGRESS` |
+| 대상 detail | `FAILED`, `UNKNOWN` |
+| 재계산 여부 | 정산 금액 재계산 없음 |
+| row 생성 여부 | 신규 `market_settlement`, `market_settlement_detail` 생성 없음 |
+| 관련 ErrorCode | `MARKET_NOT_FOUND`, `MARKET_INVALID_STATUS`, `MARKET_ALREADY_SETTLED`, `MARKET_INVALID_SETTLEMENT_DATA` |
+
+처리 흐름:
+
+```text
+1. Market과 진행 중 settlement를 조회한다.
+2. FAILED 또는 UNKNOWN detail만 재시도 대상으로 조회한다.
+3. DB 트랜잭션을 종료한 뒤 Member-Point 정산 batch API를 호출한다.
+4. Header Idempotency-Key는 retry UUID 기반 새 값을 사용한다.
+5. items[].idempotencyKey는 기존 detail.idempotency_key를 그대로 사용한다.
+6. PROCESSED 또는 ALREADY_PROCESSED는 SUCCESS로 반영하고 Prediction을 SETTLED로 전환한다.
+7. FAILED는 detail FAILED, Prediction CONFIRMED 유지로 반영한다.
+8. timeout 또는 응답 불명확은 요청 대상 detail UNKNOWN, Prediction CONFIRMED 유지로 반영한다.
+9. settlement 전체 detail 중 SUCCESS가 아닌 건이 없으면 정산 완료 처리한다.
+```
+
+Header Idempotency-Key 형식:
+
+```text
+MARKET_SETTLEMENT_BATCH:market:{marketId}:settlement:{settlementId}:retry:{uuid}
+```
+
+정산 완료 판단은 이번 retry 대상만 보지 않는다. 같은 `settlement_id`의 모든 detail을 기준으로 한다.
 
 ---
 

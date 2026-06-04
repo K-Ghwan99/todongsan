@@ -518,6 +518,52 @@
         ORDER BY id ASC
     </select>
 
+    <select id="selectMarketSettlementByMarketId" resultType="com.todongsan.marketservice.market.entity.MarketSettlement">
+        SELECT *
+        FROM market_settlement
+        WHERE market_id = #{marketId}
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
+    <select id="selectRetryableSettlementDetails" resultType="com.todongsan.marketservice.market.entity.MarketSettlementDetail">
+        SELECT *
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+          AND status IN ('FAILED', 'UNKNOWN')
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <select id="countSettlementDetailsBySettlementId" resultType="long">
+        SELECT COUNT(*)
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+    </select>
+
+    <select id="countNonSuccessSettlementDetails" resultType="long">
+        SELECT COUNT(*)
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+          AND status != 'SUCCESS'
+    </select>
+
+    <select id="countRetryableSettlementDetails" resultType="long">
+        SELECT COUNT(*)
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+          AND status IN ('FAILED', 'UNKNOWN')
+    </select>
+
+    <select id="countSettledLoserPredictions" resultType="long">
+        SELECT COUNT(*)
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND option_id != #{resultOptionId}
+          AND status = 'SETTLED'
+    </select>
+
     <update id="updateMarketSettlementAmounts">
         UPDATE market
         SET fee_amount = #{feeAmount},
@@ -535,6 +581,15 @@
             updated_at = #{updatedAt}
         WHERE id = #{detailId}
           AND status = 'PENDING'
+    </update>
+
+    <update id="updateRetrySettlementDetailStatus">
+        UPDATE market_settlement_detail
+        SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{detailId}
+          AND status IN ('FAILED', 'UNKNOWN')
     </update>
 
     <update id="settlePrediction">
