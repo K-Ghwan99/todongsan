@@ -22,11 +22,12 @@ public class InsightReportController implements InsightReportControllerDocs {
     @Override
     public ResponseEntity<ApiResponse<InsightReportResponse>> requestBattleReport(
             @PathVariable Long battleId,
-            @RequestHeader("X-Member-Id") Long memberId) {
+            @RequestHeader("X-Member-Id") Long memberId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
         
-        log.info("Battle 리포트 생성 요청: battleId={}, memberId={}", battleId, memberId);
+        log.info("Battle 리포트 생성 요청: battleId={}, memberId={}, idempotencyKey={}", battleId, memberId, idempotencyKey);
         
-        InsightReportResponse response = insightReportService.requestBattleReport(memberId, battleId);
+        InsightReportResponse response = insightReportService.requestBattleReport(memberId, battleId, idempotencyKey);
         
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -59,11 +60,12 @@ public class InsightReportController implements InsightReportControllerDocs {
     @Override
     public ResponseEntity<ApiResponse<InsightReportResponse>> requestMarketReport(
             @PathVariable Long marketId,
-            @RequestHeader("X-Member-Id") Long memberId) {
+            @RequestHeader("X-Member-Id") Long memberId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
         
-        log.info("Market 리포트 생성 요청: marketId={}, memberId={}", marketId, memberId);
+        log.info("Market 리포트 생성 요청: marketId={}, memberId={}, idempotencyKey={}", marketId, memberId, idempotencyKey);
         
-        InsightReportResponse response = insightReportService.requestMarketReport(memberId, marketId);
+        InsightReportResponse response = insightReportService.requestMarketReport(memberId, marketId, idempotencyKey);
         
         return ResponseEntity.ok(ApiResponse.success(response));
     }

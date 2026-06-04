@@ -92,22 +92,37 @@ public class InsightReport extends BaseEntity {
     }
 
     public void startProcessing() {
+        if (this.status != InsightReportStatus.PENDING) {
+            throw new IllegalStateException("PENDING 상태에서만 처리 시작 가능: current=" + this.status);
+        }
         this.status = InsightReportStatus.PROCESSING;
         this.processingStartedAt = LocalDateTime.now();
     }
 
     public void complete(String reportContent) {
+        if (this.status != InsightReportStatus.PROCESSING) {
+            throw new IllegalStateException("PROCESSING 상태에서만 완료 가능: current=" + this.status);
+        }
         this.status = InsightReportStatus.DONE;
         this.reportContent = reportContent;
         this.generatedAt = LocalDateTime.now();
     }
 
     public void failPermanently(String reason) {
+        if (this.status == InsightReportStatus.DONE) {
+            throw new IllegalStateException("DONE 상태에서는 실패로 전환할 수 없음: current=" + this.status);
+        }
         this.status = InsightReportStatus.FAILED;
         this.failedReason = reason;
     }
 
     public void resetForRetry() {
+        if (this.status == InsightReportStatus.DONE) {
+            throw new IllegalStateException("DONE 상태에서는 재시도로 전환할 수 없음: current=" + this.status);
+        }
+        if (this.status != InsightReportStatus.FAILED && this.status != InsightReportStatus.PROCESSING) {
+            throw new IllegalStateException("FAILED 또는 PROCESSING 상태에서만 재시도 가능: current=" + this.status);
+        }
         this.status = InsightReportStatus.PENDING;
         this.processingStartedAt = null;
         this.retryCount++;

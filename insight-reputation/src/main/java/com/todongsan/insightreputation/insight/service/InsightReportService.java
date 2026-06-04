@@ -48,10 +48,11 @@ public class InsightReportService {
      * 
      * @param memberId 요청 회원 ID
      * @param battleId Battle ID
+     * @param idempotencyKey 멱등성 키
      * @return 리포트 응답
      */
     @Transactional
-    public InsightReportResponse requestBattleReport(Long memberId, Long battleId) {
+    public InsightReportResponse requestBattleReport(Long memberId, Long battleId, String idempotencyKey) {
         log.info("Battle 리포트 생성 요청: memberId={}, battleId={}", memberId, battleId);
         
         // 1. 기존 리포트 확인
@@ -92,8 +93,6 @@ public class InsightReportService {
         }
         
         // 3. Point 차감 (멱등성 키 사용)
-        String idempotencyKey = generateIdempotencyKey(memberId, battleId, "BATTLE");
-        
         try {
             memberPointClient.spendPoints(memberId, REPORT_COST, idempotencyKey);
             log.info("포인트 차감 성공: memberId={}, amount={}, battleId={}", 
@@ -352,10 +351,11 @@ public class InsightReportService {
      * 
      * @param memberId 요청 회원 ID
      * @param marketId Market ID
+     * @param idempotencyKey 멱등성 키
      * @return 리포트 응답
      */
     @Transactional
-    public InsightReportResponse requestMarketReport(Long memberId, Long marketId) {
+    public InsightReportResponse requestMarketReport(Long memberId, Long marketId, String idempotencyKey) {
         log.info("Market 리포트 생성 요청: memberId={}, marketId={}", memberId, marketId);
         
         // 1. 기존 리포트 확인
@@ -387,8 +387,6 @@ public class InsightReportService {
         }
         
         // 2. Point 차감 (멱등성 키 사용) - Market 상태 확인 전에 차감
-        String idempotencyKey = generateIdempotencyKey(memberId, marketId, "MARKET");
-        
         try {
             memberPointClient.spendPoints(memberId, REPORT_COST, idempotencyKey);
             log.info("포인트 차감 성공: memberId={}, amount={}, marketId={}", 
