@@ -1611,26 +1611,167 @@ Insight-Reputation Service가 회원별 예측 참여 원본 데이터를 페이
 ### 12-1. 포인트 차감 상태 대사
 
 ```http
-POST /internal/api/v1/markets/predictions/reconcile-point?limit=100
+POST /api/v1/internal/markets/predictions/reconcile?limit=100
+```
+
+`POINT_PENDING` 또는 `POINT_UNKNOWN` 상태로 남은 예측 참여 포인트 차감 건을 Member-Point 거래 상태 조회 API로 대사한다.
+이 API는 사용자용 API가 아니라 내부 운영/보정용 API다. 추후 Scheduler가 주기적으로 호출할 수 있다.
+
+Query Parameter:
+
+| 이름 | 타입 | 필수 | 기본값 | 설명 |
+|---|---|---|---|---|
+| `limit` | int | X | 100 | 한 번에 처리할 최대 Prediction 수 |
+
+limit 정책:
+
+```text
+기본값: 100
+최대값: 500
+0 이하 값은 VALIDATION_FAILED
 ```
 
 대상:
 
 ```text
-1. PredictionStatus = POINT_UNKNOWN
-2. updatedAt 기준 3분 이상 지난 POINT_PENDING
+1. status = POINT_UNKNOWN
+
+2. status = POINT_PENDING
+   AND updated_at <= now - 3 minutes
 ```
 
-처리:
+`POINT_UNKNOWN`은 포인트 차감 여부가 불명확한 상태이므로 대사 대상이다.
+`POINT_PENDING`은 방금 생성된 정상 처리 중 상태일 수 있으므로 즉시 대사하지 않는다.
+`updated_at` 기준 3분 이상 지난 `POINT_PENDING`만 고착 상태로 보고 대사한다.
+
+Member-Point 거래 상태 조회 API:
+
+```http
+GET /api/v1/points/transactions?idempotencyKey={pointSpendIdempotencyKey}
+```
+
+조회 key:
 
 ```text
-Idempotency-Key로 Member-Point 처리 이력 조회
-→ 차감 성공 확인 시 가격 확정 트랜잭션 재시도
-→ 차감 실패 확인 시 FAILED
-→ 처리 이력 없음 시 차감 재시도 또는 다음 주기로 보류
+market_prediction.point_spend_idempotency_key
 ```
 
+key 형식:
+
+```text
+MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}:attempt:{attemptNo}
+```
+
+Member-Point 문서의 과거 예시에 `predictionId`가 포함된 spend key가 있더라도,
+Market의 현재 정책은 `marketId + memberId + attemptNo` 형식이다.
+
+Member-Point 조회 결과별 Market 처리:
+
+| Member-Point transaction status | Market 처리 |
+|---|---|
+| `PROCESSED` | 포인트 차감 성공. 가격 확정 트랜잭션 재시도 후 Prediction `CONFIRMED` |
+| `FAILED` | 포인트 차감 실패. Prediction `FAILED` |
+| `NOT_FOUND` | point_history 없음. 자동 재차감하지 않고 Prediction `FAILED` |
+| `UNKNOWN` | 처리 여부 불명확. Prediction `POINT_UNKNOWN` 유지 |
+| 조회 timeout / 5xx | 처리 여부 불명확. Prediction `POINT_UNKNOWN` 유지 |
+
+`NOT_FOUND`는 point_history가 존재하지 않는다는 뜻이다.
+Member-Point 담당자 확인 결과, `POINT_INSUFFICIENT` 같은 명확한 실패도 거래 조회 시 `NOT_FOUND`로 나올 수 있다.
+따라서 Market은 `NOT_FOUND`를 보고 자동으로 다시 spend 요청을 보내지 않는다.
+자동 재차감은 사용자의 이후 잔액 상태로 예측을 뒤늦게 성공시키는 문제가 생길 수 있다.
+
+```text
+예측 시점에는 포인트 부족
+→ Member-Point에서 POINT_INSUFFICIENT
+→ Market은 응답 유실로 POINT_UNKNOWN 유지
+→ 이후 거래 조회 결과 NOT_FOUND
+→ 그 사이 유저가 포인트를 충전
+→ Market이 자동 재차감하면 원래 실패했어야 할 예측이 뒤늦게 성공할 수 있음
+```
+
+정책:
+
+```text
+NOT_FOUND → Prediction FAILED
+```
+
+따라서 대사 API는 자동 spend 재시도를 하지 않는다.
+
 가격 확정 트랜잭션 재시도 시에도 `Market row lock + 모든 option row lock` 규칙을 동일하게 적용한다.
+`PROCESSED`일 때는 단순히 Prediction 상태만 `CONFIRMED`로 바꾸면 안 된다.
+반드시 예측 참여 성공 시 사용하는 가격 확정 트랜잭션을 재사용해야 한다.
+
+처리 내용:
+
+```text
+1. Market row lock
+2. 해당 Market의 모든 MarketOption row lock
+3. selected option의 현재 가격 기준 priceSnapshot 확정
+4. contractQuantity 계산
+5. selected option realPoolAmount 증가
+6. 전체 option currentPrice 재계산
+7. PriceHistory 저장
+8. Prediction CONFIRMED 전환
+```
+
+Prediction `CONFIRMED`만 UPDATE하고 pool, priceHistory, contractQuantity를 반영하지 않는 구현은 금지한다.
+
+사용자가 `closeAt` 이전에 예측 참여 요청을 했고,
+Prediction이 `POINT_PENDING` 또는 `POINT_UNKNOWN`으로 남은 경우,
+대사 API는 `closeAt` 이후에도 `PROCESSED` 보정을 허용한다.
+사용자의 예측 요청과 포인트 차감은 `closeAt` 이전에 시작되었을 수 있기 때문이다.
+
+대사 가격 확정 허용 Market.status:
+
+```text
+ACTIVE
+DATA_PENDING
+```
+
+대사 가격 확정 차단 Market.status:
+
+```text
+CLOSED
+SETTLEMENT_IN_PROGRESS
+SETTLED
+VOIDED
+```
+
+결과 확정 API는 `POINT_PENDING` / `POINT_UNKNOWN` Prediction이 남아 있으면 `CLOSED`로 전환하지 않는다.
+따라서 정상 흐름에서는 대사 대상이 있는 Market이 `CLOSED` 이상 상태일 수 없다.
+`CLOSED` 이상 상태에서 대사 대상이 발견되면 데이터 정합성 오류로 보고 skip 또는 로그 대상으로 처리한다.
+
+응답 예시:
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "requestedLimit": 100,
+    "scannedCount": 15,
+    "processedCount": 15,
+    "confirmedCount": 8,
+    "failedCount": 4,
+    "notFoundCount": 3,
+    "unknownCount": 2,
+    "skippedCount": 1
+  },
+  "timestamp": "2026-06-04T16:00:00"
+}
+```
+
+| 필드 | 설명 |
+|---|---|
+| `requestedLimit` | 요청 limit |
+| `scannedCount` | DB에서 조회한 대사 대상 Prediction 수 |
+| `processedCount` | Member-Point 거래 상태 조회를 시도한 수 |
+| `confirmedCount` | `PROCESSED` 확인 후 `CONFIRMED` 처리 성공 수 |
+| `failedCount` | `FAILED` 또는 `NOT_FOUND`로 `FAILED` 처리한 수 |
+| `notFoundCount` | `NOT_FOUND` 응답 수 |
+| `unknownCount` | `UNKNOWN` 또는 조회 실패로 `POINT_UNKNOWN` 유지한 수 |
+| `skippedCount` | Market 상태 불일치, 데이터 불일치 등으로 처리하지 않고 넘긴 수 |
 
 ---
 

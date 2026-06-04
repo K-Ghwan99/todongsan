@@ -156,9 +156,10 @@ Scheduler 대사 대상:
 대사 결과:
 
 ```text
-차감 성공 확인 → CONFIRMED
-차감 실패 확인 → FAILED
-처리 이력 없음 → 포인트 차감 재시도 또는 FAILED 처리
+PROCESSED → 가격 확정 트랜잭션 재시도 후 CONFIRMED
+FAILED → FAILED
+NOT_FOUND → 자동 재차감하지 않고 FAILED
+UNKNOWN 또는 조회 실패 → POINT_UNKNOWN 유지
 ```
 
 ---
@@ -559,9 +560,25 @@ POINT_INSUFFICIENT는 요청 형식 오류가 아니라
 | 위험 | 실제 차감 여부를 알 수 없음 |
 | 상태 변화 | PredictionStatus = POINT_UNKNOWN |
 | 재시도 | 즉시 재시도 금지 |
-| 복구 방식 | Idempotency-Key로 처리 이력 조회 |
+| 복구 방식 | 예측 차감 대사 API가 Idempotency-Key로 거래 상태 조회 |
 | 관련 ErrorCode | EXTERNAL_SERVICE_TIMEOUT |
 | HTTP Status | 504 |
+
+복구:
+
+```http
+POST /api/v1/internal/markets/predictions/reconcile?limit=100
+```
+
+처리:
+
+```text
+point_spend_idempotency_key로 Member-Point 거래 상태 조회
+PROCESSED → 가격 확정 트랜잭션 재시도 후 CONFIRMED
+FAILED → FAILED
+NOT_FOUND → 자동 재차감하지 않고 FAILED
+UNKNOWN / 조회 실패 → POINT_UNKNOWN 유지
+```
 
 ---
 
@@ -574,9 +591,11 @@ POINT_INSUFFICIENT는 요청 형식 오류가 아니라
 | 위험 | 포인트 차감 여부가 불명확할 수 있음 |
 | 상태 변화 | PredictionStatus = POINT_UNKNOWN |
 | 재시도 | O |
-| 복구 방식 | Idempotency-Key로 처리 이력 조회 후 재시도 |
+| 복구 방식 | 예측 차감 대사 API가 Idempotency-Key로 거래 상태 조회 |
 | 관련 ErrorCode | EXTERNAL_SERVICE_ERROR |
 | HTTP Status | 502 |
+
+`POINT_UNKNOWN` 대사 처리 정책은 5-2와 동일하다.
 
 ---
 
@@ -588,9 +607,11 @@ POINT_INSUFFICIENT는 요청 형식 오류가 아니라
 | 실패 원인 | Connection Refused, 서비스 다운, 네트워크 연결 실패 |
 | 상태 변화 | PredictionStatus = POINT_UNKNOWN |
 | 재시도 | O |
-| 복구 방식 | Scheduler 확인 후 재시도 |
+| 복구 방식 | 예측 차감 대사 API가 Idempotency-Key로 거래 상태 조회 |
 | 관련 ErrorCode | EXTERNAL_SERVICE_UNAVAILABLE |
 | HTTP Status | 503 |
+
+`POINT_UNKNOWN` 대사 처리 정책은 5-2와 동일하다.
 
 ---
 
@@ -602,7 +623,7 @@ POINT_INSUFFICIENT는 요청 형식 오류가 아니라
 | 실패 원인 | Market 서버 장애, DB 업데이트 실패, 가격 확정 트랜잭션 실패, 인스턴스 종료 |
 | 상태 변화 | PredictionStatus = POINT_PENDING 상태로 고착 |
 | 재시도 | O |
-| 복구 방식 | Scheduler가 3분 이상 지난 POINT_PENDING을 조회하여 대사 |
+| 복구 방식 | 예측 차감 대사 API가 3분 이상 지난 POINT_PENDING을 조회하여 대사 |
 | 관련 ErrorCode | 없음 또는 내부 로그 |
 | HTTP Status | API 응답 없음 |
 
@@ -619,11 +640,72 @@ Prediction POINT_PENDING 저장
 
 ```text
 1. Prediction의 point_spend_idempotency_key로 Member-Point 거래 상태 조회
-2. 차감 성공 확인 시 Market row + 모든 option row 락 획득
+2. PROCESSED이면 Market row + 모든 option row 락 획득
 3. priceSnapshot, contractQuantity 확정
 4. pool 갱신, 가격 재계산, PriceHistory 저장
 5. Prediction CONFIRMED 변경
+6. FAILED 또는 NOT_FOUND이면 Prediction FAILED 변경
+7. UNKNOWN 또는 조회 실패이면 POINT_UNKNOWN 유지
 ```
+
+---
+
+### 5-6. NOT_FOUND 자동 재차감 금지
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 예측 차감 대사 API가 Member-Point 거래 상태를 조회 |
+| 상황 | 거래 조회 결과 `NOT_FOUND` |
+| 의미 | point_history가 존재하지 않음 |
+| 상태 변화 | PredictionStatus = FAILED |
+| 자동 재차감 | 금지 |
+| 관련 ErrorCode | 없음 |
+
+위험 시나리오:
+
+```text
+예측 시점 포인트 부족
+→ Member-Point는 POINT_INSUFFICIENT
+→ Market 응답 유실
+→ 거래 조회 결과 NOT_FOUND
+→ 이후 유저 포인트 충전
+→ Market이 자동 재차감하면 원래 실패해야 할 예측이 뒤늦게 성공
+```
+
+정책:
+
+```text
+NOT_FOUND는 자동 재차감하지 않고 Prediction FAILED 처리한다.
+```
+
+---
+
+### 5-7. closeAt 이후 예측 차감 대사
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 사용자가 closeAt 이전에 예측 참여 요청 후 대사가 closeAt 이후 실행됨 |
+| 대상 | `POINT_PENDING`, `POINT_UNKNOWN` Prediction |
+| 허용 MarketStatus | `ACTIVE`, `DATA_PENDING` |
+| 차단 MarketStatus | `CLOSED`, `SETTLEMENT_IN_PROGRESS`, `SETTLED`, `VOIDED` |
+| 처리 | `PROCESSED` 확인 시 가격 확정 트랜잭션 재시도 |
+
+대표 사례:
+
+```text
+사용자가 closeAt 이전에 예측 참여 요청
+→ POINT_PENDING 저장
+→ Member-Point 차감 성공
+→ Market 서버 장애로 CONFIRMED 미반영
+→ closeAt 이후 대사 실행
+→ PROCESSED 확인
+→ 가격 확정 트랜잭션 재시도
+→ Prediction CONFIRMED
+```
+
+결과 확정 API는 `POINT_PENDING` / `POINT_UNKNOWN` Prediction이 남아 있으면 `CLOSED`로 전환하지 않는다.
+따라서 정상 흐름에서는 대사 대상이 있는 Market이 `CLOSED` 이상 상태일 수 없다.
+`CLOSED` 이상 상태에서 대사 대상이 발견되면 데이터 정합성 오류로 보고 skip 또는 로그 대상으로 처리한다.
 
 ---
 
@@ -1118,7 +1200,7 @@ Polling 결과:
 예시:
 
 ```http
-POST /internal/api/v1/markets/predictions/reconcile-point?limit=100
+POST /api/v1/internal/markets/predictions/reconcile?limit=100
 POST /internal/api/v1/markets/settlements/retry-failed?limit=100
 POST /internal/api/v1/markets/refunds/retry-failed?limit=100
 ```
