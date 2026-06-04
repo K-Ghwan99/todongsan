@@ -1607,6 +1607,17 @@ Insight-Reputation Service가 회원별 예측 참여 원본 데이터를 페이
 
 > 내부 Scheduler API는 외부 클라이언트에 공개하지 않는다.  
 > Gateway 또는 내부 네트워크에서만 접근 가능하도록 제한한다.
+> 자동 Scheduler는 Controller를 HTTP로 호출하지 않고, 기존 Service를 직접 호출한다.
+> 단일 인스턴스 중복 실행은 `AtomicBoolean` guard로 방지하며, 분산락은 MVP 범위에서 제외한다.
+
+자동 Scheduler 기본 설정:
+
+| Scheduler | 호출 Service | 기본 주기 | 기본 limit |
+|---|---|---:|---:|
+| 예측 차감 대사 | `PredictionSpendReconciliationService.reconcile(limit)` | 60초 | 100 |
+| 정산 재시도 | `MarketSettlementService.retryFailedSettlements(limit)` | 180초 | 50 |
+
+테스트 환경에서는 Scheduler를 비활성화한다.
 
 ### 12-1. 포인트 차감 상태 대사
 
@@ -1781,6 +1792,8 @@ VOIDED
 POST /internal/api/v1/markets/settlements/retry-failed?limit=100
 ```
 
+자동 Scheduler는 내부 HTTP endpoint를 호출하지 않고, `MarketSettlementService.retryFailedSettlements(limit)`를 직접 호출한다.
+
 대상:
 
 ```text
@@ -1791,8 +1804,8 @@ market_settlement_detail.status IN ('FAILED', 'UNKNOWN')
 처리:
 
 ```text
-limit 건만 조회
-→ Member-Point 정산 보상 지급 재시도
+limit 건만 marketId 조회
+→ marketId별 기존 정산 재시도 Service 호출
 → PROCESSED/ALREADY_PROCESSED면 detail SUCCESS, Prediction SETTLED
 → 모든 대상 성공 시 Market SETTLED
 ```

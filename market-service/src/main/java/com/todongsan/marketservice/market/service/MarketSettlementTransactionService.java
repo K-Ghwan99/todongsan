@@ -194,6 +194,11 @@ public class MarketSettlementTransactionService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public List<Long> selectMarketIdsForSettlementRetry(int limit) {
+        return marketMapper.selectMarketIdsForSettlementRetry(limit);
+    }
+
     @Transactional
     public SettlementRetryPreparation prepareSettlementRetry(long marketId) {
         LocalDateTime now = LocalDateTime.now();

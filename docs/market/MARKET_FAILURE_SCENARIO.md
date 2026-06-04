@@ -1197,6 +1197,23 @@ Polling 결과:
 | 기본값 | limit = 100 |
 | 대상 API | 대사, 정산 재시도, 환불 재시도, 공공 데이터 수집 재시도 |
 
+자동 Scheduler 원칙:
+
+```text
+Controller를 HTTP로 호출하지 않고 기존 Service를 직접 호출한다.
+테스트 환경에서는 Scheduler를 비활성화한다.
+한 번에 전체 대상을 처리하지 않고 limit chunk 단위로 처리한다.
+단일 인스턴스 중복 실행은 AtomicBoolean guard로 방지한다.
+다중 인스턴스 분산락은 이번 MVP 범위에서 제외한다.
+```
+
+기본 자동 실행 설정:
+
+| Scheduler | 호출 Service | 기본 주기 | 기본 limit |
+|---|---|---:|---:|
+| 예측 차감 대사 | `PredictionSpendReconciliationService.reconcile(limit)` | 60초 | 100 |
+| 정산 재시도 | `MarketSettlementService.retryFailedSettlements(limit)` | 180초 | 50 |
+
 예시:
 
 ```http

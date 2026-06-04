@@ -172,6 +172,8 @@ public interface MarketMapper {
 
     List<MarketSettlementDetail> selectRetryableSettlementDetails(@Param("settlementId") long settlementId);
 
+    List<Long> selectMarketIdsForSettlementRetry(@Param("limit") int limit);
+
     long countSettlementDetailsBySettlementId(@Param("settlementId") long settlementId);
 
     long countNonSuccessSettlementDetails(@Param("settlementId") long settlementId);

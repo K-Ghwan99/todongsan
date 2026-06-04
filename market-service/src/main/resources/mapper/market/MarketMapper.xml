@@ -584,6 +584,22 @@
         FOR UPDATE
     </select>
 
+    <select id="selectMarketIdsForSettlementRetry" resultType="long">
+        SELECT market_settlement.market_id
+        FROM market_settlement
+        JOIN market_settlement_detail
+          ON market_settlement.id = market_settlement_detail.settlement_id
+        JOIN market
+          ON market.id = market_settlement.market_id
+        WHERE market.status = 'SETTLEMENT_IN_PROGRESS'
+          AND market.deleted_at IS NULL
+          AND market_settlement.status = 'IN_PROGRESS'
+          AND market_settlement_detail.status IN ('FAILED', 'UNKNOWN')
+        GROUP BY market_settlement.market_id
+        ORDER BY MIN(market_settlement.updated_at) ASC, MIN(market_settlement.id) ASC
+        LIMIT #{limit}
+    </select>
+
     <select id="countSettlementDetailsBySettlementId" resultType="long">
         SELECT COUNT(*)
         FROM market_settlement_detail
