@@ -3,10 +3,12 @@ package com.todongsan.marketservice.market.controller;
 import com.todongsan.marketservice.global.response.ApiResponse;
 import com.todongsan.marketservice.market.dto.request.ConfirmMarketResultRequest;
 import com.todongsan.marketservice.market.dto.request.CreateMarketRequest;
+import com.todongsan.marketservice.market.dto.request.VoidMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
 import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
 import com.todongsan.marketservice.market.dto.response.SettleMarketResponse;
+import com.todongsan.marketservice.market.dto.response.VoidMarketResponse;
 import com.todongsan.marketservice.market.service.AdminMarketService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -58,5 +60,13 @@ public class AdminMarketController {
             @PathVariable long marketId
     ) {
         return ApiResponse.ok(adminMarketService.retryMarketSettlement(marketId));
+    }
+
+    @PatchMapping("/{marketId}/void")
+    public ApiResponse<VoidMarketResponse> voidMarket(
+            @PathVariable long marketId,
+            @Valid @RequestBody VoidMarketRequest request
+    ) {
+        return ApiResponse.ok(adminMarketService.voidMarket(marketId, request));
     }
 }

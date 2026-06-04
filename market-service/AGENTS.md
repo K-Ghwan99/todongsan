@@ -431,14 +431,24 @@ MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{mem
 무효 처리 가능 조건:
 
 - 아직 정산 완료되지 않은 Market
-- `SETTLEMENT_IN_PROGRESS`, `SETTLED` 상태는 VOIDED 처리할 수 없다.
+- `PENDING`, `ACTIVE`, `CLOSED`, `DATA_PENDING` 상태만 VOIDED 처리할 수 있다.
+- `SETTLEMENT_IN_PROGRESS`, `SETTLED`, `VOIDED` 상태는 VOIDED 처리할 수 없다.
+- `POINT_PENDING`, `POINT_UNKNOWN` Prediction이 남아 있으면 VOIDED 처리하지 않는다.
+- 무효 처리 API와 환불 실행 API를 분리한다.
+- 무효 처리 API는 Member-Point를 호출하지 않는다.
 
 환불 기준:
 
 - `CONFIRMED` 예측만 환불 대상이다.
+- 환불 금액은 `prediction.pointAmount`이며 수수료를 차감하지 않는다.
 - 사용자별 환불 detail item마다 별도의 멱등성 키를 사용한다.
+- 환불 batch Header Idempotency-Key와 item idempotencyKey 역할을 구분한다.
+- 실제 중복 환불 방지는 `items[].idempotencyKey` 기준이다.
 - 환불 타임아웃은 `REFUND_UNKNOWN`으로 기록한다.
 - `REFUND_UNKNOWN`은 Member-Point 거래 조회로 대사한다.
+- 환불 실행 중 DB 트랜잭션 안에서 Member-Point HTTP API를 호출하지 않는다.
+- 부분 실패는 전체 실패로 단정하지 않는다.
+- 성공 item은 `REFUNDED`로 확정하고, 실패/UNKNOWN item만 재시도 대상으로 남긴다.
 - 탈퇴 회원도 시스템 환불 대상에 포함한다.
 
 환불 detail 멱등성 키 예시:
@@ -664,6 +674,12 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 [정산/환불]
 [ ] CONFIRMED 예측만 정산·환불 대상에 포함하는가?
 [ ] 정산·환불 detail item별 멱등성 키를 사용하는가?
+[ ] VOIDED 가능 상태는 PENDING, ACTIVE, CLOSED, DATA_PENDING으로 제한했는가?
+[ ] SETTLEMENT_IN_PROGRESS, SETTLED, VOIDED 상태는 무효 처리하지 않는가?
+[ ] POINT_PENDING, POINT_UNKNOWN Prediction이 남아 있으면 VOIDED 처리하지 않는가?
+[ ] 무효 처리 API는 Member-Point를 호출하지 않는가?
+[ ] 환불 금액은 prediction.pointAmount이고 수수료를 차감하지 않는가?
+[ ] 환불 batch Header Idempotency-Key와 items[].idempotencyKey 역할을 구분하는가?
 [ ] 정산 API endpoint가 `POST /api/v1/admin/markets/{marketId}/settlements`인가?
 [ ] 정산 시작은 CLOSED 상태에서만 가능하고 Atomic Update로 처리하는가?
 [ ] Member-Point batch 정산 요청에 Header Idempotency-Key를 포함하는가?
