@@ -52,6 +52,7 @@ class AdminMarketSettlementControllerTest {
     void setUp() {
         reset(memberPointClient);
         jdbcTemplate.update("DELETE FROM market_price_history");
+        jdbcTemplate.update("DELETE FROM market_refund_detail");
         jdbcTemplate.update("DELETE FROM market_settlement_detail");
         jdbcTemplate.update("DELETE FROM market_settlement");
         jdbcTemplate.update("DELETE FROM market_void");

@@ -72,4 +72,22 @@ public class FakeMemberPointClient implements MemberPointClient {
                 .toList();
         return new MemberPointSettlementBatchResponse(request.marketId(), results);
     }
+
+    @Override
+    public MemberPointRefundBatchResponse refundMarketPredictions(
+            String batchIdempotencyKey,
+            MemberPointRefundBatchRequest request
+    ) {
+        List<MemberPointRefundItemResult> results = request.items().stream()
+                .map(item -> new MemberPointRefundItemResult(
+                        item.predictionId(),
+                        item.memberId(),
+                        MemberPointRefundItemStatus.PROCESSED,
+                        null,
+                        item.amount(),
+                        null
+                ))
+                .toList();
+        return new MemberPointRefundBatchResponse(request.marketId(), results);
+    }
 }
