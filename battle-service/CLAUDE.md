@@ -73,3 +73,5 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ../README.md
 를 일고 참고해
 
+그리고 나는 BATTLE-service 를 맡아서 너는 BATTLE-SERVICE에 있는 코드만 바꿀수 있어
+

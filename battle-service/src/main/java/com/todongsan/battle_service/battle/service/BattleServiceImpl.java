@@ -29,8 +29,6 @@ public class BattleServiceImpl implements BattleService {
     public BattleCreateResponse createBattle(Long memberId, BattleCreateRequest request) {
         validatePeriod(request.getStartAt(), request.getEndAt());
 
-        // TODO: Member-Point SPEND_BATTLE_CREATE 30P 차감 (Feature 5)
-
         Battle battle = Battle.builder()
                 .title(request.getTitle())
                 .optionA(request.getOptionA())
