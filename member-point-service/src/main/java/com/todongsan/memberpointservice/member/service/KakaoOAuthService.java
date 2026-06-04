@@ -23,7 +23,7 @@ public class KakaoOAuthService {
         String tokenPreview = accessToken != null && accessToken.length() > 10
                 ? accessToken.substring(0, 10) + "..."
                 : accessToken;
-        log.error("카카오 API 호출 시작. token: {}", tokenPreview);
+        log.info("카카오 API 호출 시작. token: {}", tokenPreview);
 
         return kakaoWebClient.get()
                 .uri("/v2/user/me")

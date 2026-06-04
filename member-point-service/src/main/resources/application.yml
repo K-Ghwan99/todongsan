@@ -40,3 +40,4 @@ logging:
   level:
     com.todongsan.memberpointservice: DEBUG
     org.hibernate.SQL: DEBUG
+    io.netty.resolver.dns.DnsServerAddressStreamProviders: OFF
