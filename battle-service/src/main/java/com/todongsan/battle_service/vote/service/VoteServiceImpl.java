@@ -3,26 +3,37 @@ package com.todongsan.battle_service.vote.service;
 import com.todongsan.battle_service.battle.entity.Battle;
 import com.todongsan.battle_service.battle.entity.BattleStatus;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
+import com.todongsan.battle_service.client.MemberPointClient;
+import com.todongsan.battle_service.client.dto.PointEarnRequest;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
+import com.todongsan.battle_service.retry.entity.PointRewardRetryQueue;
+import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
 import com.todongsan.battle_service.vote.dto.request.VoteRequest;
 import com.todongsan.battle_service.vote.dto.response.*;
 import com.todongsan.battle_service.vote.entity.BattleVote;
 import com.todongsan.battle_service.vote.repository.BattleVoteRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class VoteServiceImpl implements VoteService {
 
+    private static final BigDecimal VOTE_REWARD = BigDecimal.valueOf(10);
+
     private final BattleRepository battleRepository;
     private final BattleVoteRepository battleVoteRepository;
+    private final MemberPointClient memberPointClient;
+    private final PointRewardRetryQueueRepository retryQueueRepository;
 
     private static final long RESULT_OPEN_HOURS = 72;
 
@@ -55,7 +66,33 @@ public class VoteServiceImpl implements VoteService {
             battleRepository.incrementOptionB(battleId);
         }
 
-        // TODO: Member-Point EARN_VOTE 10P 지급 (Feature 5), 실패 시 RetryQueue 적재 (Feature 6)
+        String idempotencyKey = "battle:vote:" + battleId + ":member:" + memberId;
+        try {
+            memberPointClient.earnPoint(PointEarnRequest.builder()
+                    .memberId(memberId)
+                    .type("EARN_VOTE")
+                    .referenceType("BATTLE")
+                    .referenceId(battleId)
+                    .amount(VOTE_REWARD)
+                    .idempotencyKey(idempotencyKey)
+                    .build());
+        } catch (CustomException e) {
+            if (e.getErrorCode() == ErrorCode.EXTERNAL_SERVICE_TIMEOUT) {
+                if (!retryQueueRepository.existsByIdempotencyKey(idempotencyKey)) {
+                    retryQueueRepository.save(PointRewardRetryQueue.builder()
+                            .memberId(memberId)
+                            .referenceType("BATTLE")
+                            .referenceId(battleId)
+                            .type("EARN_VOTE")
+                            .amount(VOTE_REWARD)
+                            .idempotencyKey(idempotencyKey)
+                            .build());
+                }
+                log.warn("Vote reward enqueued for retry: member={}, battle={}", memberId, battleId);
+            } else {
+                log.warn("Vote reward failed (4xx), manual correction needed: member={}, battle={}", memberId, battleId);
+            }
+        }
 
         return VoteResponse.builder()
                 .battleId(battleId)
@@ -107,12 +144,7 @@ public class VoteServiceImpl implements VoteService {
     }
 
     @Override
-    @Transactional
-    public CrossAnalysisResponse getCrossResult(Long battleId, Long memberId, String idempotencyKey) {
-        if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
-        }
-
+    public CrossAnalysisResponse getCrossResult(Long battleId) {
         Battle battle = battleRepository.findByIdAndDeletedAtIsNull(battleId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BATTLE_NOT_FOUND));
 
@@ -120,8 +152,7 @@ public class VoteServiceImpl implements VoteService {
             throw new CustomException(ErrorCode.BATTLE_RESULT_NOT_AVAILABLE);
         }
 
-        // TODO: Member-Point SPEND_INSIGHT 30P 차감 (Feature 5)
-        // TODO: 교차분석 데이터 조회 (Insight 연계 or 내부 집계)
+        // TODO: 교차분석 집계 데이터 조회 (Feature 3)
 
         return CrossAnalysisResponse.builder()
                 .battleId(battleId)
@@ -129,12 +160,7 @@ public class VoteServiceImpl implements VoteService {
     }
 
     @Override
-    @Transactional
-    public CertifiedResultResponse getCertifiedResult(Long battleId, Long memberId, String idempotencyKey) {
-        if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
-        }
-
+    public CertifiedResultResponse getCertifiedResult(Long battleId) {
         Battle battle = battleRepository.findByIdAndDeletedAtIsNull(battleId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BATTLE_NOT_FOUND));
 
@@ -142,8 +168,7 @@ public class VoteServiceImpl implements VoteService {
             throw new CustomException(ErrorCode.BATTLE_RESULT_NOT_AVAILABLE);
         }
 
-        // TODO: Member-Point SPEND_INSIGHT 30P 차감 (Feature 5)
-        // TODO: 방문 인증자 필터 데이터 조회
+        // TODO: 방문 인증자 필터 집계 데이터 조회 (Feature 3)
 
         return CertifiedResultResponse.builder()
                 .battleId(battleId)
