@@ -8,16 +8,16 @@
 
 ### 1-1. 액션별 포인트
 
-| 액션 | PointHistoryType | 금액 | 처리 방식 |
-|---|---|---:|---|
+| 액션 | PointHistoryType |        금액 | 처리 방식 |
+|---|---|----------:|---|
 | Battle 주제 생성 | — | 포인트 차감 없음 | — |
-| Battle 주제 승인 보상 | `EARN_BATTLE_APPROVED` | 20P 지급 | 실패 시 RetryQueue 적재 |
-| 투표 참여 보상 | `EARN_VOTE` | 10P 지급 | 실패 시 RetryQueue 적재 |
-| 댓글 작성 보상 | `EARN_COMMENT` | 2P 지급 | 실패 시 RetryQueue 적재 |
-| 교차분석 / 인증자 필터 조회 | `SPEND_INSIGHT` | 30P 차감 | 실패 시 즉시 예외 전파 |
-| 승리 진영 보상 (정산) | `EARN_VOTE_WIN` | `battle.reward_amount` | BattleSettleScheduler에서 처리 |
+| Battle 주제 승인 보상 | `EARN_BATTLE_APPROVED` |    20P 지급 | 실패 시 RetryQueue 적재 |
+| 투표 참여 보상 | `EARN_VOTE` |    10P 지급 | 실패 시 RetryQueue 적재 |
+| 댓글 작성 보상 | `EARN_COMMENT` |     2P 지급 | 실패 시 RetryQueue 적재 |
+| 교차분석 / 인증자 필터 조회 | — | 0P (관리자/내부 전용, 포인트 차감 없음) | 일반 사용자 접근 불가 (`FORBIDDEN`) |
+| 승리 진영 보상 (정산) | `EARN_VOTE_WIN` |    10P 지급 | BattleSettleScheduler에서 처리 |
 
-> `SPEND_*`는 RetryQueue 대상이 아니다. 실패 시 작업 자체를 거부해야 한다.
+> `SPEND_*`는 RetryQueue 대상이 아니다. 실패 시 작ㅊ업 자체를 거부해야 한다.
 
 ### 1-2. idempotency_key 패턴
 
@@ -104,7 +104,15 @@ ACTIVE → CANCELLED: 관리자 강제 취소 (cancel)
 |---|---|---|---|
 | PENDING Battle 조회 | `BATTLE_NOT_FOUND` | 정상 응답 | 정상 응답 |
 | CANCELLED Battle 조회 | `BATTLE_NOT_FOUND` | 정상 응답 | 정상 응답 |
+| 교차분석 / 인증자 필터 조회 | `FORBIDDEN` | 집계 통계만 응답 (리포트 원문 미노출) | 접근 불가 |
 | 인증 | `X-Member-Id` 헤더 | `X-Member-Id` 헤더 + ROLE_ADMIN | `X-Internal-Auth` 헤더 |
+
+### 5-1. 교차분석 / 인증자 필터 조회 규칙
+
+- **관리자 전용**: `ROLE_ADMIN`이 없으면 `FORBIDDEN` 반환, 내부 서비스(`X-Internal-Auth`)도 접근 불가
+- **집계 데이터만 노출**: 리포트 원문(개별 응답 데이터)은 반환하지 않고, 분석 결과를 가공한 통계값만 응답
+- **노출 위치**: Battle / Market 상세 화면의 통계 섹션에만 표시 (관리자 상세 화면 한정)
+- **응답 형태**: 옵션별 비율, 연령대별/성별 분포 등 집계 수치만 포함
 
 ---
 
@@ -132,3 +140,4 @@ ACTIVE → CANCELLED: 관리자 강제 취소 (cancel)
 | 일자 | 내용 |
 |---|---|
 | 2026-06-02 | 초안 작성 |
+| 2026-06-04 | 교차분석/인증자 필터 조회를 관리자 전용으로 변경. 리포트 원문 미노출, 집계 통계만 응답. 내부 서비스 접근도 불가 |
