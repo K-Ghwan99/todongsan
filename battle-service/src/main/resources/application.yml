@@ -3,9 +3,9 @@ spring:
     name: battle-service
 
   datasource:
-    url: jdbc:mysql://localhost:3306/battle_db?useSSL=false&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3307/battle?useSSL=false&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true
     username: root
-    password: password
+    password: 1234
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
