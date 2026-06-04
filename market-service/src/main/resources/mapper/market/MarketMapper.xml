@@ -257,6 +257,15 @@
           AND status = 'CONFIRMED'
     </select>
 
+    <select id="selectConfirmedPredictionsForRefund" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status = 'CONFIRMED'
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
     <select id="selectMarketVoidByMarketId" resultType="com.todongsan.marketservice.market.entity.MarketVoid">
         SELECT *
         FROM market_void
@@ -293,6 +302,91 @@
         WHERE id = #{marketId}
           AND status IN ('PENDING', 'ACTIVE', 'CLOSED', 'DATA_PENDING')
           AND deleted_at IS NULL
+    </update>
+
+    <select id="countRefundDetailsByVoidId" resultType="long">
+        SELECT COUNT(*)
+        FROM market_refund_detail
+        WHERE market_void_id = #{marketVoidId}
+    </select>
+
+    <insert id="insertMarketRefundDetails">
+        INSERT INTO market_refund_detail (
+            market_void_id,
+            prediction_id,
+            member_id,
+            refund_amount,
+            status,
+            idempotency_key,
+            fail_reason,
+            created_at,
+            updated_at
+        ) VALUES
+        <foreach collection="details" item="detail" separator=",">
+            (
+                #{detail.marketVoidId},
+                #{detail.predictionId},
+                #{detail.memberId},
+                #{detail.refundAmount},
+                #{detail.status},
+                #{detail.idempotencyKey},
+                #{detail.failReason},
+                #{detail.createdAt},
+                #{detail.updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectPendingRefundDetailsByVoidId" resultType="com.todongsan.marketservice.market.entity.MarketRefundDetail">
+        SELECT *
+        FROM market_refund_detail
+        WHERE market_void_id = #{marketVoidId}
+          AND status = 'PENDING'
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <update id="updatePredictionToRefundPending">
+        UPDATE market_prediction
+        SET status = 'REFUND_PENDING',
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'CONFIRMED'
+    </update>
+
+    <update id="updateRefundDetailStatus">
+        UPDATE market_refund_detail
+        SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{detailId}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="markPredictionRefunded">
+        UPDATE market_prediction
+        SET status = 'REFUNDED',
+            refund_amount = #{refundAmount},
+            fail_reason = NULL,
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status IN ('REFUND_PENDING', 'REFUND_UNKNOWN')
+    </update>
+
+    <update id="markPredictionRefundUnknown">
+        UPDATE market_prediction
+        SET status = 'REFUND_UNKNOWN',
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'REFUND_PENDING'
+    </update>
+
+    <update id="updateMarketVoidRefundStatus">
+        UPDATE market_void
+        SET refund_status = #{refundStatus},
+            updated_at = #{updatedAt}
+        WHERE id = #{marketVoidId}
     </update>
 
     <update id="clearResultOptions">

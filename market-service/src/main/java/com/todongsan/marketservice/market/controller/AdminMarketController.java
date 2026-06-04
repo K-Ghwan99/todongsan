@@ -7,6 +7,7 @@ import com.todongsan.marketservice.market.dto.request.VoidMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
 import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
+import com.todongsan.marketservice.market.dto.response.RefundMarketResponse;
 import com.todongsan.marketservice.market.dto.response.SettleMarketResponse;
 import com.todongsan.marketservice.market.dto.response.VoidMarketResponse;
 import com.todongsan.marketservice.market.service.AdminMarketService;
@@ -60,6 +61,13 @@ public class AdminMarketController {
             @PathVariable long marketId
     ) {
         return ApiResponse.ok(adminMarketService.retryMarketSettlement(marketId));
+    }
+
+    @PostMapping("/{marketId}/refunds")
+    public ApiResponse<RefundMarketResponse> refundMarket(
+            @PathVariable long marketId
+    ) {
+        return ApiResponse.ok(adminMarketService.refundMarket(marketId));
     }
 
     @PatchMapping("/{marketId}/void")

@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS market_price_history;
+DROP TABLE IF EXISTS market_refund_detail;
 DROP TABLE IF EXISTS market_void;
 DROP TABLE IF EXISTS market_settlement_detail;
 DROP TABLE IF EXISTS market_settlement;
@@ -183,4 +184,25 @@ CREATE TABLE market_void (
     CONSTRAINT fk_market_void_market
         FOREIGN KEY (market_id)
         REFERENCES market(id)
+);
+
+CREATE TABLE market_refund_detail (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    market_void_id BIGINT NOT NULL,
+    prediction_id BIGINT NOT NULL,
+    member_id BIGINT NOT NULL,
+    refund_amount DECIMAL(10,2) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    idempotency_key VARCHAR(150) NOT NULL UNIQUE,
+    fail_reason VARCHAR(255),
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_refund_detail_prediction (prediction_id),
+    CONSTRAINT fk_refund_detail_market_void
+        FOREIGN KEY (market_void_id)
+        REFERENCES market_void(id),
+    CONSTRAINT fk_refund_detail_prediction
+        FOREIGN KEY (prediction_id)
+        REFERENCES market_prediction(id)
 );

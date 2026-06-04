@@ -9,4 +9,9 @@ public interface MemberPointClient {
             String batchIdempotencyKey,
             MemberPointSettlementBatchRequest request
     );
+
+    MemberPointRefundBatchResponse refundMarketPredictions(
+            String batchIdempotencyKey,
+            MemberPointRefundBatchRequest request
+    );
 }

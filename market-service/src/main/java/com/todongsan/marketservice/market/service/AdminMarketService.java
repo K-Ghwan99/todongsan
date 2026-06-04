@@ -10,6 +10,7 @@ import com.todongsan.marketservice.market.dto.request.VoidMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
 import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
+import com.todongsan.marketservice.market.dto.response.RefundMarketResponse;
 import com.todongsan.marketservice.market.dto.response.SettleMarketResponse;
 import com.todongsan.marketservice.market.dto.response.VoidMarketResponse;
 import com.todongsan.marketservice.market.entity.Market;
@@ -52,6 +53,7 @@ public class AdminMarketService {
 
     private final MarketMapper marketMapper;
     private final MarketSettlementService marketSettlementService;
+    private final MarketRefundService marketRefundService;
 
     @Transactional
     public CreateMarketResponse createMarket(CreateMarketRequest request) {
@@ -150,6 +152,10 @@ public class AdminMarketService {
 
     public SettleMarketResponse retryMarketSettlement(long marketId) {
         return marketSettlementService.retryMarketSettlement(marketId);
+    }
+
+    public RefundMarketResponse refundMarket(long marketId) {
+        return marketRefundService.refundMarket(marketId);
     }
 
     @Transactional

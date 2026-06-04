@@ -4,11 +4,13 @@ import com.todongsan.marketservice.market.entity.Market;
 import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
 import com.todongsan.marketservice.market.entity.MarketPriceHistory;
+import com.todongsan.marketservice.market.entity.MarketRefundDetail;
 import com.todongsan.marketservice.market.entity.MarketSettlement;
 import com.todongsan.marketservice.market.entity.MarketSettlementDetail;
 import com.todongsan.marketservice.market.entity.MarketVoid;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.PredictionStatus;
+import com.todongsan.marketservice.market.type.RefundStatus;
 import com.todongsan.marketservice.market.type.TransactionItemStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -243,12 +245,50 @@ public interface MarketMapper {
 
     long countConfirmedPredictionsForRefund(@Param("marketId") long marketId);
 
+    List<MarketPrediction> selectConfirmedPredictionsForRefund(@Param("marketId") long marketId);
+
     MarketVoid selectMarketVoidByMarketId(@Param("marketId") long marketId);
 
     void insertMarketVoid(MarketVoid marketVoid);
 
     int updateMarketStatusToVoided(
             @Param("marketId") long marketId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    long countRefundDetailsByVoidId(@Param("marketVoidId") long marketVoidId);
+
+    void insertMarketRefundDetails(@Param("details") List<MarketRefundDetail> details);
+
+    List<MarketRefundDetail> selectPendingRefundDetailsByVoidId(@Param("marketVoidId") long marketVoidId);
+
+    int updatePredictionToRefundPending(
+            @Param("predictionId") long predictionId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateRefundDetailStatus(
+            @Param("detailId") long detailId,
+            @Param("status") TransactionItemStatus status,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int markPredictionRefunded(
+            @Param("predictionId") long predictionId,
+            @Param("refundAmount") BigDecimal refundAmount,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int markPredictionRefundUnknown(
+            @Param("predictionId") long predictionId,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateMarketVoidRefundStatus(
+            @Param("marketVoidId") long marketVoidId,
+            @Param("refundStatus") RefundStatus refundStatus,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 }
