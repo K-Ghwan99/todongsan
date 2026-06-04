@@ -11,3 +11,13 @@ spring:
       hibernate:
         format_sql: true
     show-sql: false
+crypto:
+  aes-key: test-aes-key-must-be-32-chars!!!
+
+jwt:
+  secret: test-jwt-secret-must-be-32chars!
+  access-token-expiry: 21600000
+  refresh-token-expiry: 5184000000
+
+kakao:
+  api-base-url: http://localhost:9999
