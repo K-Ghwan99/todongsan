@@ -48,12 +48,12 @@ class MemberAuthServiceImplTest {
     @InjectMocks
     MemberAuthServiceImpl memberAuthServiceImpl;
 
-    private KakaoUserInfo mockKakaoUserInfo(String kakaoId, String nickname, String birthyear, String gender) {
+    private KakaoUserInfo mockKakaoUserInfo(String kakaoId, String nickname, String ageRange, String gender) {
         KakaoUserInfo info = mock(KakaoUserInfo.class);
         when(info.getKakaoId()).thenReturn(kakaoId);
         when(info.getNickname()).thenReturn(nickname);
         when(info.getEmail()).thenReturn(nickname + "@kakao.com");
-        when(info.getBirthyear()).thenReturn(birthyear);
+        when(info.getAgeRange()).thenReturn(ageRange);
         when(info.getGender()).thenReturn(gender);
         return info;
     }
@@ -69,7 +69,7 @@ class MemberAuthServiceImplTest {
 
     @Test
     void kakaoLogin_신규회원_회원저장_토큰저장_포인트적립() {
-        KakaoUserInfo info = mockKakaoUserInfo("12345", "새유저", "1995", "male");
+        KakaoUserInfo info = mockKakaoUserInfo("12345", "새유저", "20~29", "male");
         when(kakaoOAuthService.getUserInfo("kakao-token")).thenReturn(info);
         when(memberRepository.findByOauthProviderAndOauthId("KAKAO", "12345"))
                 .thenReturn(Optional.empty());
@@ -99,7 +99,7 @@ class MemberAuthServiceImplTest {
 
     @Test
     void kakaoLogin_신규회원_가입보상_멱등성_중복처리_안함() {
-        KakaoUserInfo info = mockKakaoUserInfo("12345", "새유저", "1995", "male");
+        KakaoUserInfo info = mockKakaoUserInfo("12345", "새유저", "20~29", "male");
         when(kakaoOAuthService.getUserInfo("kakao-token")).thenReturn(info);
         when(memberRepository.findByOauthProviderAndOauthId("KAKAO", "12345"))
                 .thenReturn(Optional.empty());
@@ -121,7 +121,7 @@ class MemberAuthServiceImplTest {
 
     @Test
     void kakaoLogin_기존회원_카카오_액세스토큰만_갱신() {
-        KakaoUserInfo info = mockKakaoUserInfo("12345", "기존유저", "1990", "female");
+        KakaoUserInfo info = mockKakaoUserInfo("12345", "기존유저", "30~39", "female");
         when(kakaoOAuthService.getUserInfo("new-kakao-token")).thenReturn(info);
 
         Member existing = mockMember(2L, "기존유저");
@@ -148,7 +148,7 @@ class MemberAuthServiceImplTest {
     }
 
     @Test
-    void kakaoLogin_birthyear_null이면_AgeGroup_UNKNOWN() {
+    void kakaoLogin_ageRange_null이면_AgeGroup_UNKNOWN() {
         KakaoUserInfo info = mockKakaoUserInfo("99999", "익명유저", null, null);
         when(kakaoOAuthService.getUserInfo("token")).thenReturn(info);
         when(memberRepository.findByOauthProviderAndOauthId("KAKAO", "99999"))
@@ -163,7 +163,7 @@ class MemberAuthServiceImplTest {
         when(jwtProvider.generateAccessToken(anyLong(), any())).thenReturn("jwt");
         when(jwtProvider.generateRefreshToken(anyLong())).thenReturn("refresh");
 
-        // birthyear=null, gender=null → AgeGroup.UNKNOWN, Gender.UNKNOWN으로 Member가 생성돼야 함
+        // ageRange=null, gender=null → AgeGroup.UNKNOWN, Gender.UNKNOWN으로 Member가 생성돼야 함
         // 실제 Member 생성 인자는 save() 호출 시 검증 (ArgumentCaptor)
         org.mockito.ArgumentCaptor<Member> captor = org.mockito.ArgumentCaptor.forClass(Member.class);
         memberAuthServiceImpl.kakaoLogin("token");
@@ -175,17 +175,17 @@ class MemberAuthServiceImplTest {
         assertThat(createdMember.getGender()).isEqualTo(Gender.UNKNOWN);
     }
 
-    @ParameterizedTest(name = "birthyear={0} → {1}, gender={2} → {3}")
+    @ParameterizedTest(name = "ageRange={0} → {1}, gender={2} → {3}")
     @CsvSource({
-            "2010, AGE_10S,      male,   MALE",
-            "2000, AGE_20S,      female, FEMALE",
-            "1990, AGE_30S,      male,   MALE",
-            "1980, AGE_40S,      female, FEMALE",
-            "1970, AGE_50S_ABOVE,male,   MALE"
+            "10~19, AGE_10S,      male,   MALE",
+            "20~29, AGE_20S,      female, FEMALE",
+            "30~39, AGE_30S,      male,   MALE",
+            "40~49, AGE_40S,      female, FEMALE",
+            "50~59, AGE_50S_ABOVE,male,   MALE"
     })
-    void kakaoLogin_birthyear_gender_변환(String birthyear, AgeGroup expectedAge,
-                                         String genderStr, Gender expectedGender) {
-        KakaoUserInfo info = mockKakaoUserInfo("77777", "유저", birthyear, genderStr);
+    void kakaoLogin_ageRange_gender_변환(String ageRange, AgeGroup expectedAge,
+                                        String genderStr, Gender expectedGender) {
+        KakaoUserInfo info = mockKakaoUserInfo("77777", "유저", ageRange, genderStr);
         when(kakaoOAuthService.getUserInfo("token")).thenReturn(info);
         when(memberRepository.findByOauthProviderAndOauthId("KAKAO", "77777"))
                 .thenReturn(Optional.empty());

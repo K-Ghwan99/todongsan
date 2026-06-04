@@ -1,10 +1,7 @@
 package com.todongsan.memberpointservice.global.security;
 
 import com.todongsan.memberpointservice.member.entity.MemberRole;
-import org.springframework.stereotype.Component;
 
-// TODO 5에서 실제 JWT 구현으로 교체
-@Component
 public class JwtProviderStub implements JwtProvider {
 
     @Override
@@ -17,4 +14,18 @@ public class JwtProviderStub implements JwtProvider {
         return "stub-refresh-token-" + memberId;
     }
 
+    @Override
+    public Long extractMemberId(String token) {
+        return Long.parseLong(token.replace("stub-access-token-", ""));
+    }
+
+    @Override
+    public MemberRole extractRole(String token) {
+        return MemberRole.USER;
+    }
+
+    @Override
+    public void validateToken(String token) {
+        // stub: 항상 유효한 것으로 처리
+    }
 }

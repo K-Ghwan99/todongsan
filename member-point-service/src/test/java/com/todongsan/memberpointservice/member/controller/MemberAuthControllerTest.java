@@ -3,6 +3,7 @@ package com.todongsan.memberpointservice.member.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.todongsan.memberpointservice.global.exception.GlobalExceptionHandler;
 import com.todongsan.memberpointservice.member.dto.response.LoginResponse;
+import com.todongsan.memberpointservice.member.dto.response.TokenResponse;
 import com.todongsan.memberpointservice.member.service.MemberAuthService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -82,6 +83,36 @@ class MemberAuthControllerTest {
         mockMvc.perform(post("/api/v1/members/oauth/kakao")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void refresh_성공_200() throws Exception {
+        TokenResponse tokenResponse = TokenResponse.builder()
+                .accessToken("new-access-jwt")
+                .refreshToken("new-refresh-jwt")
+                .build();
+        when(memberAuthService.refresh(anyString())).thenReturn(tokenResponse);
+
+        String body = objectMapper.writeValueAsString(Map.of("refreshToken", "valid-refresh-token"));
+
+        mockMvc.perform(post("/api/v1/members/token/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.accessToken").value("new-access-jwt"))
+                .andExpect(jsonPath("$.data.refreshToken").value("new-refresh-jwt"));
+    }
+
+    @Test
+    void refresh_refreshToken_누락_400() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of("refreshToken", ""));
+
+        mockMvc.perform(post("/api/v1/members/token/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
     }

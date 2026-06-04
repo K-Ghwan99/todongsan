@@ -26,8 +26,8 @@ public class KakaoUserInfo {
         return kakaoAccount != null ? kakaoAccount.email : null;
     }
 
-    public String getBirthyear() {
-        return kakaoAccount != null ? kakaoAccount.birthyear : null;
+    public String getAgeRange() {
+        return kakaoAccount != null ? kakaoAccount.ageRange : null;
     }
 
     public String getGender() {
@@ -44,8 +44,8 @@ public class KakaoUserInfo {
         @JsonProperty("email")
         private String email;
 
-        @JsonProperty("birthyear")
-        private String birthyear;
+        @JsonProperty("age_range")
+        private String ageRange;
 
         @JsonProperty("gender")
         private String gender;

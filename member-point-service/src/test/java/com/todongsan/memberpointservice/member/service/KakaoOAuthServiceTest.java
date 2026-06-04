@@ -45,7 +45,7 @@ class KakaoOAuthServiceTest {
                   "kakao_account": {
                     "profile": { "nickname": "테스트유저" },
                     "email": "test@kakao.com",
-                    "birthyear": "1995",
+                    "age_range": "20~29",
                     "gender": "male"
                   }
                 }
@@ -60,7 +60,7 @@ class KakaoOAuthServiceTest {
         assertThat(info.getKakaoId()).isEqualTo("12345");
         assertThat(info.getNickname()).isEqualTo("테스트유저");
         assertThat(info.getEmail()).isEqualTo("test@kakao.com");
-        assertThat(info.getBirthyear()).isEqualTo("1995");
+        assertThat(info.getAgeRange()).isEqualTo("20~29");
         assertThat(info.getGender()).isEqualTo("male");
 
         // Authorization 헤더와 경로 검증
