@@ -43,13 +43,15 @@ CREATE TABLE point_history (
     id               BIGINT          NOT NULL AUTO_INCREMENT,
     member_id        BIGINT          NOT NULL,
     type             VARCHAR(50)     NOT NULL,
-    amount           DECIMAL(10,2)   NOT NULL,
-    balance_snapshot DECIMAL(10,2)   NOT NULL,
+    amount           DECIMAL(10,2)   NOT NULL,                      -- 항상 양수. FAILED 시에도 시도한 금액 저장
+    balance_snapshot DECIMAL(10,2)   NOT NULL,                      -- FAILED 시 변경 없는 현재 잔액
     reason           VARCHAR(255),
     reference_type   VARCHAR(50)     NULL,
     reference_id     BIGINT          NULL,
     idempotency_key  VARCHAR(150)    NOT NULL,
     request_hash     VARCHAR(64)     NULL,
+    status           VARCHAR(20)     NOT NULL DEFAULT 'SUCCEEDED',  -- SUCCEEDED / FAILED
+    fail_reason      VARCHAR(50)     NULL,                          -- 실패 ErrorCode (예: POINT_INSUFFICIENT). SUCCEEDED이면 NULL
     created_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
