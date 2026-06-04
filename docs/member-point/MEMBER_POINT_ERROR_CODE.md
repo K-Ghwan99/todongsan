@@ -30,7 +30,7 @@
 
 | ErrorCode | HTTP Status | 메시지 | 발생 조건 | Retry | 실패 후 상태 | 프론트 처리 |
 |---|---|---|---|---|---|---|
-| `POINT_INSUFFICIENT` | 409 | 포인트가 부족합니다. | member.point_balance < 차감 요청액 | X | point_balance 변경 없음, point_history 생성 안 함 | Toast 표시 후 현재 화면 유지 |
+| `POINT_INSUFFICIENT` | 409 | 포인트가 부족합니다. | member.point_balance < 차감 요청액 | X | point_balance 변경 없음, point_history FAILED 레코드 INSERT (Scheduler 대사용) | Toast 표시 후 현재 화면 유지 |
 | `POINT_INVALID_AMOUNT` | 400 | 포인트 금액은 0보다 커야 합니다. | 요청 amount <= 0 | X | 변경 없음 | Toast 표시 후 입력 폼 유지 |
 | `POINT_HISTORY_NOT_FOUND` | 404 | 포인트 내역을 찾을 수 없습니다. | 요청한 point_history.id가 DB에 없음 | X | 변경 없음 | Toast 표시 후 현재 화면 유지 |
 | `POINT_ORIGINAL_TRANSACTION_NOT_FOUND` | 404 | 환불/정산 대상 원본 거래를 찾을 수 없습니다. | 환불/정산 요청의 reference_id에 해당하는 원본 거래 없음 | X | 변경 없음 | Toast 표시 후 관리자 문의 안내 |
@@ -208,9 +208,10 @@
 ```
 POINT_INSUFFICIENT 발생
   → member.point_balance 변경 없음
-  → point_history INSERT 안 함
+  → point_history INSERT (status=FAILED, fail_reason=POINT_INSUFFICIENT, balance_snapshot=현재잔액)
   → 호출한 서비스(Market)에 409 반환
   → Market은 Prediction 상태를 FAILED로 변경
+  → Scheduler 대사 시 transactions API가 status=FAILED 반환 → Market Prediction FAILED 처리
 ```
 
 ### 4-2. 포인트 적립 실패 시 (Battle 투표 후)
@@ -232,8 +233,10 @@ MEMBER_NOT_FOUND 또는 INTERNAL_ERROR 발생
   → point_history INSERT 됐을 수도, 안 됐을 수도 있음
   → member.point_balance 변경 여부 불명확
   → Market이 GET /api/v1/points/transactions?idempotencyKey={key} 호출
-     PROCESSED → point_history 존재, 차감 완료
-     NOT_FOUND → point_history 없음, 미처리 (재시도 가능)
+     PROCESSED  → point_history 존재 (status=SUCCEEDED), 차감 완료 → 가격 확정 재시도
+     FAILED     → point_history 존재 (status=FAILED), 잔액 부족 등 실패 → Prediction FAILED
+     NOT_FOUND  → point_history 없음, 미처리 → 정책에 따라 재차감 또는 UNKNOWN 유지
+     조회 자체 timeout/5xx → Prediction POINT_UNKNOWN 유지
 
 케이스 2: 정산/환불 요청 Timeout
   → Idempotency-Key 들고 재시도 (1회)
@@ -339,12 +342,19 @@ GET /api/v1/points/transactions?idempotencyKey={key}
 Response:
 {
   "idempotencyKey": "uuid",
-  "status": "PROCESSED | NOT_FOUND",
+  "status": "PROCESSED | FAILED | NOT_FOUND",
   "memberId": 1,
-  "amount": 100,
-  "balanceSnapshot": 50
+  "amount": "100.00",
+  "failReason": "POINT_INSUFFICIENT",   // status=FAILED일 때만
+  "balanceSnapshot": "50.00"
 }
 ```
+
+| status | 의미 | Market 처리 |
+|---|---|---|
+| PROCESSED | 차감 성공 | 가격 확정 트랜잭션 재시도 후 CONFIRMED |
+| FAILED | 차감 시도했으나 실패 | Prediction FAILED |
+| NOT_FOUND | 이력 없음 | 재차감 또는 UNKNOWN 유지 |
 
 ---
 

@@ -49,18 +49,28 @@ public class PointHistory extends BaseEntity {
     private Long referenceId;
 
     // 멱등성 키 (중복 처리 방지)
-    @Column(nullable = false, unique = true, length = 100)
+    @Column(nullable = false, unique = true, length = 150)
     private String idempotencyKey;
 
     // 요청 해시 (SHA-256, 충돌 감지)
     @Column(length = 64)
     private String requestHash;
 
+    // 처리 상태 (SUCCEEDED / FAILED). POINT_INSUFFICIENT 등 실패도 이력으로 저장
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private PointTransactionStatus status;
+
+    // 실패 사유 ErrorCode. status=FAILED 일 때만 값이 있음
+    @Column(length = 50)
+    private String failReason;
+
     @Builder
     private PointHistory(Long memberId, PointHistoryType type,
                          BigDecimal amount, BigDecimal balanceSnapshot,
                          String reason, PointReferenceType referenceType,
-                         Long referenceId, String idempotencyKey, String requestHash) {
+                         Long referenceId, String idempotencyKey, String requestHash,
+                         PointTransactionStatus status, String failReason) {
         this.memberId = memberId;
         this.type = type;
         this.amount = amount;
@@ -70,6 +80,8 @@ public class PointHistory extends BaseEntity {
         this.referenceId = referenceId;
         this.idempotencyKey = idempotencyKey;
         this.requestHash = requestHash;
+        this.status = status != null ? status : PointTransactionStatus.SUCCEEDED;
+        this.failReason = failReason;
     }
 
 }

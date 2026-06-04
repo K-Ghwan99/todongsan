@@ -508,7 +508,7 @@ memberId 목록으로 회원의 연령대/성별/거주지 정보를 한 번에 
 GET /api/v1/points/transactions?idempotencyKey={key}
 ```
 
-Market이 포인트 차감 요청 후 Timeout 발생 시 처리 성공 여부를 확인하기 위해 호출한다.
+Market이 포인트 차감 요청 후 Timeout 발생 시 처리 여부를 확인하기 위해 호출한다.
 
 **인증**: 불필요 (내부 서비스 간 호출)
 
@@ -516,24 +516,45 @@ Market이 포인트 차감 요청 후 Timeout 발생 시 처리 성공 여부를
 
 | 파라미터 | 타입 | 필수 | 설명 |
 |---|---|---|---|
-| idempotencyKey | String | Y | 조회할 거래의 Idempotency-Key |
+| idempotencyKey | String | Y | 조회할 거래의 Idempotency-Key. Market은 `market_prediction.point_spend_idempotency_key` 값을 그대로 사용한다 |
 
-**Response 200 — PROCESSED (처리 완료)**
+**Response 200 — PROCESSED (차감 성공)**
 ```json
 {
   "success": true,
   "errorCode": null,
   "message": null,
   "data": {
-    "idempotencyKey": "MARKET_PREDICTION_SPEND:market:7:prediction:1001:member:1",
+    "idempotencyKey": "MARKET_PREDICTION_SPEND:market:7:member:1:attempt:1",
     "status": "PROCESSED",
     "memberId": 1,
     "type": "SPEND_MARKET",
     "amount": "100.00",
     "referenceType": "MARKET_PREDICTION",
     "referenceId": 1001,
-    "requestHashMatched": true,
     "balanceSnapshot": "50.00",
+    "createdAt": "2026-05-28T10:00:00"
+  },
+  "timestamp": "2026-05-28T10:00:00"
+}
+```
+
+**Response 200 — FAILED (차감 시도했으나 실패)**
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "idempotencyKey": "MARKET_PREDICTION_SPEND:market:7:member:1:attempt:1",
+    "status": "FAILED",
+    "memberId": 1,
+    "type": "SPEND_MARKET",
+    "amount": "100.00",
+    "referenceType": "MARKET_PREDICTION",
+    "referenceId": 1001,
+    "failReason": "POINT_INSUFFICIENT",
+    "balanceSnapshot": "30.00",
     "createdAt": "2026-05-28T10:00:00"
   },
   "timestamp": "2026-05-28T10:00:00"
@@ -547,7 +568,7 @@ Market이 포인트 차감 요청 후 Timeout 발생 시 처리 성공 여부를
   "errorCode": null,
   "message": null,
   "data": {
-    "idempotencyKey": "MARKET_PREDICTION_SPEND:market:7:prediction:1001:member:1",
+    "idempotencyKey": "MARKET_PREDICTION_SPEND:market:7:member:1:attempt:1",
     "status": "NOT_FOUND"
   },
   "timestamp": "2026-05-28T10:00:00"
@@ -558,8 +579,11 @@ Market이 포인트 차감 요청 후 Timeout 발생 시 처리 성공 여부를
 
 | status | 의미 | Market 처리 방향 |
 |---|---|---|
-| `PROCESSED` | point_history 존재, 차감 완료 | Prediction CONFIRMED 처리 |
-| `NOT_FOUND` | point_history 없음, 미처리 | Idempotency-Key 들고 재시도 가능 |
+| `PROCESSED` | 차감 성공 (point_history.status = SUCCEEDED) | 가격 확정 트랜잭션 재시도 후 Prediction CONFIRMED |
+| `FAILED` | 차감 시도했으나 실패 (point_history.status = FAILED, 예: POINT_INSUFFICIENT) | Prediction FAILED |
+| `NOT_FOUND` | 처리 이력 없음 (point_history 미존재) | 정책에 따라 재차감 또는 UNKNOWN 유지 |
+
+> **Market Scheduler 처리 원칙**: 조회 자체가 timeout/5xx인 경우 Prediction POINT_UNKNOWN 유지.
 
 **Error Codes**
 
@@ -689,10 +713,13 @@ X-Member-Id: {memberId}
 3. point_history에서 idempotency_key 조회
    → 없으면 신규 요청 → 정상 처리
    → 있으면 request_hash 비교
-      동일 → 기존 처리 결과 반환 (200, POINT_TRANSACTION_ALREADY_PROCESSED)
+      동일 → 기존 처리 결과 반환 (status=SUCCEEDED → 200, status=FAILED → 409 POINT_INSUFFICIENT)
       불일치 → IDEMPOTENCY_KEY_CONFLICT (409)
-4. member.point_balance 잔액 확인 (부족 시 POINT_INSUFFICIENT)
-5. member.point_balance -= amount
+4. member.point_balance 잔액 확인
+   → 부족 시:
+      point_history INSERT (status=FAILED, fail_reason=POINT_INSUFFICIENT, balance_snapshot=현재잔액)
+      → POINT_INSUFFICIENT (409) 반환
+5. member.point_balance -= amount (Atomic UPDATE)
 6. point_history INSERT
    - type: SPEND_MARKET
    - amount: 100 (양수, CHECK > 0 제약)
@@ -700,7 +727,8 @@ X-Member-Id: {memberId}
    - reference_id: 1001
    - balance_snapshot: 변경 후 잔액
    - idempotency_key: 헤더값
-   - request_hash: SHA-256(memberId+type+amount+referenceType+referenceId)
+   - request_hash: SHA-256(memberId+type+normalizedAmount+referenceType+referenceId)
+   - status: SUCCEEDED
 ```
 
 **Response 200**
@@ -745,6 +773,10 @@ Market 정산 완료 시 Market Service가 호출한다.
 Idempotency-Key: {settlementId}
 ```
 
+> **[정책]** Header `Idempotency-Key` 값은 body의 `settlementId`와 동일한 값을 사용해야 한다.
+> 불일치 시 `INVALID_REQUEST` (400) 반환.
+> (Market 팀 정책: batch 요청 추적 ID를 Header와 body 양쪽에 동일하게 전송)
+
 **Request Body**
 ```json
 {
@@ -775,6 +807,9 @@ Idempotency-Key: {settlementId}
 
 **내부 처리**
 ```
+0. Header Idempotency-Key == body settlementId 일치 확인
+   → 불일치 시 INVALID_REQUEST (400) 즉시 반환
+
 items 순회하며 각 prediction에 대해:
   1. member 조회 (탈퇴 회원 포함 — deleted_at 무시)
   2. member.point_balance += amount (Atomic UPDATE)
@@ -856,6 +891,10 @@ POST /api/v1/points/refunds
 Idempotency-Key: {refundId}
 ```
 
+> **[정책]** Header `Idempotency-Key` 값은 body의 `refundId`와 동일한 값을 사용해야 한다.
+> 불일치 시 `INVALID_REQUEST` (400) 반환.
+> (Market/Insight 팀 정책: batch 요청 추적 ID를 Header와 body 양쪽에 동일하게 전송)
+
 **Request Body 예시 1 — Market 무효 환불**
 ```json
 {
@@ -895,6 +934,9 @@ Idempotency-Key: {refundId}
 
 **내부 처리**
 ```
+0. Header Idempotency-Key == body refundId 일치 확인
+   → 불일치 시 INVALID_REQUEST (400) 즉시 반환
+
 items 순회하며 각 건에 대해:
   1. member 조회 (탈퇴 회원 포함 — deleted_at 무시)
   2. member.point_balance += amount (Atomic UPDATE)
