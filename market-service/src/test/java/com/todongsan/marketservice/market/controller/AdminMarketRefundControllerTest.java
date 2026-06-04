@@ -266,6 +266,262 @@ class AdminMarketRefundControllerTest {
         assertPrediction(1001L, "REFUND_UNKNOWN", null);
     }
 
+    @Test
+    void retryRefundMarketCompletesFailedDetailAndSendsExpectedPayload() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUND_PENDING");
+        insertRefundDetail(9001L, 1001L, 1L, "FAILED", "77.00", LocalDateTime.now().minusMinutes(10));
+        int detailCountBefore = refundDetailCount();
+        stubRefundResults(Map.of());
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.refundTargetCount").value(1))
+                .andExpect(jsonPath("$.data.successCount").value(1))
+                .andExpect(jsonPath("$.data.failedCount").value(0))
+                .andExpect(jsonPath("$.data.unknownCount").value(0))
+                .andExpect(jsonPath("$.data.marketStatus").value("VOIDED"))
+                .andExpect(jsonPath("$.data.refundStatus").value("COMPLETED"));
+
+        assertThat(refundDetailCount()).isEqualTo(detailCountBefore);
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_refund_detail", String.class))
+                .isEqualTo("SUCCESS");
+        assertPrediction(1001L, "REFUNDED", "77.00");
+
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<MemberPointRefundBatchRequest> requestCaptor =
+                ArgumentCaptor.forClass(MemberPointRefundBatchRequest.class);
+        verify(memberPointClient).refundMarketPredictions(keyCaptor.capture(), requestCaptor.capture());
+        assertThat(keyCaptor.getValue())
+                .startsWith("MARKET_REFUND_BATCH:market:100:void:500:retry:");
+        assertThat(requestCaptor.getValue().refundId()).isEqualTo(keyCaptor.getValue());
+        assertThat(requestCaptor.getValue().items()).hasSize(1);
+        assertThat(requestCaptor.getValue().items().get(0).amount()).isEqualByComparingTo("77.00");
+        assertThat(requestCaptor.getValue().items().get(0).idempotencyKey())
+                .isEqualTo("EXISTING_REFUND_KEY_1001");
+        assertThat(requestCaptor.getValue().items().get(0).referenceType()).isEqualTo("MARKET_PREDICTION");
+        assertThat(requestCaptor.getValue().items().get(0).referenceId()).isEqualTo(1001L);
+        assertThat(requestCaptor.getValue().items().get(0).reason()).isEqualTo("Market 무효 처리 환불 재시도");
+    }
+
+    @Test
+    void retryRefundMarketCompletesUnknownDetail() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUND_UNKNOWN");
+        insertRefundDetail(9001L, 1001L, 1L, "UNKNOWN", "100.00", LocalDateTime.now().minusMinutes(10));
+        stubRefundResults(Map.of());
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(1))
+                .andExpect(jsonPath("$.data.refundStatus").value("COMPLETED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_refund_detail", String.class))
+                .isEqualTo("SUCCESS");
+        assertPrediction(1001L, "REFUNDED", "100.00");
+    }
+
+    @Test
+    void retryRefundMarketIncludesOldPendingDetail() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUND_PENDING");
+        insertRefundDetail(9001L, 1001L, 1L, "PENDING", "100.00", LocalDateTime.now().minusMinutes(4));
+        stubRefundResults(Map.of());
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.refundTargetCount").value(1))
+                .andExpect(jsonPath("$.data.successCount").value(1));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_refund_detail", String.class))
+                .isEqualTo("SUCCESS");
+        assertPrediction(1001L, "REFUNDED", "100.00");
+    }
+
+    @Test
+    void retryRefundMarketTreatsAlreadyProcessedAsSuccess() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUND_PENDING");
+        insertRefundDetail(9001L, 1001L, 1L, "FAILED", "100.00", LocalDateTime.now().minusMinutes(10));
+        stubRefundResults(Map.of(1001L, MemberPointRefundItemStatus.ALREADY_PROCESSED));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(1))
+                .andExpect(jsonPath("$.data.refundStatus").value("COMPLETED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_refund_detail", String.class))
+                .isEqualTo("SUCCESS");
+        assertPrediction(1001L, "REFUNDED", "100.00");
+    }
+
+    @Test
+    void retryRefundMarketKeepsPartialFailureInProgress() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUND_PENDING");
+        insertPrediction(1002L, 2L, "50.00", "REFUND_UNKNOWN");
+        insertRefundDetail(9001L, 1001L, 1L, "FAILED", "100.00", LocalDateTime.now().minusMinutes(10));
+        insertRefundDetail(9002L, 1002L, 2L, "UNKNOWN", "50.00", LocalDateTime.now().minusMinutes(10));
+        stubRefundResults(Map.of(1002L, MemberPointRefundItemStatus.FAILED));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(1))
+                .andExpect(jsonPath("$.data.failedCount").value(1))
+                .andExpect(jsonPath("$.data.unknownCount").value(0))
+                .andExpect(jsonPath("$.data.refundStatus").value("IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM market_refund_detail ORDER BY prediction_id",
+                String.class
+        )).containsExactly("SUCCESS", "FAILED");
+        assertPrediction(1001L, "REFUNDED", "100.00");
+        assertPrediction(1002L, "REFUND_PENDING", null);
+    }
+
+    @Test
+    void retryRefundMarketMarksUnknownOnBatchTimeout() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUND_PENDING");
+        insertRefundDetail(9001L, 1001L, 1L, "FAILED", "100.00", LocalDateTime.now().minusMinutes(10));
+        when(memberPointClient.refundMarketPredictions(
+                anyString(),
+                any(MemberPointRefundBatchRequest.class)
+        )).thenThrow(new MemberPointTimeoutException("timeout"));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(0))
+                .andExpect(jsonPath("$.data.unknownCount").value(1))
+                .andExpect(jsonPath("$.data.refundStatus").value("IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market WHERE id = ?", String.class, MARKET_ID))
+                .isEqualTo("VOIDED");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_refund_detail", String.class))
+                .isEqualTo("UNKNOWN");
+        assertPrediction(1001L, "REFUND_UNKNOWN", null);
+    }
+
+    @Test
+    void retryRefundMarketCorrectsCompletedWhenAllDetailsAreSuccess() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUNDED");
+        insertRefundDetail(9001L, 1001L, 1L, "SUCCESS", "100.00", LocalDateTime.now().minusMinutes(10));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.refundTargetCount").value(0))
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(0))
+                .andExpect(jsonPath("$.data.unknownCount").value(0))
+                .andExpect(jsonPath("$.data.refundStatus").value("COMPLETED"));
+
+        verifyNoInteractions(memberPointClient);
+        assertThat(jdbcTemplate.queryForObject("SELECT refund_status FROM market_void WHERE id = ?", String.class, VOID_ID))
+                .isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void retryRefundMarketRejectsWhenRefundDetailIsMissing() throws Exception {
+        insertVoidedMarketWithVoid("PENDING");
+
+        expectRetryRefundError(MARKET_ID, 409, "MARKET_REFUND_NOT_ALLOWED");
+
+        verifyNoInteractions(memberPointClient);
+    }
+
+    @Test
+    void retryRefundMarketRejectsRecentPendingOnly() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUND_PENDING");
+        insertRefundDetail(9001L, 1001L, 1L, "PENDING", "100.00", LocalDateTime.now());
+
+        expectRetryRefundError(MARKET_ID, 409, "MARKET_REFUND_NOT_ALLOWED");
+
+        verifyNoInteractions(memberPointClient);
+    }
+
+    @Test
+    void retryRefundMarketRejectsNonVoidedMarket() throws Exception {
+        insertMarket("ACTIVE");
+
+        expectRetryRefundError(MARKET_ID, 409, "MARKET_INVALID_STATUS");
+
+        verifyNoInteractions(memberPointClient);
+    }
+
+    @Test
+    void retryRefundMarketRejectsMissingMarketVoid() throws Exception {
+        insertMarket("VOIDED");
+
+        expectRetryRefundError(MARKET_ID, 409, "MARKET_INVALID_SETTLEMENT_DATA");
+
+        verifyNoInteractions(memberPointClient);
+    }
+
+    @Test
+    void retryRefundMarketMarksMissingItemResultAsUnknown() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUND_PENDING");
+        insertRefundDetail(9001L, 1001L, 1L, "FAILED", "100.00", LocalDateTime.now().minusMinutes(10));
+        when(memberPointClient.refundMarketPredictions(
+                anyString(),
+                any(MemberPointRefundBatchRequest.class)
+        )).thenReturn(new MemberPointRefundBatchResponse(MARKET_ID, List.of()));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.unknownCount").value(1))
+                .andExpect(jsonPath("$.data.refundStatus").value("IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_refund_detail", String.class))
+                .isEqualTo("UNKNOWN");
+        assertPrediction(1001L, "REFUND_UNKNOWN", null);
+    }
+
+    @Test
+    void retryRefundMarketMarksNullItemStatusAsUnknown() throws Exception {
+        insertVoidedMarketWithVoid("IN_PROGRESS");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "REFUND_PENDING");
+        insertRefundDetail(9001L, 1001L, 1L, "FAILED", "100.00", LocalDateTime.now().minusMinutes(10));
+        when(memberPointClient.refundMarketPredictions(
+                anyString(),
+                any(MemberPointRefundBatchRequest.class)
+        )).thenReturn(new MemberPointRefundBatchResponse(
+                MARKET_ID,
+                List.of(new MemberPointRefundItemResult(
+                        1001L,
+                        1L,
+                        null,
+                        null,
+                        new BigDecimal("100.00"),
+                        null
+                ))
+        ));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(0))
+                .andExpect(jsonPath("$.data.unknownCount").value(1))
+                .andExpect(jsonPath("$.data.refundStatus").value("IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_refund_detail", String.class))
+                .isEqualTo("UNKNOWN");
+        assertPrediction(1001L, "REFUND_UNKNOWN", null);
+    }
+
     private void stubRefundResults(Map<Long, MemberPointRefundItemStatus> statuses) {
         when(memberPointClient.refundMarketPredictions(
                 anyString(),
@@ -296,6 +552,12 @@ class AdminMarketRefundControllerTest {
 
     private void expectRefundError(long marketId, int statusCode, String errorCode) throws Exception {
         mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds", marketId))
+                .andExpect(status().is(statusCode))
+                .andExpect(jsonPath("$.errorCode").value(errorCode));
+    }
+
+    private void expectRetryRefundError(long marketId, int statusCode, String errorCode) throws Exception {
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds/retry", marketId))
                 .andExpect(status().is(statusCode))
                 .andExpect(jsonPath("$.errorCode").value(errorCode));
     }
@@ -373,22 +635,38 @@ class AdminMarketRefundControllerTest {
     }
 
     private void insertRefundDetail(long detailId, long predictionId, long memberId, String status) {
+        insertRefundDetail(detailId, predictionId, memberId, status, "100.00", LocalDateTime.now());
+    }
+
+    private void insertRefundDetail(
+            long detailId,
+            long predictionId,
+            long memberId,
+            String status,
+            String refundAmount,
+            LocalDateTime updatedAt
+    ) {
         LocalDateTime now = LocalDateTime.now();
         jdbcTemplate.update("""
                 INSERT INTO market_refund_detail (
                     id, market_void_id, prediction_id, member_id, refund_amount,
                     status, idempotency_key, fail_reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 100.00, ?, ?, NULL, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
                 """,
                 detailId,
                 VOID_ID,
                 predictionId,
                 memberId,
+                new BigDecimal(refundAmount),
                 status,
                 "EXISTING_REFUND_KEY_" + predictionId,
                 now,
-                now
+                updatedAt
         );
+    }
+
+    private int refundDetailCount() {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_refund_detail", Integer.class);
     }
 
     private void assertPrediction(long predictionId, String status, String refundAmount) {

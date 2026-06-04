@@ -11,6 +11,7 @@ import com.todongsan.marketservice.market.dto.response.RefundMarketResponse;
 import com.todongsan.marketservice.market.entity.MarketRefundDetail;
 import com.todongsan.marketservice.market.type.RefundStatus;
 import java.util.List;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +21,7 @@ public class MarketRefundService {
 
     private static final String REFERENCE_TYPE = "MARKET_PREDICTION";
     private static final String REASON = "Market 무효 처리 환불";
+    private static final String RETRY_REASON = "Market 무효 처리 환불 재시도";
 
     private final MarketRefundTransactionService transactionService;
     private final MemberPointClient memberPointClient;
@@ -34,7 +36,7 @@ public class MarketRefundService {
         MemberPointRefundBatchRequest request = new MemberPointRefundBatchRequest(
                 preparation.marketId(),
                 batchIdempotencyKey,
-                toItems(preparation.refundDetails())
+                toItems(preparation.refundDetails(), REASON)
         );
         try {
             MemberPointRefundBatchResponse response = memberPointClient.refundMarketPredictions(
@@ -50,7 +52,33 @@ public class MarketRefundService {
         }
     }
 
-    private List<MemberPointRefundItem> toItems(List<MarketRefundDetail> details) {
+    public RefundMarketResponse retryRefundMarket(long marketId) {
+        MarketRefundRetryPreparation preparation = transactionService.prepareRefundRetry(marketId);
+        if (preparation.completed()) {
+            return preparation.toResponse(0, 0, 0, RefundStatus.COMPLETED);
+        }
+
+        String batchIdempotencyKey = retryBatchIdempotencyKey(preparation);
+        MemberPointRefundBatchRequest request = new MemberPointRefundBatchRequest(
+                preparation.marketId(),
+                batchIdempotencyKey,
+                toItems(preparation.retryDetails(), RETRY_REASON)
+        );
+        try {
+            MemberPointRefundBatchResponse response = memberPointClient.refundMarketPredictions(
+                    batchIdempotencyKey,
+                    request
+            );
+            if (response == null || response.results() == null) {
+                return transactionService.applyRefundRetryUnknown(preparation, "MEMBER_POINT_RESULT_UNKNOWN");
+            }
+            return transactionService.applyRefundRetryResult(preparation, response);
+        } catch (MemberPointTimeoutException | MemberPointUnavailableException | MemberPointExternalException e) {
+            return transactionService.applyRefundRetryUnknown(preparation, failureReason(e, "MEMBER_POINT_RESULT_UNKNOWN"));
+        }
+    }
+
+    private List<MemberPointRefundItem> toItems(List<MarketRefundDetail> details, String reason) {
         return details.stream()
                 .map(detail -> new MemberPointRefundItem(
                         detail.getPredictionId(),
@@ -58,7 +86,7 @@ public class MarketRefundService {
                         detail.getRefundAmount(),
                         REFERENCE_TYPE,
                         detail.getPredictionId(),
-                        REASON,
+                        reason,
                         detail.getIdempotencyKey()
                 ))
                 .toList();
@@ -67,6 +95,11 @@ public class MarketRefundService {
     private String batchIdempotencyKey(MarketRefundPreparation preparation) {
         return "MARKET_REFUND_BATCH:market:%d:void:%d:attempt:1"
                 .formatted(preparation.marketId(), preparation.voidId());
+    }
+
+    private String retryBatchIdempotencyKey(MarketRefundRetryPreparation preparation) {
+        return "MARKET_REFUND_BATCH:market:%d:void:%d:retry:%s"
+                .formatted(preparation.marketId(), preparation.voidId(), UUID.randomUUID());
     }
 
     private String failureReason(RuntimeException exception, String fallback) {
