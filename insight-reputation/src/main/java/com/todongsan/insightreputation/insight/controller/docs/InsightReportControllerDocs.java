@@ -46,7 +46,8 @@ public interface InsightReportControllerDocs {
     })
     ResponseEntity<ApiResponse<InsightReportResponse>> requestBattleReport(
         @Parameter(description = "Battle ID", example = "123") Long battleId,
-        @Parameter(hidden = true) Long memberId
+        @Parameter(hidden = true) Long memberId,
+        @Parameter(description = "멱등성 키 (중복 요청 방지)", example = "battle-report-123-20241201-user456") String idempotencyKey
     );
     
     @Operation(
@@ -123,7 +124,8 @@ public interface InsightReportControllerDocs {
     })
     ResponseEntity<ApiResponse<InsightReportResponse>> requestMarketReport(
         @Parameter(description = "Market ID", example = "456") Long marketId,
-        @Parameter(hidden = true) Long memberId
+        @Parameter(hidden = true) Long memberId,
+        @Parameter(description = "멱등성 키 (중복 요청 방지)", example = "market-report-456-20241201-user789") String idempotencyKey
     );
     
     @Operation(
