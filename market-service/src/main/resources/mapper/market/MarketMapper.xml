@@ -296,6 +296,25 @@
         WHERE id = #{predictionId}
     </select>
 
+    <select id="lockPredictionById" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE id = #{predictionId}
+        FOR UPDATE
+    </select>
+
+    <select id="selectPredictionsForSpendReconciliation" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE status = 'POINT_UNKNOWN'
+           OR (
+                status = 'POINT_PENDING'
+                AND updated_at &lt;= #{pendingThreshold}
+           )
+        ORDER BY updated_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
     <insert id="insertPrediction" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO market_prediction (
             market_id,
@@ -415,9 +434,38 @@
           AND status = 'POINT_PENDING'
     </update>
 
+    <update id="updatePredictionConfirmedForReconciliation">
+        UPDATE market_prediction
+        SET price_snapshot = #{priceSnapshot},
+            contract_quantity = #{contractQuantity},
+            status = 'CONFIRMED',
+            fail_reason = NULL,
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status IN ('POINT_PENDING', 'POINT_UNKNOWN')
+    </update>
+
     <update id="updatePendingPredictionStatus">
         UPDATE market_prediction
         SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'POINT_PENDING'
+    </update>
+
+    <update id="updatePredictionFailedForReconciliation">
+        UPDATE market_prediction
+        SET status = 'FAILED',
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status IN ('POINT_PENDING', 'POINT_UNKNOWN')
+    </update>
+
+    <update id="updatePredictionUnknownFromPending">
+        UPDATE market_prediction
+        SET status = 'POINT_UNKNOWN',
             fail_reason = #{failReason},
             updated_at = #{updatedAt}
         WHERE id = #{predictionId}

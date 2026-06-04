@@ -17,6 +17,7 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -94,78 +95,34 @@ public class MarketPredictionTransactionService {
 
     @Transactional
     public CreatePredictionResponse confirmPrediction(long predictionId) {
-        MarketPrediction pendingPrediction = marketMapper.selectPredictionById(predictionId);
-        if (pendingPrediction == null) {
-            throw priceUpdateConflict();
-        }
-
-        Market market = marketMapper.lockMarketById(pendingPrediction.getMarketId());
-        if (market == null) {
-            throw new CustomException(MarketErrorCode.MARKET_NOT_FOUND);
-        }
-        List<MarketOption> options = marketMapper.lockOptionsByMarketId(market.getId());
-        MarketPrediction prediction = marketMapper.selectPredictionById(predictionId);
-        if (prediction == null || prediction.getStatus() != PredictionStatus.POINT_PENDING) {
-            throw priceUpdateConflict();
-        }
-
-        MarketOption selectedOption = options.stream()
-                .filter(option -> option.getId().equals(prediction.getOptionId()))
-                .findFirst()
-                .orElseThrow(() -> new CustomException(MarketErrorCode.MARKET_OPTION_NOT_FOUND));
-        BigDecimal priceSnapshot = selectedOption.getCurrentPrice().setScale(PRICE_SCALE, RoundingMode.HALF_UP);
-        if (priceSnapshot.compareTo(BigDecimal.ZERO) <= 0) {
-            throw priceUpdateConflict();
-        }
-        BigDecimal contractQuantity = prediction.getPointAmount()
-                .divide(priceSnapshot, PRICE_SCALE, RoundingMode.DOWN);
-        LocalDateTime now = LocalDateTime.now();
-
-        Map<Long, OptionSnapshot> snapshots = options.stream()
-                .collect(Collectors.toMap(MarketOption::getId, OptionSnapshot::from));
-        selectedOption.setRealPoolAmount(selectedOption.getRealPoolAmount().add(prediction.getPointAmount()));
-        selectedOption.setTotalContractQuantity(
-                selectedOption.getTotalContractQuantity().add(contractQuantity)
-        );
-        selectedOption.setPredictionCount(selectedOption.getPredictionCount() + 1);
-
-        BigDecimal totalEffectivePool = options.stream()
-                .map(this::effectivePool)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        if (totalEffectivePool.compareTo(BigDecimal.ZERO) <= 0) {
-            throw priceUpdateConflict();
-        }
-
-        for (MarketOption option : options) {
-            option.setCurrentPrice(effectivePool(option).divide(totalEffectivePool, PRICE_SCALE, RoundingMode.HALF_UP));
-            option.setUpdatedAt(now);
-        }
-        marketMapper.updateMarketTotalPool(market.getId(), prediction.getPointAmount(), now);
-        for (MarketOption option : options) {
-            marketMapper.updateMarketOptionPoolsAndPrice(option);
-        }
-        marketMapper.insertPriceHistoryRows(options.stream()
-                .map(option -> toPriceHistory(predictionId, option, snapshots.get(option.getId()), now))
-                .toList());
-
-        int updatedRows = marketMapper.updatePredictionConfirmed(
+        PredictionConfirmationResult result = confirmPredictionInternal(
                 predictionId,
-                priceSnapshot,
-                contractQuantity,
-                now
+                Set.of(PredictionStatus.POINT_PENDING),
+                Set.of(MarketStatus.ACTIVE),
+                false
         );
-        if (updatedRows != 1) {
+        if (!result.confirmed()) {
             throw priceUpdateConflict();
         }
-        return new CreatePredictionResponse(
+        return result.response();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MarketPrediction> selectPredictionsForSpendReconciliation(
+            LocalDateTime pendingThreshold,
+            int limit
+    ) {
+        return marketMapper.selectPredictionsForSpendReconciliation(pendingThreshold, limit);
+    }
+
+    @Transactional
+    public boolean confirmPredictionForReconciliation(long predictionId) {
+        return confirmPredictionInternal(
                 predictionId,
-                market.getId(),
-                selectedOption.getId(),
-                prediction.getPointAmount(),
-                priceSnapshot,
-                contractQuantity,
-                PredictionStatus.CONFIRMED
-        );
+                Set.of(PredictionStatus.POINT_PENDING, PredictionStatus.POINT_UNKNOWN),
+                Set.of(MarketStatus.ACTIVE, MarketStatus.DATA_PENDING),
+                true
+        ).confirmed();
     }
 
     @Transactional
@@ -176,6 +133,35 @@ public class MarketPredictionTransactionService {
     @Transactional
     public MarketPrediction markPredictionUnknown(long predictionId, String failReason) {
         return updatePendingPredictionStatus(predictionId, PredictionStatus.POINT_UNKNOWN, failReason);
+    }
+
+    @Transactional
+    public boolean failPredictionForReconciliation(long predictionId, String failReason) {
+        return marketMapper.updatePredictionFailedForReconciliation(
+                predictionId,
+                failReason,
+                LocalDateTime.now()
+        ) == 1;
+    }
+
+    @Transactional
+    public ReconciliationStatusUpdateResult markPredictionUnknownForReconciliation(
+            long predictionId,
+            String failReason
+    ) {
+        int updatedRows = marketMapper.updatePredictionUnknownFromPending(
+                predictionId,
+                failReason,
+                LocalDateTime.now()
+        );
+        if (updatedRows == 1) {
+            return ReconciliationStatusUpdateResult.UPDATED;
+        }
+        MarketPrediction prediction = marketMapper.selectPredictionById(predictionId);
+        if (prediction != null && prediction.getStatus() == PredictionStatus.POINT_UNKNOWN) {
+            return ReconciliationStatusUpdateResult.ALREADY_TARGET_STATUS;
+        }
+        return ReconciliationStatusUpdateResult.SKIPPED;
     }
 
     private MarketPrediction updatePendingPredictionStatus(
@@ -237,6 +223,122 @@ public class MarketPredictionTransactionService {
         return option.getRealPoolAmount().add(option.getVirtualPoolAmount());
     }
 
+    private PredictionConfirmationResult confirmPredictionInternal(
+            long predictionId,
+            Set<PredictionStatus> allowedPredictionStatuses,
+            Set<MarketStatus> allowedMarketStatuses,
+            boolean skipOnInvalidState
+    ) {
+        MarketPrediction initialPrediction = marketMapper.selectPredictionById(predictionId);
+        if (initialPrediction == null || hasMissingReconciliationData(initialPrediction)) {
+            return confirmationFailure(skipOnInvalidState);
+        }
+
+        Market market = marketMapper.lockMarketById(initialPrediction.getMarketId());
+        if (market == null) {
+            if (skipOnInvalidState) {
+                return PredictionConfirmationResult.skipped();
+            }
+            throw new CustomException(MarketErrorCode.MARKET_NOT_FOUND);
+        }
+        if (!allowedMarketStatuses.contains(market.getStatus())) {
+            return confirmationFailure(skipOnInvalidState);
+        }
+
+        List<MarketOption> options = marketMapper.lockOptionsByMarketId(market.getId());
+        MarketPrediction prediction = marketMapper.lockPredictionById(predictionId);
+        if (prediction == null
+                || hasMissingReconciliationData(prediction)
+                || !allowedPredictionStatuses.contains(prediction.getStatus())) {
+            return confirmationFailure(skipOnInvalidState);
+        }
+
+        MarketOption selectedOption = options.stream()
+                .filter(option -> option.getId().equals(prediction.getOptionId()))
+                .findFirst()
+                .orElse(null);
+        if (selectedOption == null) {
+            if (skipOnInvalidState) {
+                return PredictionConfirmationResult.skipped();
+            }
+            throw new CustomException(MarketErrorCode.MARKET_OPTION_NOT_FOUND);
+        }
+        BigDecimal priceSnapshot = selectedOption.getCurrentPrice().setScale(PRICE_SCALE, RoundingMode.HALF_UP);
+        if (priceSnapshot.compareTo(BigDecimal.ZERO) <= 0) {
+            return confirmationFailure(skipOnInvalidState);
+        }
+        BigDecimal contractQuantity = prediction.getPointAmount()
+                .divide(priceSnapshot, PRICE_SCALE, RoundingMode.DOWN);
+        LocalDateTime now = LocalDateTime.now();
+
+        Map<Long, OptionSnapshot> snapshots = options.stream()
+                .collect(Collectors.toMap(MarketOption::getId, OptionSnapshot::from));
+        selectedOption.setRealPoolAmount(selectedOption.getRealPoolAmount().add(prediction.getPointAmount()));
+        selectedOption.setTotalContractQuantity(
+                selectedOption.getTotalContractQuantity().add(contractQuantity)
+        );
+        selectedOption.setPredictionCount(selectedOption.getPredictionCount() + 1);
+
+        BigDecimal totalEffectivePool = options.stream()
+                .map(this::effectivePool)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (totalEffectivePool.compareTo(BigDecimal.ZERO) <= 0) {
+            return confirmationFailure(skipOnInvalidState);
+        }
+
+        for (MarketOption option : options) {
+            option.setCurrentPrice(effectivePool(option).divide(totalEffectivePool, PRICE_SCALE, RoundingMode.HALF_UP));
+            option.setUpdatedAt(now);
+        }
+        marketMapper.updateMarketTotalPool(market.getId(), prediction.getPointAmount(), now);
+        for (MarketOption option : options) {
+            marketMapper.updateMarketOptionPoolsAndPrice(option);
+        }
+        marketMapper.insertPriceHistoryRows(options.stream()
+                .map(option -> toPriceHistory(predictionId, option, snapshots.get(option.getId()), now))
+                .toList());
+
+        int updatedRows = skipOnInvalidState
+                ? marketMapper.updatePredictionConfirmedForReconciliation(
+                        predictionId,
+                        priceSnapshot,
+                        contractQuantity,
+                        now
+                )
+                : marketMapper.updatePredictionConfirmed(
+                        predictionId,
+                        priceSnapshot,
+                        contractQuantity,
+                        now
+                );
+        if (updatedRows != 1) {
+            return confirmationFailure(skipOnInvalidState);
+        }
+        return PredictionConfirmationResult.confirmed(new CreatePredictionResponse(
+                predictionId,
+                market.getId(),
+                selectedOption.getId(),
+                prediction.getPointAmount(),
+                priceSnapshot,
+                contractQuantity,
+                PredictionStatus.CONFIRMED
+        ));
+    }
+
+    private PredictionConfirmationResult confirmationFailure(boolean skipOnInvalidState) {
+        if (skipOnInvalidState) {
+            return PredictionConfirmationResult.skipped();
+        }
+        throw priceUpdateConflict();
+    }
+
+    private boolean hasMissingReconciliationData(MarketPrediction prediction) {
+        return prediction.getMarketId() == null
+                || prediction.getOptionId() == null
+                || prediction.getMemberId() == null
+                || prediction.getPointAmount() == null;
+    }
+
     private MarketPriceHistory toPriceHistory(
             long predictionId,
             MarketOption option,
@@ -272,8 +374,28 @@ public class MarketPredictionTransactionService {
             return new OptionSnapshot(
                     option.getCurrentPrice(),
                     option.getRealPoolAmount(),
-                    option.getTotalContractQuantity()
+                option.getTotalContractQuantity()
             );
         }
+    }
+
+    private record PredictionConfirmationResult(
+            boolean confirmed,
+            CreatePredictionResponse response
+    ) {
+
+        private static PredictionConfirmationResult confirmed(CreatePredictionResponse response) {
+            return new PredictionConfirmationResult(true, response);
+        }
+
+        private static PredictionConfirmationResult skipped() {
+            return new PredictionConfirmationResult(false, null);
+        }
+    }
+
+    public enum ReconciliationStatusUpdateResult {
+        UPDATED,
+        ALREADY_TARGET_STATUS,
+        SKIPPED
     }
 }

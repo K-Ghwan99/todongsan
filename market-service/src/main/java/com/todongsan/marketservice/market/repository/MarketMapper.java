@@ -90,6 +90,13 @@ public interface MarketMapper {
 
     MarketPrediction selectPredictionById(@Param("predictionId") long predictionId);
 
+    MarketPrediction lockPredictionById(@Param("predictionId") long predictionId);
+
+    List<MarketPrediction> selectPredictionsForSpendReconciliation(
+            @Param("pendingThreshold") LocalDateTime pendingThreshold,
+            @Param("limit") int limit
+    );
+
     void insertPrediction(MarketPrediction prediction);
 
     int retryFailedPrediction(
@@ -122,9 +129,28 @@ public interface MarketMapper {
             @Param("updatedAt") LocalDateTime updatedAt
     );
 
+    int updatePredictionConfirmedForReconciliation(
+            @Param("predictionId") long predictionId,
+            @Param("priceSnapshot") BigDecimal priceSnapshot,
+            @Param("contractQuantity") BigDecimal contractQuantity,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
     int updatePendingPredictionStatus(
             @Param("predictionId") long predictionId,
             @Param("status") PredictionStatus status,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updatePredictionFailedForReconciliation(
+            @Param("predictionId") long predictionId,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updatePredictionUnknownFromPending(
+            @Param("predictionId") long predictionId,
             @Param("failReason") String failReason,
             @Param("updatedAt") LocalDateTime updatedAt
     );
