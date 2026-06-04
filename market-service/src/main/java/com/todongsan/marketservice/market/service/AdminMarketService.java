@@ -9,6 +9,7 @@ import com.todongsan.marketservice.market.dto.request.CreateMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
 import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
+import com.todongsan.marketservice.market.dto.response.SettleMarketResponse;
 import com.todongsan.marketservice.market.entity.Market;
 import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.repository.MarketInsertRow;
@@ -39,6 +40,7 @@ public class AdminMarketService {
     private static final int PRICE_SCALE = 8;
 
     private final MarketMapper marketMapper;
+    private final MarketSettlementService marketSettlementService;
 
     @Transactional
     public CreateMarketResponse createMarket(CreateMarketRequest request) {
@@ -129,6 +131,10 @@ public class AdminMarketService {
                 request.getResultText(),
                 MarketStatus.CLOSED
         );
+    }
+
+    public SettleMarketResponse settleMarket(long marketId) {
+        return marketSettlementService.settleMarket(marketId);
     }
 
     private Market getMarket(long marketId) {

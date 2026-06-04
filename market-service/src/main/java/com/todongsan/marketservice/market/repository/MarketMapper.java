@@ -4,8 +4,11 @@ import com.todongsan.marketservice.market.entity.Market;
 import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
 import com.todongsan.marketservice.market.entity.MarketPriceHistory;
+import com.todongsan.marketservice.market.entity.MarketSettlement;
+import com.todongsan.marketservice.market.entity.MarketSettlementDetail;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.PredictionStatus;
+import com.todongsan.marketservice.market.type.TransactionItemStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -123,6 +126,65 @@ public interface MarketMapper {
             @Param("predictionId") long predictionId,
             @Param("status") PredictionStatus status,
             @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int startSettlement(
+            @Param("marketId") long marketId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    List<MarketPrediction> selectConfirmedPredictionsForSettlement(@Param("marketId") long marketId);
+
+    void insertMarketSettlement(MarketSettlement settlement);
+
+    void insertMarketSettlementDetails(@Param("details") List<MarketSettlementDetail> details);
+
+    List<MarketSettlementDetail> selectSettlementDetailsBySettlementId(@Param("settlementId") long settlementId);
+
+    int updateMarketSettlementAmounts(
+            @Param("marketId") long marketId,
+            @Param("feeAmount") BigDecimal feeAmount,
+            @Param("settlementPool") BigDecimal settlementPool,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateSettlementDetailStatus(
+            @Param("detailId") long detailId,
+            @Param("status") TransactionItemStatus status,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int settlePrediction(
+            @Param("predictionId") long predictionId,
+            @Param("settledAmount") BigDecimal settledAmount,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int settleLoserPredictions(
+            @Param("marketId") long marketId,
+            @Param("resultOptionId") long resultOptionId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int settleAllConfirmedPredictionsZero(
+            @Param("marketId") long marketId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int completeMarketSettlement(
+            @Param("settlementId") long settlementId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int touchMarketSettlement(
+            @Param("settlementId") long settlementId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int completeMarket(
+            @Param("marketId") long marketId,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 }
