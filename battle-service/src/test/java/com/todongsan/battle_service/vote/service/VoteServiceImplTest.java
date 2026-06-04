@@ -1,14 +1,16 @@
 package com.todongsan.battle_service.vote.service;
 
 import com.todongsan.battle_service.battle.entity.Battle;
-import com.todongsan.battle_service.battle.entity.BattleStatus;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
+import com.todongsan.battle_service.client.MemberPointClient;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
+import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
 import com.todongsan.battle_service.vote.dto.request.VoteRequest;
+import com.todongsan.battle_service.vote.dto.response.CrossAnalysisResponse;
+import com.todongsan.battle_service.vote.dto.response.VoteRawResponse;
 import com.todongsan.battle_service.vote.dto.response.VoteResponse;
 import com.todongsan.battle_service.vote.dto.response.VoteResultResponse;
-import com.todongsan.battle_service.vote.dto.response.VoteRawResponse;
 import com.todongsan.battle_service.vote.entity.BattleVote;
 import com.todongsan.battle_service.vote.repository.BattleVoteRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -27,16 +29,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class VoteServiceImplTest {
 
-    @Mock
-    private BattleRepository battleRepository;
-
-    @Mock
-    private BattleVoteRepository battleVoteRepository;
+    @Mock private BattleRepository battleRepository;
+    @Mock private BattleVoteRepository battleVoteRepository;
+    @Mock private MemberPointClient memberPointClient;
+    @Mock private PointRewardRetryQueueRepository retryQueueRepository;
 
     @InjectMocks
     private VoteServiceImpl voteService;
@@ -44,12 +47,9 @@ class VoteServiceImplTest {
     // ===================== vote =====================
 
     @Test
-    @DisplayName("투표 성공 - 옵션 A")
+    @DisplayName("투표 성공 - 옵션 A + 보상 지급")
     void vote_success_optionA() {
-        Battle battle = activeBattle(
-                LocalDateTime.now().minusDays(1),
-                LocalDateTime.now().plusDays(7)
-        );
+        Battle battle = activeBattle(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(7));
         given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
         given(battleVoteRepository.save(any(BattleVote.class))).willReturn(new BattleVote());
 
@@ -57,15 +57,13 @@ class VoteServiceImplTest {
 
         assertThat(response.getSelectedOption()).isEqualTo("A");
         verify(battleRepository).incrementOptionA(1L);
+        verify(memberPointClient).earnPoint(any());
     }
 
     @Test
     @DisplayName("투표 성공 - 옵션 B")
     void vote_success_optionB() {
-        Battle battle = activeBattle(
-                LocalDateTime.now().minusDays(1),
-                LocalDateTime.now().plusDays(7)
-        );
+        Battle battle = activeBattle(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(7));
         given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
         given(battleVoteRepository.save(any(BattleVote.class))).willReturn(new BattleVote());
 
@@ -76,10 +74,40 @@ class VoteServiceImplTest {
     }
 
     @Test
-    @DisplayName("투표 실패 - PENDING 상태 Battle")
-    void vote_fail_pendingBattle() {
-        Battle battle = pendingBattle();
+    @DisplayName("투표 성공 - 보상 Timeout 시 RetryQueue 적재")
+    void vote_success_rewardTimeout_enqueued() {
+        Battle battle = activeBattle(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(7));
         given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleVoteRepository.save(any(BattleVote.class))).willReturn(new BattleVote());
+        willThrow(new CustomException(ErrorCode.EXTERNAL_SERVICE_TIMEOUT))
+                .given(memberPointClient).earnPoint(any());
+        given(retryQueueRepository.existsByIdempotencyKey(any())).willReturn(false);
+
+        VoteResponse response = voteService.vote(1L, 1L, voteRequest("A"));
+
+        assertThat(response.getSelectedOption()).isEqualTo("A");
+        verify(retryQueueRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("투표 성공 - 보상 4xx 실패 시 RetryQueue 미적재 (로그만)")
+    void vote_success_reward4xx_notEnqueued() {
+        Battle battle = activeBattle(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(7));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleVoteRepository.save(any(BattleVote.class))).willReturn(new BattleVote());
+        willThrow(new CustomException(ErrorCode.POINT_INSUFFICIENT))
+                .given(memberPointClient).earnPoint(any());
+
+        VoteResponse response = voteService.vote(1L, 1L, voteRequest("A"));
+
+        assertThat(response.getSelectedOption()).isEqualTo("A");
+        verify(retryQueueRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("투표 실패 - PENDING 상태 Battle → BATTLE_NOT_FOUND")
+    void vote_fail_pendingBattle() {
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(pendingBattle()));
 
         assertThatThrownBy(() -> voteService.vote(1L, 1L, voteRequest("A")))
                 .isInstanceOf(CustomException.class)
@@ -88,10 +116,9 @@ class VoteServiceImplTest {
     }
 
     @Test
-    @DisplayName("투표 실패 - CLOSED 상태 Battle")
+    @DisplayName("투표 실패 - CLOSED 상태 Battle → BATTLE_CLOSED")
     void vote_fail_closedBattle() {
-        Battle battle = closedBattle();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(closedBattle()));
 
         assertThatThrownBy(() -> voteService.vote(1L, 1L, voteRequest("A")))
                 .isInstanceOf(CustomException.class)
@@ -100,10 +127,9 @@ class VoteServiceImplTest {
     }
 
     @Test
-    @DisplayName("투표 실패 - CANCELLED 상태 Battle")
+    @DisplayName("투표 실패 - CANCELLED 상태 Battle → BATTLE_CLOSED")
     void vote_fail_cancelledBattle() {
-        Battle battle = cancelledBattle();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(cancelledBattle()));
 
         assertThatThrownBy(() -> voteService.vote(1L, 1L, voteRequest("A")))
                 .isInstanceOf(CustomException.class)
@@ -112,12 +138,9 @@ class VoteServiceImplTest {
     }
 
     @Test
-    @DisplayName("투표 실패 - start_at 미도달")
+    @DisplayName("투표 실패 - start_at 미도달 → BATTLE_CLOSED")
     void vote_fail_beforeStartAt() {
-        Battle battle = activeBattle(
-                LocalDateTime.now().plusDays(1),
-                LocalDateTime.now().plusDays(7)
-        );
+        Battle battle = activeBattle(LocalDateTime.now().plusDays(1), LocalDateTime.now().plusDays(7));
         given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
 
         assertThatThrownBy(() -> voteService.vote(1L, 1L, voteRequest("A")))
@@ -127,12 +150,9 @@ class VoteServiceImplTest {
     }
 
     @Test
-    @DisplayName("투표 실패 - 잘못된 옵션")
+    @DisplayName("투표 실패 - 잘못된 옵션 → BATTLE_INVALID_OPTION")
     void vote_fail_invalidOption() {
-        Battle battle = activeBattle(
-                LocalDateTime.now().minusDays(1),
-                LocalDateTime.now().plusDays(7)
-        );
+        Battle battle = activeBattle(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(7));
         given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
 
         assertThatThrownBy(() -> voteService.vote(1L, 1L, voteRequest("C")))
@@ -146,10 +166,7 @@ class VoteServiceImplTest {
     @Test
     @DisplayName("결과 조회 - ACTIVE 배틀, 미투표 → 비공개")
     void getResult_active_notVoted_hidden() {
-        Battle battle = activeBattle(
-                LocalDateTime.now().minusDays(1),
-                LocalDateTime.now().plusDays(7)
-        );
+        Battle battle = activeBattle(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(7));
         given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
         given(battleVoteRepository.existsByBattleIdAndMemberId(1L, 1L)).willReturn(false);
 
@@ -161,10 +178,7 @@ class VoteServiceImplTest {
     @Test
     @DisplayName("결과 조회 - ACTIVE 배틀, 투표 완료 → 공개")
     void getResult_active_voted_visible() {
-        Battle battle = activeBattle(
-                LocalDateTime.now().minusDays(1),
-                LocalDateTime.now().plusDays(7)
-        );
+        Battle battle = activeBattle(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(7));
         given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
         given(battleVoteRepository.existsByBattleIdAndMemberId(1L, 1L)).willReturn(true);
 
@@ -208,14 +222,37 @@ class VoteServiceImplTest {
                         .isEqualTo(ErrorCode.BATTLE_NOT_FOUND));
     }
 
+    // ===================== getCrossResult (관리자 전용) =====================
+
+    @Test
+    @DisplayName("교차분석 조회 성공 - CLOSED 상태")
+    void getCrossResult_success() {
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(closedBattle()));
+
+        CrossAnalysisResponse response = voteService.getCrossResult(1L);
+
+        assertThat(response.getBattleId()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("교차분석 조회 실패 - CLOSED 아님 → BATTLE_RESULT_NOT_AVAILABLE")
+    void getCrossResult_fail_notClosed() {
+        Battle battle = activeBattle(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(7));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+
+        assertThatThrownBy(() -> voteService.getCrossResult(1L))
+                .isInstanceOf(CustomException.class)
+                .satisfies(e -> assertThat(((CustomException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.BATTLE_RESULT_NOT_AVAILABLE));
+    }
+
     // ===================== getRawVotes =====================
 
     @Test
     @DisplayName("투표 원본 데이터 조회 성공")
     void getRawVotes_success() {
-        Battle battle = closedBattle();
         BattleVote vote = BattleVote.builder().battleId(1L).memberId(1L).selectedOption("A").build();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(closedBattle()));
         given(battleVoteRepository.findByBattleId(1L)).willReturn(List.of(vote));
 
         VoteRawResponse response = voteService.getRawVotes(1L);
@@ -232,10 +269,7 @@ class VoteServiceImplTest {
 
     private Battle pendingBattle() {
         Battle battle = Battle.builder()
-                .title("테스트")
-                .optionA("A")
-                .optionB("B")
-                .createdBy(1L)
+                .title("테스트").optionA("A").optionB("B").createdBy(1L)
                 .startAt(LocalDateTime.now().minusDays(1))
                 .endAt(LocalDateTime.now().plusDays(7))
                 .build();
@@ -245,12 +279,8 @@ class VoteServiceImplTest {
 
     private Battle activeBattle(LocalDateTime startAt, LocalDateTime endAt) {
         Battle battle = Battle.builder()
-                .title("테스트")
-                .optionA("A")
-                .optionB("B")
-                .createdBy(1L)
-                .startAt(startAt)
-                .endAt(endAt)
+                .title("테스트").optionA("A").optionB("B").createdBy(1L)
+                .startAt(startAt).endAt(endAt)
                 .build();
         ReflectionTestUtils.setField(battle, "id", 1L);
         battle.approve();
@@ -263,12 +293,8 @@ class VoteServiceImplTest {
 
     private Battle closedBattleWithEndAt(LocalDateTime endAt) {
         Battle battle = Battle.builder()
-                .title("테스트")
-                .optionA("A")
-                .optionB("B")
-                .createdBy(1L)
-                .startAt(endAt.minusDays(7))
-                .endAt(endAt)
+                .title("테스트").optionA("A").optionB("B").createdBy(1L)
+                .startAt(endAt.minusDays(7)).endAt(endAt)
                 .build();
         ReflectionTestUtils.setField(battle, "id", 1L);
         battle.approve();
