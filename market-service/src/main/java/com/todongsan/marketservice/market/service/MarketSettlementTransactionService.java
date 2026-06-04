@@ -194,6 +194,112 @@ public class MarketSettlementTransactionService {
         );
     }
 
+    @Transactional
+    public SettlementRetryPreparation prepareSettlementRetry(long marketId) {
+        LocalDateTime now = LocalDateTime.now();
+        Market market = marketMapper.lockMarketById(marketId);
+        if (market == null) {
+            throw new CustomException(MarketErrorCode.MARKET_NOT_FOUND);
+        }
+        if (market.getStatus() == MarketStatus.SETTLED) {
+            throw new CustomException(MarketErrorCode.MARKET_ALREADY_SETTLED);
+        }
+        if (market.getStatus() != MarketStatus.SETTLEMENT_IN_PROGRESS) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+        }
+
+        MarketSettlement settlement = marketMapper.selectMarketSettlementByMarketId(marketId);
+        if (settlement == null) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_SETTLEMENT_DATA);
+        }
+        if (settlement.getStatus() == SettlementStatus.COMPLETED) {
+            throw new CustomException(MarketErrorCode.MARKET_ALREADY_SETTLED);
+        }
+        if (settlement.getStatus() != SettlementStatus.IN_PROGRESS) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_SETTLEMENT_DATA);
+        }
+
+        List<MarketSettlementDetail> retryDetails = marketMapper.selectRetryableSettlementDetails(settlement.getId());
+        long nonSuccessCount = marketMapper.countNonSuccessSettlementDetails(settlement.getId());
+        if (retryDetails.isEmpty()) {
+            if (nonSuccessCount == 0) {
+                marketMapper.completeMarketSettlement(settlement.getId(), now);
+                marketMapper.completeMarket(marketId, now);
+                return toRetryPreparation(marketId, settlement, List.of(), true);
+            }
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_SETTLEMENT_DATA);
+        }
+
+        return toRetryPreparation(marketId, settlement, retryDetails, false);
+    }
+
+    @Transactional
+    public SettleMarketResponse applySettlementRetryResult(
+            SettlementRetryPreparation preparation,
+            MemberPointSettlementBatchResponse response
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        Map<Long, MemberPointSettlementItemResult> resultsByPredictionId = response.results().stream()
+                .collect(Collectors.toMap(
+                        MemberPointSettlementItemResult::predictionId,
+                        Function.identity(),
+                        (first, ignored) -> first
+                ));
+
+        int successCount = 0;
+        for (MarketSettlementDetail detail : preparation.retryDetails()) {
+            MemberPointSettlementItemResult result = resultsByPredictionId.get(detail.getPredictionId());
+            if (result == null) {
+                markRetryDetail(detail, TransactionItemStatus.UNKNOWN, "MEMBER_POINT_RESULT_MISSING", now);
+                continue;
+            }
+            if (isSuccess(result.status())) {
+                markRetryDetail(detail, TransactionItemStatus.SUCCESS, null, now);
+                marketMapper.settlePrediction(detail.getPredictionId(), detail.getSettledAmount(), now);
+                successCount++;
+                continue;
+            }
+            markRetryDetail(detail, TransactionItemStatus.FAILED, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+        }
+
+        long remainingNonSuccessCount = marketMapper.countNonSuccessSettlementDetails(preparation.settlementId());
+        if (remainingNonSuccessCount == 0) {
+            marketMapper.completeMarketSettlement(preparation.settlementId(), now);
+            marketMapper.completeMarket(preparation.marketId(), now);
+            return preparation.toResponse(
+                    MarketStatus.SETTLED,
+                    SettlementStatus.COMPLETED,
+                    successCount,
+                    0
+            );
+        }
+
+        marketMapper.touchMarketSettlement(preparation.settlementId(), now);
+        int remainingRetryableCount = Math.toIntExact(marketMapper.countRetryableSettlementDetails(preparation.settlementId()));
+        return preparation.toResponse(
+                MarketStatus.SETTLEMENT_IN_PROGRESS,
+                SettlementStatus.IN_PROGRESS,
+                successCount,
+                remainingRetryableCount
+        );
+    }
+
+    @Transactional
+    public SettleMarketResponse applySettlementRetryUnknown(SettlementRetryPreparation preparation, String failReason) {
+        LocalDateTime now = LocalDateTime.now();
+        for (MarketSettlementDetail detail : preparation.retryDetails()) {
+            markRetryDetail(detail, TransactionItemStatus.UNKNOWN, failReason, now);
+        }
+        marketMapper.touchMarketSettlement(preparation.settlementId(), now);
+        int remainingRetryableCount = Math.toIntExact(marketMapper.countRetryableSettlementDetails(preparation.settlementId()));
+        return preparation.toResponse(
+                MarketStatus.SETTLEMENT_IN_PROGRESS,
+                SettlementStatus.IN_PROGRESS,
+                0,
+                remainingRetryableCount
+        );
+    }
+
     private void throwSettlementStartError(long marketId) {
         Market market = marketMapper.selectMarketById(marketId);
         if (market == null) {
@@ -283,6 +389,38 @@ public class MarketSettlementTransactionService {
             LocalDateTime now
     ) {
         marketMapper.updateSettlementDetailStatus(detail.getId(), status, failReason, now);
+    }
+
+    private void markRetryDetail(
+            MarketSettlementDetail detail,
+            TransactionItemStatus status,
+            String failReason,
+            LocalDateTime now
+    ) {
+        marketMapper.updateRetrySettlementDetailStatus(detail.getId(), status, failReason, now);
+    }
+
+    private SettlementRetryPreparation toRetryPreparation(
+            long marketId,
+            MarketSettlement settlement,
+            List<MarketSettlementDetail> retryDetails,
+            boolean completed
+    ) {
+        return new SettlementRetryPreparation(
+                marketId,
+                settlement.getId(),
+                settlement.getResultOptionId(),
+                settlement.getTotalPool(),
+                settlement.getFeeAmount(),
+                settlement.getSettlementPool(),
+                settlement.getWinningContractQuantity(),
+                settlement.getPayoutPerContract(),
+                settlement.getBurnedPointAmount(),
+                Math.toIntExact(marketMapper.countSettlementDetailsBySettlementId(settlement.getId())),
+                Math.toIntExact(marketMapper.countSettledLoserPredictions(marketId, settlement.getResultOptionId())),
+                retryDetails,
+                completed
+        );
     }
 
     private boolean isSuccess(MemberPointSettlementItemStatus status) {

@@ -140,7 +140,22 @@ public interface MarketMapper {
 
     void insertMarketSettlementDetails(@Param("details") List<MarketSettlementDetail> details);
 
+    MarketSettlement selectMarketSettlementByMarketId(@Param("marketId") long marketId);
+
     List<MarketSettlementDetail> selectSettlementDetailsBySettlementId(@Param("settlementId") long settlementId);
+
+    List<MarketSettlementDetail> selectRetryableSettlementDetails(@Param("settlementId") long settlementId);
+
+    long countSettlementDetailsBySettlementId(@Param("settlementId") long settlementId);
+
+    long countNonSuccessSettlementDetails(@Param("settlementId") long settlementId);
+
+    long countRetryableSettlementDetails(@Param("settlementId") long settlementId);
+
+    long countSettledLoserPredictions(
+            @Param("marketId") long marketId,
+            @Param("resultOptionId") long resultOptionId
+    );
 
     int updateMarketSettlementAmounts(
             @Param("marketId") long marketId,
@@ -150,6 +165,13 @@ public interface MarketMapper {
     );
 
     int updateSettlementDetailStatus(
+            @Param("detailId") long detailId,
+            @Param("status") TransactionItemStatus status,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateRetrySettlementDetailStatus(
             @Param("detailId") long detailId,
             @Param("status") TransactionItemStatus status,
             @Param("failReason") String failReason,

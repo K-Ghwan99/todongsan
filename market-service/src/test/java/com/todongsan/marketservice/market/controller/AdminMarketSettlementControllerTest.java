@@ -283,6 +283,169 @@ class AdminMarketSettlementControllerTest {
         assertPrediction(1002L, "SETTLED", "0.00");
     }
 
+    @Test
+    void retryMarketSettlementRetriesFailedDetailAndCompletesSettlement() throws Exception {
+        long settlementId = 500L;
+        insertSettlementMarket("SETTLEMENT_IN_PROGRESS", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "CONFIRMED");
+        insertExistingSettlement(settlementId, "IN_PROGRESS");
+        insertSettlementDetail(9001L, settlementId, 1001L, 1L, "FAILED", "100.00");
+        stubSettlementResults(Map.of());
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(1))
+                .andExpect(jsonPath("$.data.failedCount").value(0))
+                .andExpect(jsonPath("$.data.marketStatus").value("SETTLED"))
+                .andExpect(jsonPath("$.data.settlementStatus").value("COMPLETED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market WHERE id = ?", String.class, MARKET_ID))
+                .isEqualTo("SETTLED");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_settlement_detail", String.class))
+                .isEqualTo("SUCCESS");
+        assertPrediction(1001L, "SETTLED", "100.00");
+
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<MemberPointSettlementBatchRequest> requestCaptor =
+                ArgumentCaptor.forClass(MemberPointSettlementBatchRequest.class);
+        verify(memberPointClient).settleMarketRewards(keyCaptor.capture(), requestCaptor.capture());
+        assertThat(keyCaptor.getValue()).isEqualTo(requestCaptor.getValue().settlementId());
+        assertThat(keyCaptor.getValue())
+                .startsWith("MARKET_SETTLEMENT_BATCH:market:100:settlement:500:retry:");
+        assertThat(requestCaptor.getValue().items()).hasSize(1);
+        assertThat(requestCaptor.getValue().items().get(0).reason())
+                .isEqualTo("Market 정산 보상 재시도");
+        assertThat(requestCaptor.getValue().items().get(0).idempotencyKey())
+                .isEqualTo("RETRY_DETAIL_KEY_1001");
+    }
+
+    @Test
+    void retryMarketSettlementTreatsAlreadyProcessedAsSuccess() throws Exception {
+        long settlementId = 500L;
+        insertSettlementMarket("SETTLEMENT_IN_PROGRESS", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "CONFIRMED");
+        insertExistingSettlement(settlementId, "IN_PROGRESS");
+        insertSettlementDetail(9001L, settlementId, 1001L, 1L, "UNKNOWN", "100.00");
+        stubSettlementResults(Map.of(1001L, MemberPointSettlementItemStatus.ALREADY_PROCESSED));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(1))
+                .andExpect(jsonPath("$.data.failedCount").value(0))
+                .andExpect(jsonPath("$.data.marketStatus").value("SETTLED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_settlement_detail", String.class))
+                .isEqualTo("SUCCESS");
+        assertPrediction(1001L, "SETTLED", "100.00");
+    }
+
+    @Test
+    void retryMarketSettlementKeepsInProgressWhenOneItemStillFails() throws Exception {
+        long settlementId = 500L;
+        insertSettlementMarket("SETTLEMENT_IN_PROGRESS", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "CONFIRMED");
+        insertPrediction(1002L, WIN_OPTION_ID, 2L, "100.00", "1.00000000", "CONFIRMED");
+        insertExistingSettlement(settlementId, "IN_PROGRESS");
+        insertSettlementDetail(9001L, settlementId, 1001L, 1L, "FAILED", "100.00");
+        insertSettlementDetail(9002L, settlementId, 1002L, 2L, "UNKNOWN", "100.00");
+        stubSettlementResults(Map.of(1002L, MemberPointSettlementItemStatus.FAILED));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(1))
+                .andExpect(jsonPath("$.data.failedCount").value(1))
+                .andExpect(jsonPath("$.data.marketStatus").value("SETTLEMENT_IN_PROGRESS"))
+                .andExpect(jsonPath("$.data.settlementStatus").value("IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM market_settlement_detail ORDER BY prediction_id",
+                String.class
+        )).containsExactly("SUCCESS", "FAILED");
+        assertPrediction(1001L, "SETTLED", "100.00");
+        assertPrediction(1002L, "CONFIRMED", null);
+    }
+
+    @Test
+    void retryMarketSettlementMarksUnknownOnBatchTimeout() throws Exception {
+        long settlementId = 500L;
+        insertSettlementMarket("SETTLEMENT_IN_PROGRESS", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "CONFIRMED");
+        insertExistingSettlement(settlementId, "IN_PROGRESS");
+        insertSettlementDetail(9001L, settlementId, 1001L, 1L, "FAILED", "100.00");
+        when(memberPointClient.settleMarketRewards(
+                anyString(),
+                any(MemberPointSettlementBatchRequest.class)
+        )).thenThrow(new MemberPointTimeoutException("timeout"));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(1))
+                .andExpect(jsonPath("$.data.marketStatus").value("SETTLEMENT_IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_settlement_detail", String.class))
+                .isEqualTo("UNKNOWN");
+        assertPrediction(1001L, "CONFIRMED", null);
+    }
+
+    @Test
+    void retryMarketSettlementCompletesWhenNoRetryableDetailsAndAllSuccess() throws Exception {
+        long settlementId = 500L;
+        insertSettlementMarket("SETTLEMENT_IN_PROGRESS", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "SETTLED");
+        insertExistingSettlement(settlementId, "IN_PROGRESS");
+        insertSettlementDetail(9001L, settlementId, 1001L, 1L, "SUCCESS", "100.00");
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(0))
+                .andExpect(jsonPath("$.data.marketStatus").value("SETTLED"))
+                .andExpect(jsonPath("$.data.settlementStatus").value("COMPLETED"));
+
+        verifyNoInteractions(memberPointClient);
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market WHERE id = ?", String.class, MARKET_ID))
+                .isEqualTo("SETTLED");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_settlement", String.class))
+                .isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void retryMarketSettlementRejectsNoRetryableDetailsWithPendingDetail() throws Exception {
+        long settlementId = 500L;
+        insertSettlementMarket("SETTLEMENT_IN_PROGRESS", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "CONFIRMED");
+        insertExistingSettlement(settlementId, "IN_PROGRESS");
+        insertSettlementDetail(9001L, settlementId, 1001L, 1L, "PENDING", "100.00");
+
+        expectRetrySettlementError(MARKET_ID, 409, "MARKET_INVALID_SETTLEMENT_DATA");
+
+        verifyNoInteractions(memberPointClient);
+    }
+
+    @Test
+    void retryMarketSettlementRejectsInvalidStartStates() throws Exception {
+        expectRetrySettlementError(MARKET_ID, 404, "MARKET_NOT_FOUND");
+
+        insertSettlementMarket("SETTLED", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        expectRetrySettlementError(MARKET_ID, 409, "MARKET_ALREADY_SETTLED");
+    }
+
+    @Test
+    void retryMarketSettlementRejectsInProgressMarketWithoutSettlement() throws Exception {
+        insertSettlementMarket("SETTLEMENT_IN_PROGRESS", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+
+        expectRetrySettlementError(MARKET_ID, 409, "MARKET_INVALID_SETTLEMENT_DATA");
+    }
+
     private void stubSettlementResults(Map<Long, MemberPointSettlementItemStatus> statuses) {
         when(memberPointClient.settleMarketRewards(
                 anyString(),
@@ -313,6 +476,12 @@ class AdminMarketSettlementControllerTest {
 
     private void expectSettlementError(long marketId, int statusCode, String errorCode) throws Exception {
         mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements", marketId))
+                .andExpect(status().is(statusCode))
+                .andExpect(jsonPath("$.errorCode").value(errorCode));
+    }
+
+    private void expectRetrySettlementError(long marketId, int statusCode, String errorCode) throws Exception {
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements/retry", marketId))
                 .andExpect(status().is(statusCode))
                 .andExpect(jsonPath("$.errorCode").value(errorCode));
     }
@@ -386,6 +555,54 @@ class AdminMarketSettlementControllerTest {
                 new BigDecimal(contractQuantity),
                 status,
                 "SETTLEMENT_TEST_KEY_" + predictionId,
+                now,
+                now
+        );
+    }
+
+    private void insertExistingSettlement(long settlementId, String status) {
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.update("""
+                INSERT INTO market_settlement (
+                    id, market_id, result_option_id, total_pool, fee_rate, fee_amount,
+                    settlement_pool, winning_contract_quantity, payout_per_contract,
+                    burned_point_amount, status, created_at, updated_at
+                ) VALUES (?, ?, ?, 100.00, 0.00, 0.00, 100.00, 1.00000000,
+                          100.00000000, 0.00, ?, ?, ?)
+                """,
+                settlementId,
+                MARKET_ID,
+                WIN_OPTION_ID,
+                status,
+                now,
+                now
+        );
+    }
+
+    private void insertSettlementDetail(
+            long detailId,
+            long settlementId,
+            long predictionId,
+            long memberId,
+            String status,
+            String settledAmount
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.update("""
+                INSERT INTO market_settlement_detail (
+                    id, settlement_id, prediction_id, member_id, original_point_amount,
+                    contract_quantity, payout_per_contract, settled_amount, profit_amount,
+                    status, idempotency_key, fail_reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 100.00, 1.00000000, 100.00000000, ?, 0.00,
+                          ?, ?, 'previous failure', ?, ?)
+                """,
+                detailId,
+                settlementId,
+                predictionId,
+                memberId,
+                new BigDecimal(settledAmount),
+                status,
+                "RETRY_DETAIL_KEY_" + predictionId,
                 now,
                 now
         );

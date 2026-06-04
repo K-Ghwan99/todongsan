@@ -12,6 +12,7 @@ import com.todongsan.marketservice.market.entity.MarketSettlementDetail;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.SettlementStatus;
 import java.util.List;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +22,7 @@ public class MarketSettlementService {
 
     private static final String REFERENCE_TYPE = "MARKET_PREDICTION";
     private static final String REASON = "Market 정산 보상";
+    private static final String RETRY_REASON = "Market 정산 보상 재시도";
 
     private final MarketSettlementTransactionService transactionService;
     private final MemberPointClient memberPointClient;
@@ -40,7 +42,7 @@ public class MarketSettlementService {
         MemberPointSettlementBatchRequest request = new MemberPointSettlementBatchRequest(
                 preparation.marketId(),
                 batchIdempotencyKey,
-                toItems(preparation.winnerDetails())
+                toItems(preparation.winnerDetails(), REASON)
         );
         try {
             MemberPointSettlementBatchResponse response = memberPointClient.settleMarketRewards(
@@ -56,7 +58,38 @@ public class MarketSettlementService {
         }
     }
 
-    private List<MemberPointSettlementItem> toItems(List<MarketSettlementDetail> details) {
+    public SettleMarketResponse retryMarketSettlement(long marketId) {
+        SettlementRetryPreparation preparation = transactionService.prepareSettlementRetry(marketId);
+        if (preparation.completed()) {
+            return preparation.toResponse(
+                    MarketStatus.SETTLED,
+                    SettlementStatus.COMPLETED,
+                    0,
+                    0
+            );
+        }
+
+        String batchIdempotencyKey = retryBatchIdempotencyKey(preparation);
+        MemberPointSettlementBatchRequest request = new MemberPointSettlementBatchRequest(
+                preparation.marketId(),
+                batchIdempotencyKey,
+                toItems(preparation.retryDetails(), RETRY_REASON)
+        );
+        try {
+            MemberPointSettlementBatchResponse response = memberPointClient.settleMarketRewards(
+                    batchIdempotencyKey,
+                    request
+            );
+            if (response == null || response.results() == null) {
+                return transactionService.applySettlementRetryUnknown(preparation, "MEMBER_POINT_RESULT_UNKNOWN");
+            }
+            return transactionService.applySettlementRetryResult(preparation, response);
+        } catch (MemberPointTimeoutException | MemberPointUnavailableException | MemberPointExternalException e) {
+            return transactionService.applySettlementRetryUnknown(preparation, failureReason(e, "MEMBER_POINT_RESULT_UNKNOWN"));
+        }
+    }
+
+    private List<MemberPointSettlementItem> toItems(List<MarketSettlementDetail> details, String reason) {
         return details.stream()
                 .map(detail -> new MemberPointSettlementItem(
                         detail.getPredictionId(),
@@ -64,7 +97,7 @@ public class MarketSettlementService {
                         detail.getSettledAmount(),
                         REFERENCE_TYPE,
                         detail.getPredictionId(),
-                        REASON,
+                        reason,
                         detail.getIdempotencyKey()
                 ))
                 .toList();
@@ -73,6 +106,11 @@ public class MarketSettlementService {
     private String batchIdempotencyKey(SettlementPreparation preparation) {
         return "MARKET_SETTLEMENT_BATCH:market:%d:settlement:%d:attempt:1"
                 .formatted(preparation.marketId(), preparation.settlementId());
+    }
+
+    private String retryBatchIdempotencyKey(SettlementRetryPreparation preparation) {
+        return "MARKET_SETTLEMENT_BATCH:market:%d:settlement:%d:retry:%s"
+                .formatted(preparation.marketId(), preparation.settlementId(), UUID.randomUUID());
     }
 
     private String failureReason(RuntimeException exception, String fallback) {
