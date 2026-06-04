@@ -857,16 +857,44 @@ PATCH /api/v1/admin/markets/{marketId}/result
 
 이 API는 결과를 확정할 뿐, 실제 포인트 정산을 실행하지 않는다.  
 정산 실행은 별도의 정산 API 또는 Scheduler가 담당한다.
+`CLOSED`는 단순 시간 마감 상태가 아니라 결과 확정 완료 및 정산 준비 완료 상태를 의미한다.
+결과 확정 전에 `POINT_PENDING`, `POINT_UNKNOWN` Prediction이 남아 있으면 `MARKET_INVALID_STATUS`로 실패한다.
+미해결 포인트 차감 건이 있는 Market은 아직 정산 준비 상태가 아니다.
+
+허용 상태 전이:
+
+```text
+ACTIVE + closeAt <= now → CLOSED
+DATA_PENDING → CLOSED
+```
 
 ### Request
 
 ```json
 {
-  "winningOptionId": 2,
-  "actualValue": "0.1834",
-  "source": "KOREA_REAL_ESTATE_BOARD"
+  "resultOptionId": 2,
+  "resultValue": "0.1834",
+  "resultText": "한국부동산원 2026-06-30 기준 OO구 아파트 가격 변동률"
 }
 ```
+
+처리 기준:
+
+```text
+YES_NO, MULTIPLE_CHOICE:
+- resultOptionId 필수
+- resultOptionId가 해당 Market의 option인지 검증
+
+NUMERIC_RANGE:
+- resultValue 필수
+- 서버가 resultValue와 option range를 비교하여 정답 option 계산
+- request.resultOptionId가 있으면 서버 계산 결과와 일치 여부 검증
+- 매칭 option 0개: MARKET_WINNING_OPTION_NOT_FOUND
+- 매칭 option 2개 이상: MARKET_INVALID_SETTLEMENT_DATA
+```
+
+정답 option이 존재하지만 해당 option을 선택한 사용자가 없는 경우에도 결과 확정은 성공한다.
+정답자 존재 여부와 지급 처리는 후속 정산 API의 책임이다.
 
 ### Response
 
@@ -877,22 +905,27 @@ PATCH /api/v1/admin/markets/{marketId}/result
   "message": null,
   "data": {
     "marketId": 1,
-    "winningOptionId": 2,
-    "actualValue": "0.1834",
+    "resultOptionId": 2,
+    "resultValue": "0.1834",
+    "resultText": "한국부동산원 2026-06-30 기준 OO구 아파트 가격 변동률",
     "status": "CLOSED"
   },
-  "timestamp": "2026-05-29T15:30:00"
+  "timestamp": "2026-06-02T16:00:00"
 }
 ```
+
+이 API는 Member-Point를 호출하지 않고, Prediction 상태 및 PriceHistory를 변경하지 않는다.
 
 ### 발생 가능한 ErrorCode
 
 | ErrorCode | HTTP Status | 설명 |
 |---|---:|---|
 | `MARKET_NOT_FOUND` | 404 | Market 없음 |
-| `MARKET_INVALID_STATUS` | 409 | 결과 확정 가능한 상태가 아님 |
+| `MARKET_INVALID_STATUS` | 409 | 결과 확정 가능한 상태가 아니거나 미해결 포인트 차감 건이 남아 있음 |
+| `MARKET_OPTION_NOT_FOUND` | 404 | 해당 Market의 선택지가 아님 |
 | `MARKET_WINNING_OPTION_NOT_FOUND` | 409 | 정답 선택지 계산 실패 |
 | `MARKET_INVALID_SETTLEMENT_DATA` | 409 | 정산 데이터 비정상 |
+| `VALIDATION_FAILED` | 400 | AnswerType별 필수 결과 값 누락 |
 | `FORBIDDEN` | 403 | 관리자 권한 없음 |
 
 ---
@@ -930,7 +963,7 @@ POST /api/v1/admin/markets/{marketId}/settle
 UPDATE market
 SET status = 'SETTLEMENT_IN_PROGRESS'
 WHERE id = :marketId
-AND status IN ('CLOSED', 'DATA_PENDING');
+AND status = 'CLOSED';
 ```
 
 `affected row = 0`이면 이미 정산 중이거나 정산 가능한 상태가 아니므로 중단한다.

@@ -1,21 +1,27 @@
 package com.todongsan.marketservice.market.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.todongsan.marketservice.market.client.MemberPointClient;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest
@@ -28,8 +34,12 @@ class AdminMarketControllerTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @MockitoBean
+    private MemberPointClient memberPointClient;
+
     @BeforeEach
     void setUp() {
+        reset(memberPointClient);
         jdbcTemplate.update("DELETE FROM market_price_history");
         jdbcTemplate.update("DELETE FROM market_prediction");
         jdbcTemplate.update("DELETE FROM market_option");
@@ -595,6 +605,325 @@ class AdminMarketControllerTest {
         jdbcTemplate.update("UPDATE market SET initial_virtual_liquidity = 0.00 WHERE id = ?", marketId);
 
         expectActivationError(marketId, status().isBadRequest(), "MARKET_INVALID_OPTION");
+    }
+
+    @Test
+    void confirmMarketResultClosesActiveMultipleChoiceMarketWithoutChangingPredictionOrHistory() throws Exception {
+        insertResultMarket(100L, "ACTIVE", "MULTIPLE_CHOICE", LocalDateTime.now().minusMinutes(1));
+        insertResultOption(101L, 100L, "A", null, null, true, false, true);
+        insertResultOption(102L, 100L, "B", null, null, true, false, false);
+        insertTrackingPredictionAndHistory(100L, 101L);
+
+        mockMvc.perform(patch("/api/v1/admin/markets/{marketId}/result", 100L)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(resultRequest(102L, "0.1834", "공공데이터 확정")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.marketId").value(100))
+                .andExpect(jsonPath("$.data.resultOptionId").value(102))
+                .andExpect(jsonPath("$.data.resultValue").value("0.1834"))
+                .andExpect(jsonPath("$.data.resultText").value("공공데이터 확정"))
+                .andExpect(jsonPath("$.data.status").value("CLOSED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market WHERE id = 100", String.class))
+                .isEqualTo("CLOSED");
+        assertThat(jdbcTemplate.queryForObject("SELECT result_option_id FROM market WHERE id = 100", Long.class))
+                .isEqualTo(102L);
+        assertThat(jdbcTemplate.queryForObject("SELECT result_value FROM market WHERE id = 100", String.class))
+                .isEqualTo("0.1834");
+        assertThat(jdbcTemplate.queryForObject("SELECT result_text FROM market WHERE id = 100", String.class))
+                .isEqualTo("공공데이터 확정");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT is_result FROM market_option WHERE market_id = 100 ORDER BY id",
+                Boolean.class
+        )).containsExactly(false, true);
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_prediction", String.class))
+                .isEqualTo("CONFIRMED");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_price_history", Integer.class))
+                .isEqualTo(1);
+        verifyNoInteractions(memberPointClient);
+    }
+
+    @Test
+    void confirmMarketResultClosesActiveYesNoMarket() throws Exception {
+        insertResultMarket(100L, "ACTIVE", "YES_NO", LocalDateTime.now().minusMinutes(1));
+        insertResultOption(101L, 100L, "YES", null, null, true, false, false);
+        insertResultOption(102L, 100L, "NO", null, null, true, false, false);
+
+        expectConfirmedResult(100L, resultRequest(101L, null, null), 101L);
+    }
+
+    @Test
+    void confirmMarketResultClosesDataPendingMarket() throws Exception {
+        insertResultMarket(100L, "DATA_PENDING", "MULTIPLE_CHOICE", LocalDateTime.now().plusDays(1));
+        insertResultOption(101L, 100L, "A", null, null, true, false, false);
+        insertResultOption(102L, 100L, "B", null, null, true, false, false);
+
+        expectConfirmedResult(100L, resultRequest(102L, null, null), 102L);
+    }
+
+    @Test
+    void confirmMarketResultCalculatesNumericRangeOptionFromResultValue() throws Exception {
+        insertNumericRangeResultMarket();
+
+        expectConfirmedResult(100L, resultRequest(null, "0.3000", null), 102L);
+    }
+
+    @Test
+    void confirmMarketResultRejectsPointPendingPredictionWithoutChangingData() throws Exception {
+        insertResultMarket(100L, "ACTIVE", "MULTIPLE_CHOICE", LocalDateTime.now().minusMinutes(1));
+        insertResultOption(101L, 100L, "A", null, null, true, false, true);
+        insertResultOption(102L, 100L, "B", null, null, true, false, false);
+        insertPredictionForResult(100L, 101L, "POINT_PENDING");
+
+        expectResultConfirmationError(100L, resultRequest(102L, null, null), 409, "MARKET_INVALID_STATUS");
+
+        assertUnresolvedPredictionResultConfirmationBlocked("POINT_PENDING");
+    }
+
+    @Test
+    void confirmMarketResultRejectsPointUnknownPredictionWithoutChangingData() throws Exception {
+        insertResultMarket(100L, "ACTIVE", "MULTIPLE_CHOICE", LocalDateTime.now().minusMinutes(1));
+        insertResultOption(101L, 100L, "A", null, null, true, false, true);
+        insertResultOption(102L, 100L, "B", null, null, true, false, false);
+        insertPredictionForResult(100L, 101L, "POINT_UNKNOWN");
+
+        expectResultConfirmationError(100L, resultRequest(102L, null, null), 409, "MARKET_INVALID_STATUS");
+
+        assertUnresolvedPredictionResultConfirmationBlocked("POINT_UNKNOWN");
+    }
+
+    @Test
+    void confirmMarketResultRejectsMissingMarket() throws Exception {
+        expectResultConfirmationError(999L, resultRequest(101L, null, null), 404, "MARKET_NOT_FOUND");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PENDING", "CLOSED", "SETTLEMENT_IN_PROGRESS", "SETTLED", "VOIDED"})
+    void confirmMarketResultRejectsInvalidStatuses(String marketStatus) throws Exception {
+        insertResultMarket(100L, marketStatus, "MULTIPLE_CHOICE", LocalDateTime.now().minusMinutes(1));
+        insertResultOption(101L, 100L, "A", null, null, true, false, false);
+
+        expectResultConfirmationError(100L, resultRequest(101L, null, null), 409, "MARKET_INVALID_STATUS");
+    }
+
+    @Test
+    void confirmMarketResultRejectsActiveMarketBeforeCloseAt() throws Exception {
+        insertResultMarket(100L, "ACTIVE", "MULTIPLE_CHOICE", LocalDateTime.now().plusDays(1));
+        insertResultOption(101L, 100L, "A", null, null, true, false, false);
+
+        expectResultConfirmationError(100L, resultRequest(101L, null, null), 409, "MARKET_INVALID_STATUS");
+    }
+
+    @Test
+    void confirmMarketResultRejectsOptionFromDifferentMarket() throws Exception {
+        insertResultMarket(100L, "ACTIVE", "MULTIPLE_CHOICE", LocalDateTime.now().minusMinutes(1));
+        insertResultOption(101L, 100L, "A", null, null, true, false, false);
+        insertResultMarket(200L, "ACTIVE", "MULTIPLE_CHOICE", LocalDateTime.now().minusMinutes(1));
+        insertResultOption(201L, 200L, "B", null, null, true, false, false);
+
+        expectResultConfirmationError(100L, resultRequest(201L, null, null), 404, "MARKET_OPTION_NOT_FOUND");
+    }
+
+    @Test
+    void confirmMarketResultRejectsNumericRangeWithoutMatchedOption() throws Exception {
+        insertNumericRangeResultMarket();
+
+        expectResultConfirmationError(
+                100L,
+                resultRequest(null, "0.7000", null),
+                409,
+                "MARKET_WINNING_OPTION_NOT_FOUND"
+        );
+    }
+
+    @Test
+    void confirmMarketResultRejectsNumericRangeWithMultipleMatchedOptions() throws Exception {
+        insertResultMarket(100L, "ACTIVE", "NUMERIC_RANGE", LocalDateTime.now().minusMinutes(1));
+        insertResultOption(101L, 100L, "A", "0.0000", "0.3000", true, true, false);
+        insertResultOption(102L, 100L, "B", "0.3000", "0.6000", true, false, false);
+
+        expectResultConfirmationError(
+                100L,
+                resultRequest(null, "0.3000", null),
+                409,
+                "MARKET_INVALID_SETTLEMENT_DATA"
+        );
+    }
+
+    @Test
+    void confirmMarketResultRejectsNumericRangeWhenRequestedOptionDoesNotMatch() throws Exception {
+        insertNumericRangeResultMarket();
+
+        expectResultConfirmationError(
+                100L,
+                resultRequest(101L, "0.3000", null),
+                409,
+                "MARKET_INVALID_SETTLEMENT_DATA"
+        );
+    }
+
+    @Test
+    void confirmMarketResultRejectsMissingRequiredAnswerTypeValue() throws Exception {
+        insertNumericRangeResultMarket();
+
+        expectResultConfirmationError(100L, resultRequest(null, null, null), 400, "VALIDATION_FAILED");
+    }
+
+    private void insertNumericRangeResultMarket() {
+        insertResultMarket(100L, "ACTIVE", "NUMERIC_RANGE", LocalDateTime.now().minusMinutes(1));
+        insertResultOption(101L, 100L, "A", "0.0000", "0.3000", true, false, false);
+        insertResultOption(102L, 100L, "B", "0.3000", "0.6000", true, false, false);
+    }
+
+    private void insertResultMarket(long marketId, String marketStatus, String answerType, LocalDateTime closeAt) {
+        jdbcTemplate.update("""
+                INSERT INTO market (
+                    id, title, category, answer_type, judge_data_source, judge_criteria, judge_date,
+                    status, close_at, total_pool, initial_virtual_liquidity, created_by, created_at, updated_at
+                ) VALUES (?, 'Result Test Market', 'PRICE_INDEX', ?, 'TEST', 'TEST',
+                          ?, ?, ?, 0.00, 200.00, 1, ?, ?)
+                """,
+                marketId,
+                answerType,
+                LocalDate.now(),
+                marketStatus,
+                closeAt,
+                LocalDateTime.now(),
+                LocalDateTime.now()
+        );
+    }
+
+    private void insertResultOption(
+            long optionId,
+            long marketId,
+            String optionCode,
+            String rangeMin,
+            String rangeMax,
+            boolean minInclusive,
+            boolean maxInclusive,
+            boolean isResult
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO market_option (
+                    id, market_id, option_code, option_text, display_order,
+                    range_min, range_max, min_inclusive, max_inclusive,
+                    virtual_pool_amount, real_pool_amount, total_contract_quantity,
+                    current_price, prediction_count, is_result, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 100.00, 0.00, 0.00000000, 0.50000000, 0, ?, ?, ?)
+                """,
+                optionId,
+                marketId,
+                optionCode,
+                optionCode,
+                optionId,
+                rangeMin,
+                rangeMax,
+                minInclusive,
+                maxInclusive,
+                isResult,
+                LocalDateTime.now(),
+                LocalDateTime.now()
+        );
+    }
+
+    private void insertTrackingPredictionAndHistory(long marketId, long optionId) {
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.update("""
+                INSERT INTO market_prediction (
+                    id, market_id, option_id, member_id, point_amount, price_snapshot, contract_quantity,
+                    status, point_spend_idempotency_key, attempt_no, created_at, updated_at
+                ) VALUES (1001, ?, ?, 10, 100.00, 0.50000000, 200.00000000,
+                          'CONFIRMED', 'RESULT_TEST_KEY', 1, ?, ?)
+                """,
+                marketId,
+                optionId,
+                now,
+                now
+        );
+        jdbcTemplate.update("""
+                INSERT INTO market_price_history (
+                    market_id, option_id, prediction_id, price_before, price_after,
+                    real_pool_before, real_pool_after, contract_quantity_before, contract_quantity_after,
+                    event_type, created_at, updated_at
+                ) VALUES (?, ?, 1001, 0.50000000, 0.50000000,
+                          0.00, 0.00, 0.00000000, 0.00000000,
+                          'PREDICTION_CONFIRMED', ?, ?)
+                """,
+                marketId,
+                optionId,
+                now,
+                now
+        );
+    }
+
+    private void insertPredictionForResult(long marketId, long optionId, String predictionStatus) {
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.update("""
+                INSERT INTO market_prediction (
+                    id, market_id, option_id, member_id, point_amount,
+                    status, point_spend_idempotency_key, attempt_no, created_at, updated_at
+                ) VALUES (1001, ?, ?, 10, 100.00, ?, 'RESULT_TEST_KEY', 1, ?, ?)
+                """,
+                marketId,
+                optionId,
+                predictionStatus,
+                now,
+                now
+        );
+    }
+
+    private void assertUnresolvedPredictionResultConfirmationBlocked(String predictionStatus) {
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market WHERE id = 100", String.class))
+                .isEqualTo("ACTIVE");
+        assertThat(jdbcTemplate.queryForObject("SELECT result_option_id FROM market WHERE id = 100", Long.class))
+                .isNull();
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT is_result FROM market_option WHERE market_id = 100 ORDER BY id",
+                Boolean.class
+        )).containsExactly(true, false);
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_prediction", String.class))
+                .isEqualTo(predictionStatus);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_price_history", Integer.class))
+                .isZero();
+        verifyNoInteractions(memberPointClient);
+    }
+
+    private void expectConfirmedResult(long marketId, String request, long resultOptionId) throws Exception {
+        mockMvc.perform(patch("/api/v1/admin/markets/{marketId}/result", marketId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.marketId").value(marketId))
+                .andExpect(jsonPath("$.data.resultOptionId").value(resultOptionId))
+                .andExpect(jsonPath("$.data.status").value("CLOSED"));
+    }
+
+    private void expectResultConfirmationError(
+            long marketId,
+            String request,
+            int statusCode,
+            String errorCode
+    ) throws Exception {
+        mockMvc.perform(patch("/api/v1/admin/markets/{marketId}/result", marketId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().is(statusCode))
+                .andExpect(jsonPath("$.errorCode").value(errorCode));
+    }
+
+    private String resultRequest(Long resultOptionId, String resultValue, String resultText) {
+        return """
+                {
+                  "resultOptionId": %s,
+                  "resultValue": %s,
+                  "resultText": %s
+                }
+                """.formatted(
+                resultOptionId == null ? "null" : resultOptionId,
+                jsonString(resultValue),
+                jsonString(resultText)
+        );
     }
 
     private Long createMarketAndGetId() throws Exception {

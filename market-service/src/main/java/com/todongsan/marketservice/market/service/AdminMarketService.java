@@ -1,12 +1,16 @@
 package com.todongsan.marketservice.market.service;
 
 import com.todongsan.marketservice.global.exception.CustomException;
+import com.todongsan.marketservice.global.exception.errorcode.CommonErrorCode;
 import com.todongsan.marketservice.global.exception.errorcode.MarketErrorCode;
+import com.todongsan.marketservice.market.dto.request.ConfirmMarketResultRequest;
 import com.todongsan.marketservice.market.dto.request.CreateMarketOptionRequest;
 import com.todongsan.marketservice.market.dto.request.CreateMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
+import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
 import com.todongsan.marketservice.market.entity.Market;
+import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.repository.MarketInsertRow;
 import com.todongsan.marketservice.market.repository.MarketMapper;
 import com.todongsan.marketservice.market.repository.MarketOptionInsertRow;
@@ -92,6 +96,41 @@ public class AdminMarketService {
         return new ActivateMarketResponse(marketId, MarketStatus.ACTIVE);
     }
 
+    @Transactional
+    public ConfirmMarketResultResponse confirmMarketResult(long marketId, ConfirmMarketResultRequest request) {
+        LocalDateTime now = LocalDateTime.now();
+        Market market = marketMapper.lockMarketById(marketId);
+        if (market == null) {
+            throw new CustomException(MarketErrorCode.MARKET_NOT_FOUND);
+        }
+        validateResultConfirmation(market, now);
+        if (marketMapper.countUnresolvedPredictionsForResult(marketId) > 0) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+        }
+
+        List<MarketOption> options = marketMapper.lockOptionsByMarketId(marketId);
+        MarketOption resultOption = resolveResultOption(market, options, request);
+
+        marketMapper.clearResultOptions(marketId, now);
+        if (marketMapper.markResultOption(marketId, resultOption.getId(), now) != 1
+                || marketMapper.updateMarketResult(
+                        marketId,
+                        resultOption.getId(),
+                        request.getResultValue(),
+                        request.getResultText(),
+                        now
+                ) != 1) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_SETTLEMENT_DATA);
+        }
+        return new ConfirmMarketResultResponse(
+                marketId,
+                resultOption.getId(),
+                request.getResultValue(),
+                request.getResultText(),
+                MarketStatus.CLOSED
+        );
+    }
+
     private Market getMarket(long marketId) {
         Market market = marketMapper.selectMarketById(marketId);
         if (market == null) {
@@ -116,6 +155,73 @@ public class AdminMarketService {
     private boolean hasInvalidInitialVirtualLiquidity(Market market) {
         return market.getInitialVirtualLiquidity() == null
                 || market.getInitialVirtualLiquidity().compareTo(BigDecimal.ZERO) <= 0;
+    }
+
+    private void validateResultConfirmation(Market market, LocalDateTime now) {
+        if (market.getStatus() == MarketStatus.ACTIVE) {
+            if (market.getCloseAt().isAfter(now)) {
+                throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+            }
+            return;
+        }
+        if (market.getStatus() != MarketStatus.DATA_PENDING) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+        }
+    }
+
+    private MarketOption resolveResultOption(
+            Market market,
+            List<MarketOption> options,
+            ConfirmMarketResultRequest request
+    ) {
+        if (market.getAnswerType() == MarketAnswerType.NUMERIC_RANGE) {
+            return resolveNumericRangeResult(options, request);
+        }
+        if (request.getResultOptionId() == null) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        return findOption(options, request.getResultOptionId());
+    }
+
+    private MarketOption resolveNumericRangeResult(
+            List<MarketOption> options,
+            ConfirmMarketResultRequest request
+    ) {
+        if (request.getResultValue() == null) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        List<MarketOption> matchedOptions = options.stream()
+                .filter(option -> matchesRange(option, request.getResultValue()))
+                .toList();
+        if (matchedOptions.isEmpty()) {
+            throw new CustomException(MarketErrorCode.MARKET_WINNING_OPTION_NOT_FOUND);
+        }
+        if (matchedOptions.size() > 1) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_SETTLEMENT_DATA);
+        }
+        MarketOption resultOption = matchedOptions.get(0);
+        if (request.getResultOptionId() != null
+                && !request.getResultOptionId().equals(resultOption.getId())) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_SETTLEMENT_DATA);
+        }
+        return resultOption;
+    }
+
+    private boolean matchesRange(MarketOption option, BigDecimal resultValue) {
+        boolean matchesMin = option.getRangeMin() == null
+                || resultValue.compareTo(option.getRangeMin()) > 0
+                || resultValue.compareTo(option.getRangeMin()) == 0 && Boolean.TRUE.equals(option.getMinInclusive());
+        boolean matchesMax = option.getRangeMax() == null
+                || resultValue.compareTo(option.getRangeMax()) < 0
+                || resultValue.compareTo(option.getRangeMax()) == 0 && Boolean.TRUE.equals(option.getMaxInclusive());
+        return matchesMin && matchesMax;
+    }
+
+    private MarketOption findOption(List<MarketOption> options, Long resultOptionId) {
+        return options.stream()
+                .filter(option -> option.getId().equals(resultOptionId))
+                .findFirst()
+                .orElseThrow(() -> new CustomException(MarketErrorCode.MARKET_OPTION_NOT_FOUND));
     }
 
     private void validateRequest(CreateMarketRequest request, LocalDateTime now) {
