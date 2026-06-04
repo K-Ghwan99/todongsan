@@ -6,6 +6,7 @@ import com.todongsan.marketservice.market.dto.request.CreateMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
 import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
+import com.todongsan.marketservice.market.dto.response.SettleMarketResponse;
 import com.todongsan.marketservice.market.service.AdminMarketService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -43,5 +44,12 @@ public class AdminMarketController {
             @Valid @RequestBody ConfirmMarketResultRequest request
     ) {
         return ApiResponse.ok(adminMarketService.confirmMarketResult(marketId, request));
+    }
+
+    @PostMapping("/{marketId}/settlements")
+    public ApiResponse<SettleMarketResponse> settleMarket(
+            @PathVariable long marketId
+    ) {
+        return ApiResponse.ok(adminMarketService.settleMarket(marketId));
     }
 }

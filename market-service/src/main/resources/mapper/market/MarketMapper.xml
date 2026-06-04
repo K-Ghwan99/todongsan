@@ -424,4 +424,171 @@
           AND status = 'POINT_PENDING'
     </update>
 
+    <update id="startSettlement">
+        UPDATE market
+        SET status = 'SETTLEMENT_IN_PROGRESS',
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND status = 'CLOSED'
+          AND deleted_at IS NULL
+    </update>
+
+    <select id="selectConfirmedPredictionsForSettlement" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status = 'CONFIRMED'
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <insert id="insertMarketSettlement" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO market_settlement (
+            market_id,
+            result_option_id,
+            total_pool,
+            fee_rate,
+            fee_amount,
+            settlement_pool,
+            winning_contract_quantity,
+            payout_per_contract,
+            burned_point_amount,
+            status,
+            settled_by,
+            settled_at,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{marketId},
+            #{resultOptionId},
+            #{totalPool},
+            #{feeRate},
+            #{feeAmount},
+            #{settlementPool},
+            #{winningContractQuantity},
+            #{payoutPerContract},
+            #{burnedPointAmount},
+            #{status},
+            #{settledBy},
+            #{settledAt},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <insert id="insertMarketSettlementDetails">
+        INSERT INTO market_settlement_detail (
+            settlement_id,
+            prediction_id,
+            member_id,
+            original_point_amount,
+            contract_quantity,
+            payout_per_contract,
+            settled_amount,
+            profit_amount,
+            status,
+            idempotency_key,
+            fail_reason,
+            created_at,
+            updated_at
+        ) VALUES
+        <foreach collection="details" item="detail" separator=",">
+            (
+                #{detail.settlementId},
+                #{detail.predictionId},
+                #{detail.memberId},
+                #{detail.originalPointAmount},
+                #{detail.contractQuantity},
+                #{detail.payoutPerContract},
+                #{detail.settledAmount},
+                #{detail.profitAmount},
+                #{detail.status},
+                #{detail.idempotencyKey},
+                #{detail.failReason},
+                #{detail.createdAt},
+                #{detail.updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectSettlementDetailsBySettlementId" resultType="com.todongsan.marketservice.market.entity.MarketSettlementDetail">
+        SELECT *
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+        ORDER BY id ASC
+    </select>
+
+    <update id="updateMarketSettlementAmounts">
+        UPDATE market
+        SET fee_amount = #{feeAmount},
+            settlement_pool = #{settlementPool},
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND status = 'SETTLEMENT_IN_PROGRESS'
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="updateSettlementDetailStatus">
+        UPDATE market_settlement_detail
+        SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{detailId}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="settlePrediction">
+        UPDATE market_prediction
+        SET status = 'SETTLED',
+            settled_amount = #{settledAmount},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'CONFIRMED'
+    </update>
+
+    <update id="settleLoserPredictions">
+        UPDATE market_prediction
+        SET status = 'SETTLED',
+            settled_amount = 0.00,
+            updated_at = #{updatedAt}
+        WHERE market_id = #{marketId}
+          AND option_id != #{resultOptionId}
+          AND status = 'CONFIRMED'
+    </update>
+
+    <update id="settleAllConfirmedPredictionsZero">
+        UPDATE market_prediction
+        SET status = 'SETTLED',
+            settled_amount = 0.00,
+            updated_at = #{updatedAt}
+        WHERE market_id = #{marketId}
+          AND status = 'CONFIRMED'
+    </update>
+
+    <update id="completeMarketSettlement">
+        UPDATE market_settlement
+        SET status = 'COMPLETED',
+            settled_at = #{updatedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{settlementId}
+          AND status = 'IN_PROGRESS'
+    </update>
+
+    <update id="touchMarketSettlement">
+        UPDATE market_settlement
+        SET updated_at = #{updatedAt}
+        WHERE id = #{settlementId}
+          AND status = 'IN_PROGRESS'
+    </update>
+
+    <update id="completeMarket">
+        UPDATE market
+        SET status = 'SETTLED',
+            settled_at = #{updatedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND status = 'SETTLEMENT_IN_PROGRESS'
+          AND deleted_at IS NULL
+    </update>
+
 </mapper>
