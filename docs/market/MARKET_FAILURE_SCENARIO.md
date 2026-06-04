@@ -773,7 +773,7 @@ Prediction POINT_PENDING 저장
 | 항목 | 내용 |
 |---|---|
 | 발생 시점 | Member-Point 정산 보상 batch API 호출 |
-| 실패 원인 | 일부 item의 지급 요청 실패 |
+| 실패 원인 | 일부 item의 지급 요청 실패 또는 일부 item만 FAILED 응답 |
 | 상태 변화 | MarketStatus = SETTLEMENT_IN_PROGRESS 유지 |
 | 성공 건 | PredictionStatus = SETTLED, market_settlement_detail.status = SUCCESS |
 | 실패 건 | market_settlement_detail.status = FAILED 또는 UNKNOWN |
@@ -783,23 +783,113 @@ Prediction POINT_PENDING 저장
 
 정산 batch API는 유지하되, 멱등성은 item 단위로 보장한다.
 
+Header Idempotency-Key는 Member-Point 정산 batch 요청 전체를 추적하기 위한 필수 헤더다. 실제 유저별 중복 지급 방지 기준은 아니다. 부분 실패 후 실패 item만 재시도할 경우 새 Header Idempotency-Key를 사용할 수 있다.
+
 정산 item Idempotency-Key:
 
 ```text
 MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{memberId}
 ```
 
+같은 Prediction에 대한 재시도에서는 항상 같은 item.idempotencyKey를 사용한다.
+
 Member-Point 응답의 item별 `results[]` 처리 기준:
 
 | status | Market 처리 |
 |---|---|
-| `PROCESSED` | 성공으로 처리 |
-| `ALREADY_PROCESSED` | 이미 처리된 거래이므로 성공으로 처리 |
-| `FAILED` | 실패 건으로 기록하고 다음 Scheduler 주기에 재시도 |
+| `PROCESSED` | detail `SUCCESS`, Prediction `SETTLED` |
+| `ALREADY_PROCESSED` | 성공으로 간주, detail `SUCCESS`, Prediction `SETTLED` |
+| `FAILED` | detail `FAILED`, MarketStatus = SETTLEMENT_IN_PROGRESS 유지 |
 
 ---
 
-### 8-6. 정산 대상 예측이 없는 경우
+### 8-6. 정산 batch 요청 timeout
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Member-Point 정산 batch API 호출 |
+| 실패 원인 | timeout, 연결 실패, 응답 불명확 |
+| 상태 변화 | MarketStatus = SETTLEMENT_IN_PROGRESS 유지, market_settlement.status = IN_PROGRESS 유지 |
+| 요청 대상 detail | UNKNOWN으로 기록 |
+| 재시도 | O |
+| 복구 방식 | 후속 재시도 API 또는 Scheduler에서 UNKNOWN detail 재시도 |
+| 관련 ErrorCode | EXTERNAL_SERVICE_TIMEOUT 또는 EXTERNAL_SERVICE_UNAVAILABLE |
+| HTTP Status | 504 또는 503 |
+
+멱등성 처리:
+
+```text
+재시도 시 item.idempotencyKey는 동일하게 유지한다.
+Header Idempotency-Key는 새로운 batch 요청 추적용 키를 사용할 수 있다.
+```
+
+---
+
+### 8-7. 정산 batch 부분 실패
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Member-Point 정산 batch API 응답 수신 |
+| 상황 | results[] 중 일부 item은 PROCESSED 또는 ALREADY_PROCESSED, 일부 item은 FAILED |
+| 상태 변화 | MarketStatus = SETTLEMENT_IN_PROGRESS 유지, market_settlement.status = IN_PROGRESS 유지 |
+| 성공 item | detail SUCCESS, Prediction SETTLED |
+| 실패 item | detail FAILED |
+| 재시도 | O |
+| 복구 방식 | 실패 detail만 후속 재시도 대상 |
+| 관련 ErrorCode | MARKET_SETTLEMENT_FAILED 또는 EXTERNAL_SERVICE_ERROR |
+| HTTP Status | 500 또는 502 |
+
+부분 실패는 전체 정산 실패로 단정하지 않는다. 성공한 item은 확정하고 실패한 item만 재시도 대상으로 남긴다.
+
+---
+
+### 8-8. 이미 처리된 item 재시도
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 정산 실패 또는 UNKNOWN detail 재시도 |
+| 상황 | 같은 Prediction에 대해 같은 item.idempotencyKey로 재시도 |
+| Member-Point 응답 | ALREADY_PROCESSED 또는 POINT_TRANSACTION_ALREADY_PROCESSED 성격의 응답 |
+| 상태 변화 | detail SUCCESS, Prediction SETTLED |
+| 재시도 | 필요 없음 |
+| 관련 ErrorCode | 없음 |
+
+이미 처리된 item 재시도는 성공으로 간주한다.
+
+---
+
+### 8-9. 승자 없는 정산
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 정산 |
+| 조건 | 정답 option은 있으나 해당 option을 선택한 CONFIRMED Prediction이 없음 |
+| Member-Point 호출 | 정산 batch API 호출 없음 |
+| 정산 detail | market_settlement_detail 생성 0건 |
+| 상태 변화 | 모든 CONFIRMED Prediction SETTLED, settledAmount = 0.00, MarketStatus = SETTLED |
+| burnedPointAmount | settlementPool 전체 |
+| 재시도 | 필요 없음 |
+| 관련 ErrorCode | 없음 |
+
+승자 없음은 정산 실패가 아니다.
+
+---
+
+### 8-10. 소수점 버림 잔여 금액 발생
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 정산 금액 계산 |
+| 상황 | 정산 금액을 소수점 둘째 자리까지 버림 처리하면서 settlementPool 일부가 남음 |
+| 처리 | 남은 금액은 burnedPointAmount에 기록 |
+| Member-Point 지급 | 지급 대상 아님 |
+| 관련 ErrorCode | 없음 |
+
+정산 지급 금액은 소수점 둘째 자리까지 사용하고 셋째 자리 이하는 `RoundingMode.DOWN`으로 버림 처리한다.
+
+---
+
+### 8-11. 정산 대상 예측이 없는 경우
 
 | 항목 | 내용 |
 |---|---|
