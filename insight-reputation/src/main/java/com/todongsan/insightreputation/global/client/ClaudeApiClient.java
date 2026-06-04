@@ -36,12 +36,12 @@ public class ClaudeApiClient {
     private String model;
 
     /**
-     * Claude API를 통한 Battle 분석
+     * Claude API를 통한 AI 분석
      * 
      * @param prompt 분석 프롬프트
      * @return 분석 결과
      */
-    public String analyzeBattle(String prompt) {
+    public String analyze(String prompt) {
         if (apiKey == null || apiKey.trim().isEmpty()) {
             log.warn("Claude API key가 설정되지 않음. 목업 응답 반환");
             return generateMockAnalysis();

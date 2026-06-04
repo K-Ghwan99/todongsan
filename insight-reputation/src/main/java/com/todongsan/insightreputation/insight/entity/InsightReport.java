@@ -99,21 +99,22 @@ public class InsightReport extends BaseEntity {
         this.processingStartedAt = LocalDateTime.now();
     }
 
-    public void complete(String reportContent) {
+    public void complete(String summary) {
         if (this.status != InsightReportStatus.PROCESSING) {
             throw new IllegalStateException("PROCESSING 상태에서만 완료 가능: current=" + this.status);
         }
         this.status = InsightReportStatus.DONE;
-        this.reportContent = reportContent;
+        this.summary = summary;
         this.generatedAt = LocalDateTime.now();
     }
 
-    public void failPermanently(String reason) {
-        if (this.status == InsightReportStatus.DONE) {
-            throw new IllegalStateException("DONE 상태에서는 실패로 전환할 수 없음: current=" + this.status);
+    public void fail(String reason) {
+        if (this.status != InsightReportStatus.PROCESSING) {
+            throw new IllegalStateException("PROCESSING 상태에서만 실패로 전환 가능: current=" + this.status);
         }
         this.status = InsightReportStatus.FAILED;
         this.failedReason = reason;
+        this.retryCount++;
     }
 
     public void resetForRetry() {
@@ -125,7 +126,7 @@ public class InsightReport extends BaseEntity {
         }
         this.status = InsightReportStatus.PENDING;
         this.processingStartedAt = null;
-        this.retryCount++;
+        // retry_count는 fail() 메서드에서 이미 증가했으므로 여기서는 증가하지 않음
     }
 
     public boolean canRetry() {

@@ -47,7 +47,7 @@ public class InsightReportRecoveryScheduler {
                 // 최대 재시도 횟수 초과 여부 확인
                 if (report.getRetryCount() >= InsightReport.MAX_RETRY_COUNT) {
                     // 영구 실패로 전환
-                    report.failPermanently("처리 타임아웃으로 인한 영구 실패");
+                    report.fail("처리 타임아웃으로 인한 영구 실패");
                     log.error("리포트 영구 실패 처리: reportId={}, retryCount={}", 
                              report.getId(), report.getRetryCount());
                 } else {
