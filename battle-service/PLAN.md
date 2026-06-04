@@ -46,10 +46,9 @@ Feature 1 (Global 설정)
 
 **createBattle 흐름:**
 1. 요청 헤더 `X-Member-Id` → memberId 추출
-2. `end_at > start_at` AND `start_at > NOW()` 검증 (실패 → `BATTLE_INVALID_PERIOD`)
-3. Member-Point `SPEND_BATTLE_CREATE` 30P 차감 (실패 → 예외 전파)
-4. Battle INSERT (`status=PENDING`)
-5. `BattleCreateResponse` 반환
+2. `end_at > start_at` AND `end_at > NOW()` 검증 (실패 → `BATTLE_INVALID_PERIOD`)
+3. Battle INSERT (`status=PENDING`) — 포인트 차감 없음
+4. `BattleCreateResponse` 반환
 
 **getBattle 분기:**
 - `status = PENDING or CANCELLED` → `BATTLE_NOT_FOUND` 반환 (일반 사용자 비공개)
@@ -129,7 +128,6 @@ CLOSED + 미투표/비회원 + 72h 경과  → 전체 결과 비율만
 댓글 보상:    battle:comment:{commentId}:member:{memberId}
 승리 보상:    battle:settle:{battleId}:member:{memberId}
 승인 보상:    battle:approved:{battleId}:member:{memberId}
-생성권 차감:  battle:create:{battleId}:member:{memberId}
 ```
 
 ---

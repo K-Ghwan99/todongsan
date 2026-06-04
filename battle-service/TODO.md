@@ -32,7 +32,7 @@
 ### 서비스 & 컨트롤러
 - [ ] `battle/service/BattleService.java` — 인터페이스
 - [ ] `battle/service/BattleServiceImpl.java` — 구현체
-  - `createBattle(Long memberId, BattleCreateRequest)` — PENDING 생성, Member-Point SPEND_BATTLE_CREATE 호출
+  - `createBattle(Long memberId, BattleCreateRequest)` — PENDING 생성 (포인트 차감 없음)
   - `getBattles(String status, int page, int size)` — ACTIVE/CLOSED만 노출
   - `getBattle(Long battleId)` — PENDING/CANCELLED는 BATTLE_NOT_FOUND 처리
   - `approveBattle(Long battleId)` — PENDING → ACTIVE, 생성자에게 EARN_BATTLE_APPROVED 보상
