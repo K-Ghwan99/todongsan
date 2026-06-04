@@ -1,5 +1,7 @@
 package com.todongsan.battle_service.vote.controller;
 
+import com.todongsan.battle_service.global.exception.CustomException;
+import com.todongsan.battle_service.global.exception.ErrorCode;
 import com.todongsan.battle_service.global.response.ApiResponse;
 import com.todongsan.battle_service.vote.dto.request.VoteRequest;
 import com.todongsan.battle_service.vote.dto.response.*;
@@ -34,21 +36,27 @@ public class VoteController {
         return ApiResponse.ok(voteService.getResult(battleId, memberId));
     }
 
-    // GET /api/v1/battles/{battleId}/result/cross (30P 소비)
+    // GET /api/v1/battles/{battleId}/result/cross (관리자 전용)
     @GetMapping("/{battleId}/result/cross")
     public ApiResponse<CrossAnalysisResponse> getCrossResult(
             @PathVariable Long battleId,
-            @RequestHeader("X-Member-Id") Long memberId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        return ApiResponse.ok(voteService.getCrossResult(battleId, memberId, idempotencyKey));
+            @RequestHeader("X-Member-Role") String role) {
+        validateAdmin(role);
+        return ApiResponse.ok(voteService.getCrossResult(battleId));
     }
 
-    // GET /api/v1/battles/{battleId}/result/certified (30P 소비)
+    // GET /api/v1/battles/{battleId}/result/certified (관리자 전용)
     @GetMapping("/{battleId}/result/certified")
     public ApiResponse<CertifiedResultResponse> getCertifiedResult(
             @PathVariable Long battleId,
-            @RequestHeader("X-Member-Id") Long memberId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        return ApiResponse.ok(voteService.getCertifiedResult(battleId, memberId, idempotencyKey));
+            @RequestHeader("X-Member-Role") String role) {
+        validateAdmin(role);
+        return ApiResponse.ok(voteService.getCertifiedResult(battleId));
+    }
+
+    private void validateAdmin(String role) {
+        if (!"ADMIN".equals(role)) {
+            throw new CustomException(ErrorCode.FORBIDDEN);
+        }
     }
 }

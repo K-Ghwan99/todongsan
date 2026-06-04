@@ -5,24 +5,35 @@ import com.todongsan.battle_service.battle.dto.response.*;
 import com.todongsan.battle_service.battle.entity.Battle;
 import com.todongsan.battle_service.battle.entity.BattleStatus;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
+import com.todongsan.battle_service.client.MemberPointClient;
+import com.todongsan.battle_service.client.dto.PointEarnRequest;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
+import com.todongsan.battle_service.retry.entity.PointRewardRetryQueue;
+import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class BattleServiceImpl implements BattleService {
 
+    private static final BigDecimal APPROVED_REWARD = BigDecimal.valueOf(20);
+
     private final BattleRepository battleRepository;
+    private final MemberPointClient memberPointClient;
+    private final PointRewardRetryQueueRepository retryQueueRepository;
 
     @Override
     @Transactional
@@ -67,7 +78,33 @@ public class BattleServiceImpl implements BattleService {
         }
         battle.approve();
 
-        // TODO: 생성자에게 EARN_BATTLE_APPROVED 20P 지급 (Feature 5)
+        String idempotencyKey = "battle:approved:" + battleId + ":member:" + battle.getCreatedBy();
+        try {
+            memberPointClient.earnPoint(PointEarnRequest.builder()
+                    .memberId(battle.getCreatedBy())
+                    .type("EARN_BATTLE_APPROVED")
+                    .referenceType("BATTLE")
+                    .referenceId(battleId)
+                    .amount(APPROVED_REWARD)
+                    .idempotencyKey(idempotencyKey)
+                    .build());
+        } catch (CustomException e) {
+            if (e.getErrorCode() == ErrorCode.EXTERNAL_SERVICE_TIMEOUT) {
+                if (!retryQueueRepository.existsByIdempotencyKey(idempotencyKey)) {
+                    retryQueueRepository.save(PointRewardRetryQueue.builder()
+                            .memberId(battle.getCreatedBy())
+                            .referenceType("BATTLE")
+                            .referenceId(battleId)
+                            .type("EARN_BATTLE_APPROVED")
+                            .amount(APPROVED_REWARD)
+                            .idempotencyKey(idempotencyKey)
+                            .build());
+                }
+                log.warn("Approved reward enqueued for retry: member={}, battle={}", battle.getCreatedBy(), battleId);
+            } else {
+                log.warn("Approved reward failed (4xx), manual correction needed: member={}, battle={}", battle.getCreatedBy(), battleId);
+            }
+        }
 
         return BattleStatusResponse.from(battle);
     }

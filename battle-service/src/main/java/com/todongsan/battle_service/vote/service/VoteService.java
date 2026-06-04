@@ -9,9 +9,9 @@ public interface VoteService {
 
     VoteResultResponse getResult(Long battleId, Long memberId);
 
-    CrossAnalysisResponse getCrossResult(Long battleId, Long memberId, String idempotencyKey);
+    CrossAnalysisResponse getCrossResult(Long battleId);
 
-    CertifiedResultResponse getCertifiedResult(Long battleId, Long memberId, String idempotencyKey);
+    CertifiedResultResponse getCertifiedResult(Long battleId);
 
     VoteRawResponse getRawVotes(Long battleId);
 }
