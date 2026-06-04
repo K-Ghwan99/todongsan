@@ -6,6 +6,7 @@ import com.todongsan.marketservice.market.entity.MarketPrediction;
 import com.todongsan.marketservice.market.entity.MarketPriceHistory;
 import com.todongsan.marketservice.market.entity.MarketSettlement;
 import com.todongsan.marketservice.market.entity.MarketSettlementDetail;
+import com.todongsan.marketservice.market.entity.MarketVoid;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.PredictionStatus;
 import com.todongsan.marketservice.market.type.TransactionItemStatus;
@@ -234,6 +235,19 @@ public interface MarketMapper {
     );
 
     int completeMarket(
+            @Param("marketId") long marketId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    long countUnresolvedPredictionsForVoid(@Param("marketId") long marketId);
+
+    long countConfirmedPredictionsForRefund(@Param("marketId") long marketId);
+
+    MarketVoid selectMarketVoidByMarketId(@Param("marketId") long marketId);
+
+    void insertMarketVoid(MarketVoid marketVoid);
+
+    int updateMarketStatusToVoided(
             @Param("marketId") long marketId,
             @Param("updatedAt") LocalDateTime updatedAt
     );

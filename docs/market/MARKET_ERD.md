@@ -476,6 +476,10 @@ CREATE TABLE market_settlement_detail (
 
 Market 무효 처리 기록을 저장한다.
 
+`market_void`는 Market이 `VOIDED` 처리된 원인과 처리자를 기록한다.
+Market 하나당 active한 `market_void`는 하나만 존재해야 하며, `uq_market_void_market (market_id)`로 중복 생성을 막는다.
+무효 처리 API는 `market_void`를 생성하고 `market.status`를 `VOIDED`로 변경한다.
+
 환불 멱등성은 batch 단위가 아니라 `market_refund_detail.idempotency_key`로 보장한다.
 
 ```sql
@@ -517,6 +521,9 @@ CREATE TABLE market_void (
 Market 무효 처리 시 사용자별 환불 상세를 저장한다.
 
 환불 API 호출의 멱등성과 실패 재시도 추적을 위해 별도 테이블로 분리한다.
+`market_refund_detail`은 `CONFIRMED` Prediction 1건에 대한 환불 처리 상태를 기록한다.
+환불 금액은 `prediction.point_amount`와 동일하며, 부분 실패 시 `FAILED` 또는 `UNKNOWN` detail만 재시도한다.
+item idempotencyKey는 `MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}` 형식을 사용한다.
 
 ```sql
 CREATE TABLE market_refund_detail (

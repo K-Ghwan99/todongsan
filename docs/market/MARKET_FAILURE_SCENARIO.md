@@ -1023,19 +1023,35 @@ MARKET_SETTLEMENT_BATCH:market:{marketId}:settlement:{settlementId}:retry:{uuid}
 
 ## 9. 환불 실패 시나리오
 
-### 9-1. 정상 환불
+### 9-1. 정상 무효 처리
 
 | 항목 | 내용 |
 |---|---|
-| 발생 시점 | Market VOIDED 처리 |
-| 조건 | 환불 대상 Prediction 존재, 환불 요청 성공 |
-| 상태 변화 | PredictionStatus = REFUNDED |
+| 발생 시점 | 관리자 `PATCH /api/v1/admin/markets/{marketId}/void` |
+| 조건 | MarketStatus = PENDING, ACTIVE, CLOSED, DATA_PENDING |
+| 처리 | market_void 생성, MarketStatus = VOIDED |
+| Member-Point 호출 | 없음 |
 | 재시도 | 필요 없음 |
 | 관련 ErrorCode | 없음 |
 
 ---
 
-### 9-2. VOIDED 처리 불가능한 Market
+### 9-2. 미해결 Prediction 존재로 무효 처리 차단
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 관리자 VOIDED 처리 요청 |
+| 실패 원인 | `POINT_PENDING` 또는 `POINT_UNKNOWN` Prediction 존재 |
+| 상태 변화 | 없음 |
+| 복구 방식 | 예측 차감 대사 API 또는 Scheduler로 먼저 `CONFIRMED`/`FAILED` 정리 |
+| 관련 ErrorCode | `MARKET_INVALID_STATUS` 또는 `MARKET_REFUND_NOT_ALLOWED` |
+| HTTP Status | 409 |
+
+`POINT_PENDING` 또는 `POINT_UNKNOWN`은 포인트 차감 여부가 불명확하므로 환불 대상 여부를 판단할 수 없다.
+
+---
+
+### 9-3. 정산 중 또는 정산 완료 Market 무효 처리 차단
 
 | 항목 | 내용 |
 |---|---|
@@ -1048,7 +1064,22 @@ MARKET_SETTLEMENT_BATCH:market:{marketId}:settlement:{settlementId}:retry:{uuid}
 
 ---
 
-### 9-3. 환불 대상이 아닌 Prediction 환불 시도
+### 9-4. 정상 환불
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | `POST /api/v1/admin/markets/{marketId}/refunds` |
+| 조건 | MarketStatus = VOIDED, CONFIRMED Prediction 존재 |
+| 트랜잭션 A | CONFIRMED Prediction을 REFUND_PENDING으로 전환하고 market_refund_detail 생성 |
+| Member-Point 호출 | refund batch API 호출 |
+| 성공 item | PredictionStatus = REFUNDED, market_refund_detail.status = SUCCESS |
+| 상태 변화 | MarketStatus = VOIDED 유지 |
+| 재시도 | 필요 없음 |
+| 관련 ErrorCode | 없음 |
+
+---
+
+### 9-5. 환불 대상이 아닌 Prediction 환불 시도
 
 | 항목 | 내용 |
 |---|---|
@@ -1061,7 +1092,7 @@ MARKET_SETTLEMENT_BATCH:market:{marketId}:settlement:{settlementId}:retry:{uuid}
 
 ---
 
-### 9-4. 이미 환불된 Prediction 재환불 시도
+### 9-6. 이미 환불된 Prediction 재환불 시도
 
 | 항목 | 내용 |
 |---|---|
@@ -1074,30 +1105,31 @@ MARKET_SETTLEMENT_BATCH:market:{marketId}:settlement:{settlementId}:retry:{uuid}
 
 ---
 
-### 9-5. 환불 요청 타임아웃
+### 9-7. 환불 batch timeout
 
 | 항목 | 내용 |
 |---|---|
-| 발생 시점 | Member-Point 환불 요청 |
+| 발생 시점 | Member-Point 환불 batch API 호출 |
 | 실패 원인 | 제한 시간 안에 응답 없음 |
 | 위험 | 실제 환불 여부를 알 수 없음 |
+| 요청 대상 detail | UNKNOWN |
 | 상태 변화 | PredictionStatus = REFUND_UNKNOWN |
 | 재시도 | 즉시 재시도 금지 |
-| 복구 방식 | Idempotency-Key로 처리 이력 조회 |
+| 복구 방식 | 후속 환불 재시도 API 또는 Scheduler 대상 |
 | 관련 ErrorCode | EXTERNAL_SERVICE_TIMEOUT |
 | HTTP Status | 504 |
 
 ---
 
-### 9-6. 일부 유저 환불 실패
+### 9-8. 환불 batch 부분 실패
 
 | 항목 | 내용 |
 |---|---|
 | 발생 시점 | Member-Point 환불 batch API 호출 |
-| 실패 원인 | 일부 item의 환불 요청 실패 |
+| 실패 원인 | 일부 item은 PROCESSED, 일부 item은 FAILED |
 | 상태 변화 | MarketStatus = VOIDED 유지 |
 | 성공 건 | PredictionStatus = REFUNDED, market_refund_detail.status = SUCCESS |
-| 실패 건 | market_refund_detail.status = FAILED 또는 UNKNOWN |
+| 실패 건 | market_refund_detail.status = FAILED |
 | 재시도 | O |
 | 관련 ErrorCode | MARKET_REFUND_FAILED 또는 EXTERNAL_SERVICE_ERROR |
 | HTTP Status | 500 또는 502 |
@@ -1117,6 +1149,35 @@ Member-Point 응답의 item별 `results[]` 처리 기준:
 | `PROCESSED` | 성공으로 처리 |
 | `ALREADY_PROCESSED` | 이미 처리된 거래이므로 성공으로 처리 |
 | `FAILED` | 실패 건으로 기록하고 다음 Scheduler 주기에 재시도 |
+
+---
+
+### 9-9. 이미 환불된 item 재시도
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 환불 실패 또는 UNKNOWN detail 재시도 |
+| 상황 | 같은 Prediction에 대해 같은 item.idempotencyKey로 재시도 |
+| Member-Point 응답 | ALREADY_PROCESSED |
+| 상태 변화 | detail SUCCESS, Prediction REFUNDED |
+| 재시도 | 필요 없음 |
+| 관련 ErrorCode | 없음 |
+
+이미 환불된 item 재시도는 성공으로 간주한다.
+
+---
+
+### 9-10. 환불 대상 없음
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | VOIDED Market 환불 실행 |
+| 조건 | CONFIRMED Prediction 없음 |
+| Member-Point 호출 | 없음 |
+| 환불 detail | 생성 0건 |
+| 상태 변화 | MarketStatus = VOIDED 유지 |
+| 재시도 | 필요 없음 |
+| 관련 ErrorCode | 없음 |
 
 ---
 
@@ -1219,7 +1280,7 @@ Controller를 HTTP로 호출하지 않고 기존 Service를 직접 호출한다.
 ```http
 POST /api/v1/internal/markets/predictions/reconcile?limit=100
 POST /internal/api/v1/markets/settlements/retry-failed?limit=100
-POST /internal/api/v1/markets/refunds/retry-failed?limit=100
+POST /api/v1/internal/markets/refunds/retry?limit=100
 ```
 
 ---

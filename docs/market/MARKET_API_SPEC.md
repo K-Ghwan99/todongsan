@@ -1295,6 +1295,35 @@ WHERE settlement_id = :settlementId
 PATCH /api/v1/admin/markets/{marketId}/void
 ```
 
+관리자가 Market을 무효 처리한다.
+무효 처리 API는 Market 상태와 무효 사유를 확정할 뿐, Member-Point 환불 API를 호출하지 않는다.
+실제 환불은 별도의 환불 실행 API가 담당한다.
+
+Request 예시:
+
+```json
+{
+  "reasonCode": "DATA_UNAVAILABLE",
+  "reason": "공공 데이터 제공 중단으로 결과 판정이 불가능합니다."
+}
+```
+
+요청의 `reasonCode`는 `market_void.reason_type`, `reason`은 `market_void.reason_detail`에 저장한다.
+
+Response 예시:
+
+```json
+{
+  "marketId": 7,
+  "voidId": 1,
+  "status": "VOIDED",
+  "refundRequired": true,
+  "refundablePredictionCount": 12,
+  "reasonCode": "DATA_UNAVAILABLE",
+  "reason": "공공 데이터 제공 중단으로 결과 판정이 불가능합니다."
+}
+```
+
 ### VOIDED 가능 상태
 
 ```text
@@ -1309,36 +1338,175 @@ DATA_PENDING
 ```text
 SETTLEMENT_IN_PROGRESS
 SETTLED
+VOIDED
 ```
 
 정산이 이미 시작된 Market은 관리자도 VOIDED 처리할 수 없다.  
 정산 시작 이후 문제가 발생하면 관리자 수동 보정 대상으로 남긴다.
 
+무효 처리 전에 다음 Prediction이 남아 있으면 차단한다.
+
+```text
+Prediction.status IN ('POINT_PENDING', 'POINT_UNKNOWN')
+```
+
+`POINT_PENDING` 또는 `POINT_UNKNOWN` Prediction은 차감 여부가 불명확하므로 환불 대상 여부를 판단할 수 없다.
+먼저 예측 차감 대사 API 또는 Scheduler로 해당 Prediction을 `CONFIRMED` 또는 `FAILED`로 정리해야 한다.
+
 ### 처리 흐름
 
 ```text
-1. Market 조회
-2. VOIDED 가능 상태 검증
-3. Market VOIDED 변경
-4. 환불 대상 Prediction 조회
-5. market_refund_detail 생성
-6. Member-Point 환불 batch API 호출
-   - 각 item은 predictionId 기준 idempotencyKey를 가진다.
-   - 각 item은 referenceType=MARKET_PREDICTION, referenceId=predictionId를 가진다.
-7. results[]를 기준으로 성공/실패 detail 상태 반영
-8. 성공 건 Prediction REFUNDED
-9. 실패 건 REFUND_UNKNOWN 또는 재시도 대상으로 기록
+1. Market FOR UPDATE 조회
+2. Market 존재 여부 확인
+3. Market.status가 PENDING / ACTIVE / CLOSED / DATA_PENDING 중 하나인지 확인
+4. SETTLEMENT_IN_PROGRESS / SETTLED / VOIDED이면 차단
+5. POINT_PENDING / POINT_UNKNOWN Prediction 존재 여부 확인
+6. 존재하면 차단
+7. market_void row 생성
+8. Market.status = VOIDED 변경
+9. CONFIRMED Prediction 수를 조회하여 refundRequired / refundablePredictionCount 반환
+10. Member-Point 호출 없음
 ```
+
+무효 처리 API는 환불 대상 Prediction의 포인트를 직접 환불하지 않는다.
+
+### 발생 가능한 ErrorCode
+
+| ErrorCode | HTTP Status | 설명 |
+|---|---:|---|
+| `MARKET_NOT_FOUND` | 404 | Market 없음 |
+| `MARKET_CANNOT_VOID` | 409 | 정산 중/정산 완료/이미 무효 등 무효 처리 불가능 |
+| `MARKET_INVALID_STATUS` | 409 | 미해결 Prediction 존재 등 상태 전제 불충족 |
+| `FORBIDDEN` | 403 | 관리자 권한 없음 |
+
+---
+
+## 10-1. 관리자 환불 실행
+
+```http
+POST /api/v1/admin/markets/{marketId}/refunds
+```
+
+VOIDED Market의 `CONFIRMED` Prediction에 대해 원금 환불을 실행한다.
+환불 대상은 실제 포인트 차감과 가격 확정이 완료된 `CONFIRMED` Prediction이다.
+
+시작 조건:
+
+```text
+Market.status = VOIDED
+```
+
+환불 대상:
+
+```text
+Prediction.status = CONFIRMED
+```
+
+환불 대상 아님:
+
+| PredictionStatus | 처리 |
+|---|---|
+| `POINT_PENDING` | 차감 여부 불명확. 먼저 대사 필요 |
+| `POINT_UNKNOWN` | 차감 여부 불명확. 먼저 대사 필요 |
+| `FAILED` | 포인트 미차감 또는 실패. 환불 대상 아님 |
+| `SETTLED` | 이미 정산 완료. 환불 대상 아님 |
+| `REFUND_PENDING` | 이미 환불 요청 중 |
+| `REFUND_UNKNOWN` | 환불 여부 불명확. 재시도 대상 |
+| `REFUNDED` | 이미 환불 완료 |
+
+환불 금액:
+
+```text
+refundAmount = prediction.pointAmount
+```
+
+무효 처리는 Market 자체가 성립하지 않는 상황이므로 `CONFIRMED` Prediction 참여자에게 예측 참여 원금을 환불한다.
+수수료를 차감하지 않고, 정산 금액 계산처럼 비율 계산을 하지 않는다.
+
+### 처리 흐름
+
+트랜잭션 A - 환불 준비:
+
+```text
+1. VOIDED Market 조회
+2. market_void 조회
+3. CONFIRMED Prediction 조회
+4. 환불 대상 Prediction을 REFUND_PENDING으로 변경
+5. market_refund_detail 생성
+   - marketVoidId
+   - predictionId
+   - memberId
+   - refundAmount = prediction.pointAmount
+   - status = PENDING
+   - idempotencyKey = MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}
+6. commit
+```
+
+트랜잭션 A에서는 Member-Point를 호출하지 않는다.
+
+트랜잭션 밖 - Member-Point refund batch 호출:
+
+```text
+1. PENDING refund_detail 기준으로 items 생성
+2. Header Idempotency-Key 생성
+3. body refundId 또는 batchId 생성
+4. Member-Point refund batch API 호출
+```
+
+Header Idempotency-Key:
+
+```text
+MARKET_REFUND_BATCH:market:{marketId}:void:{voidId}:attempt:1
+```
+
+Item idempotencyKey:
+
+```text
+MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}
+```
+
+트랜잭션 B - 환불 결과 반영:
+
+```text
+PROCESSED / ALREADY_PROCESSED:
+- market_refund_detail.status = SUCCESS
+- Prediction.status = REFUNDED
+- Prediction.refundAmount = refundAmount
+
+FAILED:
+- market_refund_detail.status = FAILED
+- Prediction.status = REFUND_PENDING 또는 REFUND_UNKNOWN 유지
+
+batch timeout / 응답 불명확:
+- market_refund_detail.status = UNKNOWN
+- Prediction.status = REFUND_UNKNOWN
+```
+
+일부 item 실패는 전체 환불 실패로 단정하지 않는다.
+성공한 item은 `REFUNDED`로 확정하고, 실패/UNKNOWN item만 재시도 대상으로 남긴다.
+
+환불 대상이 없는 경우:
+
+```text
+Market.status = VOIDED
+CONFIRMED Prediction = 0
+```
+
+환불 실행 API는 성공으로 응답한다.
+Member-Point refund batch API를 호출하지 않고, `market_refund_detail`은 0건 생성된다.
 
 ### Member-Point 환불 요청 예시
 
 ```http
 POST /api/v1/points/refunds
+Idempotency-Key: MARKET_REFUND_BATCH:market:7:void:1:attempt:1
+Content-Type: application/json
 ```
 
 ```json
 {
   "marketId": 7,
+  "refundId": "MARKET_REFUND_BATCH:market:7:void:1:attempt:1",
   "items": [
     {
       "predictionId": 1001,
@@ -1346,26 +1514,147 @@ POST /api/v1/points/refunds
       "amount": "100.00",
       "referenceType": "MARKET_PREDICTION",
       "referenceId": 1001,
-      "reason": "Market 무효 환불",
+      "reason": "Market 무효 처리 환불",
       "idempotencyKey": "MARKET_REFUND:market:7:prediction:1001:member:1"
     }
   ]
 }
 ```
 
+Header와 item key 역할:
+
+```text
+Header Idempotency-Key:
+- Member-Point 환불 batch 요청 전체를 추적하기 위한 필수 헤더다.
+- 실제 유저별 중복 환불 방지 기준은 아니다.
+- 부분 실패 후 실패 item만 재시도할 경우 새 Header Idempotency-Key를 사용할 수 있다.
+
+items[].idempotencyKey:
+- Prediction 1건의 환불 멱등성 키다.
+- 실제 중복 환불 방지는 이 키를 기준으로 한다.
+- 같은 Prediction에 대한 재시도에서는 항상 같은 item.idempotencyKey를 사용한다.
+```
+
+Response 예시:
+
+```json
+{
+  "marketId": 7,
+  "voidId": 1,
+  "refundTargetCount": 12,
+  "successCount": 10,
+  "failedCount": 2,
+  "unknownCount": 0,
+  "marketStatus": "VOIDED",
+  "refundStatus": "IN_PROGRESS"
+}
+```
+
+환불 완료 기준:
+
+```text
+모든 refund_detail.status = SUCCESS이면 refundStatus = COMPLETED
+하나라도 FAILED 또는 UNKNOWN이면 refundStatus = IN_PROGRESS
+```
+
+Market.status는 계속 `VOIDED`로 유지한다.
+
 ### 발생 가능한 ErrorCode
 
 | ErrorCode | HTTP Status | 설명 |
 |---|---:|---|
 | `MARKET_NOT_FOUND` | 404 | Market 없음 |
-| `MARKET_CANNOT_VOID` | 409 | 무효 처리 불가능한 상태 |
-| `MARKET_REFUND_FAILED` | 500 | 환불 실패 |
+| `MARKET_INVALID_STATUS` | 409 | VOIDED가 아닌 Market 환불 실행 |
+| `MARKET_REFUND_NOT_ALLOWED` | 409 | 환불 대상이 아닌 Prediction |
+| `MARKET_ALREADY_REFUNDED` | 409 | 이미 환불 완료 |
+| `MARKET_REFUND_FAILED` | 500 | 환불 처리 실패 |
 | `EXTERNAL_SERVICE_TIMEOUT` | 504 | 환불 요청 타임아웃 |
 | `EXTERNAL_SERVICE_ERROR` | 502 | 포인트 서비스 오류 |
-| `FORBIDDEN` | 403 | 관리자 권한 없음 |
+| `EXTERNAL_SERVICE_UNAVAILABLE` | 503 | 포인트 서비스 연결 실패 |
 
 ---
 
+## 10-2. 관리자 환불 재시도
+
+```http
+POST /api/v1/admin/markets/{marketId}/refunds/retry
+```
+
+기존 환불 실행 중 `FAILED` 또는 `UNKNOWN`으로 남은 `market_refund_detail`만 재시도한다.
+
+재시도 대상:
+
+```text
+market_refund_detail.status IN ('FAILED', 'UNKNOWN')
+```
+
+재시도 금지:
+
+```text
+새 market_void 생성 금지
+새 market_refund_detail 생성 금지
+refundAmount 재계산 금지
+성공한 SUCCESS detail 재요청 금지
+items[].idempotencyKey 재생성 금지
+```
+
+Header Idempotency-Key:
+
+```text
+MARKET_REFUND_BATCH:market:{marketId}:void:{voidId}:retry:{uuid}
+```
+
+items[].idempotencyKey:
+
+```text
+기존 market_refund_detail.idempotency_key 그대로 사용
+```
+
+처리:
+
+```text
+PROCESSED / ALREADY_PROCESSED:
+- refund_detail SUCCESS
+- Prediction REFUNDED
+
+FAILED:
+- refund_detail FAILED
+- Prediction REFUND_PENDING 또는 REFUND_UNKNOWN 유지
+
+timeout / 응답 불명확:
+- refund_detail UNKNOWN
+- Prediction REFUND_UNKNOWN
+```
+
+---
+
+## 10-3. 내부 환불 재시도 API / Scheduler 대상
+
+```http
+POST /api/v1/internal/markets/refunds/retry?limit=100
+```
+
+VOIDED Market 중 `FAILED` 또는 `UNKNOWN` refund_detail이 남아 있는 Market을 limit 단위로 조회하여 환불 재시도를 수행한다.
+
+대상:
+
+```text
+market.status = VOIDED
+market_refund_detail.status IN ('FAILED', 'UNKNOWN')
+```
+
+처리:
+
+```text
+기존 관리자 환불 재시도 Service 로직을 marketId별로 호출한다.
+Controller를 HTTP로 자기 호출하지 않는다.
+Scheduler는 Service를 직접 호출한다.
+```
+
+이번 문서 작업에서는 실제 Scheduler 구현은 하지 않는다.
+추후 환불 API 구현 이후 Scheduler 자동화 작업에서 처리한다.
+
+---
 
 ## 11. Insight-Reputation 내부 연계 API
 
@@ -1815,7 +2104,7 @@ limit 건만 marketId 조회
 ### 12-3. 환불 실패 건 재시도
 
 ```http
-POST /internal/api/v1/markets/refunds/retry-failed?limit=100
+POST /api/v1/internal/markets/refunds/retry?limit=100
 ```
 
 대상:

@@ -530,11 +530,28 @@ DATA_PENDING
 ```text
 SETTLEMENT_IN_PROGRESS
 SETTLED
+VOIDED
 ```
 
 정산이 시작된 Market은 관리자도 VOIDED 처리할 수 없다.
 
 ### 11-3. 환불 관련 ErrorCode
+
+무효/환불 API에서 사용하는 ErrorCode 매핑:
+
+| 상황 | ErrorCode |
+|---|---|
+| Market 없음 | `MARKET_NOT_FOUND` |
+| `SETTLEMENT_IN_PROGRESS` / `SETTLED` Market 무효 처리 시도 | `MARKET_CANNOT_VOID` |
+| 이미 `VOIDED`인 Market 무효 처리 시도 | `MARKET_CANNOT_VOID` 또는 `MARKET_INVALID_STATUS` |
+| `POINT_PENDING` / `POINT_UNKNOWN` 존재로 무효 처리 불가 | `MARKET_INVALID_STATUS` 또는 `MARKET_REFUND_NOT_ALLOWED` |
+| `VOIDED`가 아닌 Market 환불 실행 | `MARKET_INVALID_STATUS` |
+| 이미 `REFUNDED`된 Prediction 환불 시도 | `MARKET_ALREADY_REFUNDED` |
+| 환불 대상이 아닌 Prediction 환불 시도 | `MARKET_REFUND_NOT_ALLOWED` |
+| Member-Point 환불 timeout | 공통 `EXTERNAL_SERVICE_TIMEOUT` |
+| Member-Point 환불 5xx | 공통 `EXTERNAL_SERVICE_ERROR` |
+| Member-Point 연결 실패 | 공통 `EXTERNAL_SERVICE_UNAVAILABLE` |
+| 일부 item 환불 실패 | API는 성공 응답 가능. `failedCount`에 반영하거나 `MARKET_REFUND_FAILED` 사용 |
 
 | ErrorCode | HTTP Status | 설명 | Retry | 상태 변화 |
 |---|---:|---|---:|---|
@@ -551,6 +568,9 @@ SETTLED
 | `ALREADY_PROCESSED` | 이미 처리된 거래이므로 성공으로 처리 |
 | `FAILED` | 실패 건으로 기록하고 다음 Scheduler 주기에 재시도 |
 
+부분 실패는 전체 API 실패로 단정하지 않는다.
+성공한 item은 `REFUNDED`로 확정하고 실패/UNKNOWN item만 재시도 대상으로 남긴다.
+새 ErrorCode가 필요하면 임의로 추가하지 않고 공식 문서 합의 후 추가한다.
 
 `MARKET_CANNOT_VOID`는 특히 다음 상황에서 사용한다.
 
@@ -570,7 +590,7 @@ MarketStatus = SETTLED
 ```http
 POST /api/v1/internal/markets/predictions/reconcile?limit=100
 POST /internal/api/v1/markets/settlements/retry-failed?limit=100
-POST /internal/api/v1/markets/refunds/retry-failed?limit=100
+POST /api/v1/internal/markets/refunds/retry?limit=100
 POST /internal/api/v1/markets/settlement-data/retry-fetch?limit=100
 ```
 

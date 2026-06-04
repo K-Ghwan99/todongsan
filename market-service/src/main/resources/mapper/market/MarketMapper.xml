@@ -243,6 +243,58 @@
           AND status IN ('POINT_PENDING', 'POINT_UNKNOWN')
     </select>
 
+    <select id="countUnresolvedPredictionsForVoid" resultType="long">
+        SELECT COUNT(*)
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status IN ('POINT_PENDING', 'POINT_UNKNOWN')
+    </select>
+
+    <select id="countConfirmedPredictionsForRefund" resultType="long">
+        SELECT COUNT(*)
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status = 'CONFIRMED'
+    </select>
+
+    <select id="selectMarketVoidByMarketId" resultType="com.todongsan.marketservice.market.entity.MarketVoid">
+        SELECT *
+        FROM market_void
+        WHERE market_id = #{marketId}
+        FOR UPDATE
+    </select>
+
+    <insert id="insertMarketVoid" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO market_void (
+            market_id,
+            reason_type,
+            reason_detail,
+            refund_status,
+            voided_by,
+            voided_at,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{marketId},
+            #{reasonType},
+            #{reasonDetail},
+            #{refundStatus},
+            #{voidedBy},
+            #{voidedAt},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateMarketStatusToVoided">
+        UPDATE market
+        SET status = 'VOIDED',
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND status IN ('PENDING', 'ACTIVE', 'CLOSED', 'DATA_PENDING')
+          AND deleted_at IS NULL
+    </update>
+
     <update id="clearResultOptions">
         UPDATE market_option
         SET is_result = FALSE,
