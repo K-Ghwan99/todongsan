@@ -6,6 +6,7 @@ import com.todongsan.memberpointservice.global.security.JwtProvider;
 import com.todongsan.memberpointservice.global.util.CryptoUtil;
 import com.todongsan.memberpointservice.member.dto.KakaoUserInfo;
 import com.todongsan.memberpointservice.member.dto.response.LoginResponse;
+import com.todongsan.memberpointservice.member.dto.response.TokenResponse;
 import com.todongsan.memberpointservice.member.entity.*;
 import com.todongsan.memberpointservice.member.repository.MemberRepository;
 import com.todongsan.memberpointservice.member.repository.OauthTokenRepository;
@@ -108,6 +109,20 @@ public class MemberAuthServiceImpl implements MemberAuthService {
                 .memberId(member.getId())
                 .nickname(member.getNickname())
                 .isNewMember(isNewMember)
+                .build();
+    }
+
+    @Override
+    public TokenResponse refresh(String refreshToken) {
+        jwtProvider.validateToken(refreshToken);
+        Long memberId = jwtProvider.extractMemberId(refreshToken);
+
+        Member member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
+
+        return TokenResponse.builder()
+                .accessToken(jwtProvider.generateAccessToken(member.getId(), member.getRole()))
+                .refreshToken(jwtProvider.generateRefreshToken(member.getId()))
                 .build();
     }
 
