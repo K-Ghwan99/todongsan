@@ -18,7 +18,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -40,7 +39,7 @@ public class MemberAuthServiceImpl implements MemberAuthService {
     public LoginResponse kakaoLogin(String accessToken) {
         KakaoUserInfo kakaoUserInfo = kakaoOAuthService.getUserInfo(accessToken);
 
-        AgeGroup ageGroup = resolveAgeGroup(kakaoUserInfo.getBirthyear());
+        AgeGroup ageGroup = resolveAgeGroup(kakaoUserInfo.getAgeRange());
         Gender gender = resolveGender(kakaoUserInfo.getGender());
 
         boolean isNewMember;
@@ -126,14 +125,14 @@ public class MemberAuthServiceImpl implements MemberAuthService {
                 .build();
     }
 
-    // birthyear → AgeGroup 변환
-    private AgeGroup resolveAgeGroup(String birthyear) {
-        if (birthyear == null) return AgeGroup.UNKNOWN;
-        int age = LocalDate.now().getYear() - Integer.parseInt(birthyear);
-        if (age < 20) return AgeGroup.AGE_10S;
-        if (age < 30) return AgeGroup.AGE_20S;
-        if (age < 40) return AgeGroup.AGE_30S;
-        if (age < 50) return AgeGroup.AGE_40S;
+    // age_range → AgeGroup 변환 (카카오 응답: "20~29", "30~39" 등)
+    private AgeGroup resolveAgeGroup(String ageRange) {
+        if (ageRange == null) return AgeGroup.UNKNOWN;
+        int start = Integer.parseInt(ageRange.split("~")[0]);
+        if (start < 20) return AgeGroup.AGE_10S;
+        if (start < 30) return AgeGroup.AGE_20S;
+        if (start < 40) return AgeGroup.AGE_30S;
+        if (start < 50) return AgeGroup.AGE_40S;
         return AgeGroup.AGE_50S_ABOVE;
     }
 
