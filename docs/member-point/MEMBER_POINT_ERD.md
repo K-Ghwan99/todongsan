@@ -66,13 +66,15 @@ CREATE TABLE point_history (
     id                  BIGINT          NOT NULL AUTO_INCREMENT,
     member_id           BIGINT          NOT NULL,
     type                VARCHAR(50)     NOT NULL,                    -- PointHistoryType (방향 구분)
-    amount              DECIMAL(10,2)   NOT NULL CHECK (amount > 0), -- 항상 양수
-    balance_snapshot    DECIMAL(10,2)   NOT NULL,                    -- 처리 후 잔액
+    amount              DECIMAL(10,2)   NOT NULL CHECK (amount > 0), -- 항상 양수 (실패 기록 시에도 시도한 금액 저장)
+    balance_snapshot    DECIMAL(10,2)   NOT NULL,                    -- 처리 후 잔액 (FAILED 시 변경 없는 현재 잔액)
     reason              VARCHAR(255),
     reference_type      VARCHAR(50)     NULL,                        -- PointReferenceType (BATTLE / MARKET_PREDICTION / INSIGHT_REPORT)
     reference_id        BIGINT          NULL,                        -- 해당 도메인 객체의 ID
     idempotency_key     VARCHAR(150)    UNIQUE,                      -- 중복 처리 방지 (Market 정산/환불 키 길이 대응)
     request_hash        VARCHAR(64)     NULL,                        -- SHA-256(memberId+type+amount+referenceType+referenceId) 충돌 감지용
+    status              VARCHAR(20)     NOT NULL DEFAULT 'SUCCEEDED', -- SUCCEEDED / FAILED (포인트 차감 실패 이력 추적용)
+    fail_reason         VARCHAR(50)     NULL,                        -- 실패 사유 ErrorCode (예: POINT_INSUFFICIENT). status=SUCCEEDED이면 NULL
     created_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -128,12 +130,14 @@ erDiagram
         BIGINT member_id FK
         VARCHAR type "PointHistoryType"
         DECIMAL amount "CHECK > 0 (항상 양수)"
-        DECIMAL balance_snapshot "처리 후 잔액"
+        DECIMAL balance_snapshot "처리 후 잔액 (FAILED 시 현재 잔액)"
         VARCHAR reason
         VARCHAR reference_type "BATTLE/MARKET_PREDICTION/INSIGHT_REPORT"
         BIGINT reference_id "도메인 객체 ID"
         VARCHAR(150) idempotency_key UK
         VARCHAR request_hash "SHA-256 해시 (충돌 감지)"
+        VARCHAR status "SUCCEEDED / FAILED"
+        VARCHAR fail_reason "실패 ErrorCode (POINT_INSUFFICIENT 등)"
         DATETIME created_at "DEFAULT CURRENT_TIMESTAMP"
         DATETIME updated_at "ON UPDATE CURRENT_TIMESTAMP"
     }
@@ -276,8 +280,9 @@ POST /api/v1/points/refunds
 ## 6. request_hash 생성 규칙
 
 ```java
-// referenceType 포함 (v5부터 변경)
-String raw = memberId + "|" + type + "|" + amount + "|" + referenceType + "|" + referenceId;
+// referenceType 포함 (v5부터 변경), amount 정규화 (v8부터 추가)
+String normalizedAmount = new BigDecimal(amount).setScale(2, RoundingMode.DOWN).toPlainString();
+String raw = memberId + "|" + type + "|" + normalizedAmount + "|" + referenceType + "|" + referenceId;
 String hash = sha256(raw);
 // 결과: "a3f8c2d1e9b4..."  (64자리 16진수)
 ```
@@ -290,6 +295,13 @@ referenceType = INSIGHT_REPORT,    referenceId = 42  → Report 42
 
 같은 referenceId라도 referenceType이 다르면 완전히 다른 거래임.
 따라서 request_hash에 referenceType을 포함해야 정확한 충돌 감지 가능.
+```
+
+amount 정규화 이유:
+```
+"100", "100.0", "100.00" 은 모두 동일한 금액이지만 문자열이 다르면 해시가 달라짐.
+setScale(2, DOWN) 정규화 후 비교하면 세 값 모두 "100.00" → 동일 해시.
+호출자는 어떤 형태로 보내도 동일 요청으로 처리됨.
 ```
 
 ---
@@ -315,3 +327,6 @@ referenceType = INSIGHT_REPORT,    referenceId = 42  → Report 42
 | v5 | 탈퇴 회원 정산/환불 허용 정책 추가 |
 | v6 | `member.age_group`, `member.gender` 컬럼 추가 (Insight 배치 조회 응답용) |
 | v7 | `point_history.idempotency_key` VARCHAR(100) → VARCHAR(150) (Market 정산/환불 키 길이 대응) |
+| v8 | `point_history.status` 컬럼 추가 (SUCCEEDED/FAILED). POINT_INSUFFICIENT 시 FAILED 기록 저장 |
+| v8 | `point_history.fail_reason` 컬럼 추가 (실패 ErrorCode 저장, SUCCEEDED 시 NULL) |
+| v8 | `request_hash` 생성 시 amount `setScale(2, DOWN)` 정규화 정책 추가 |
