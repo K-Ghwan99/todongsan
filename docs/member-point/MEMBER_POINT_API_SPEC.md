@@ -745,6 +745,10 @@ Market 정산 완료 시 Market Service가 호출한다.
 Idempotency-Key: {settlementId}
 ```
 
+> **[정책]** Header `Idempotency-Key` 값은 body의 `settlementId`와 동일한 값을 사용해야 한다.
+> 불일치 시 `INVALID_REQUEST` (400) 반환.
+> (Market 팀 정책: batch 요청 추적 ID를 Header와 body 양쪽에 동일하게 전송)
+
 **Request Body**
 ```json
 {
@@ -775,6 +779,9 @@ Idempotency-Key: {settlementId}
 
 **내부 처리**
 ```
+0. Header Idempotency-Key == body settlementId 일치 확인
+   → 불일치 시 INVALID_REQUEST (400) 즉시 반환
+
 items 순회하며 각 prediction에 대해:
   1. member 조회 (탈퇴 회원 포함 — deleted_at 무시)
   2. member.point_balance += amount (Atomic UPDATE)
@@ -856,6 +863,10 @@ POST /api/v1/points/refunds
 Idempotency-Key: {refundId}
 ```
 
+> **[정책]** Header `Idempotency-Key` 값은 body의 `refundId`와 동일한 값을 사용해야 한다.
+> 불일치 시 `INVALID_REQUEST` (400) 반환.
+> (Market/Insight 팀 정책: batch 요청 추적 ID를 Header와 body 양쪽에 동일하게 전송)
+
 **Request Body 예시 1 — Market 무효 환불**
 ```json
 {
@@ -895,6 +906,9 @@ Idempotency-Key: {refundId}
 
 **내부 처리**
 ```
+0. Header Idempotency-Key == body refundId 일치 확인
+   → 불일치 시 INVALID_REQUEST (400) 즉시 반환
+
 items 순회하며 각 건에 대해:
   1. member 조회 (탈퇴 회원 포함 — deleted_at 무시)
   2. member.point_balance += amount (Atomic UPDATE)

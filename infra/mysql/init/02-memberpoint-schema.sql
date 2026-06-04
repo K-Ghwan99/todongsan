@@ -48,7 +48,7 @@ CREATE TABLE point_history (
     reason           VARCHAR(255),
     reference_type   VARCHAR(50)     NULL,
     reference_id     BIGINT          NULL,
-    idempotency_key  VARCHAR(100)    NOT NULL,
+    idempotency_key  VARCHAR(150)    NOT NULL,
     request_hash     VARCHAR(64)     NULL,
     created_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

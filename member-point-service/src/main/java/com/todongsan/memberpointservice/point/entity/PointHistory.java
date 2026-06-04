@@ -49,7 +49,7 @@ public class PointHistory extends BaseEntity {
     private Long referenceId;
 
     // 멱등성 키 (중복 처리 방지)
-    @Column(nullable = false, unique = true, length = 100)
+    @Column(nullable = false, unique = true, length = 150)
     private String idempotencyKey;
 
     // 요청 해시 (SHA-256, 충돌 감지)

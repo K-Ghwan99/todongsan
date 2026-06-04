@@ -71,7 +71,7 @@ CREATE TABLE point_history (
     reason              VARCHAR(255),
     reference_type      VARCHAR(50)     NULL,                        -- PointReferenceType (BATTLE / MARKET_PREDICTION / INSIGHT_REPORT)
     reference_id        BIGINT          NULL,                        -- 해당 도메인 객체의 ID
-    idempotency_key     VARCHAR(100)    UNIQUE,                      -- 중복 처리 방지
+    idempotency_key     VARCHAR(150)    UNIQUE,                      -- 중복 처리 방지 (Market 정산/환불 키 길이 대응)
     request_hash        VARCHAR(64)     NULL,                        -- SHA-256(memberId+type+amount+referenceType+referenceId) 충돌 감지용
     created_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -132,7 +132,7 @@ erDiagram
         VARCHAR reason
         VARCHAR reference_type "BATTLE/MARKET_PREDICTION/INSIGHT_REPORT"
         BIGINT reference_id "도메인 객체 ID"
-        VARCHAR idempotency_key UK
+        VARCHAR(150) idempotency_key UK
         VARCHAR request_hash "SHA-256 해시 (충돌 감지)"
         DATETIME created_at "DEFAULT CURRENT_TIMESTAMP"
         DATETIME updated_at "ON UPDATE CURRENT_TIMESTAMP"
@@ -314,3 +314,4 @@ referenceType = INSIGHT_REPORT,    referenceId = 42  → Report 42
 | v5 | `point_balance` Atomic UPDATE 동시성 제어 정책 추가 |
 | v5 | 탈퇴 회원 정산/환불 허용 정책 추가 |
 | v6 | `member.age_group`, `member.gender` 컬럼 추가 (Insight 배치 조회 응답용) |
+| v7 | `point_history.idempotency_key` VARCHAR(100) → VARCHAR(150) (Market 정산/환불 키 길이 대응) |
