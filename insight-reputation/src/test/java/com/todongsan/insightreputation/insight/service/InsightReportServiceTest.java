@@ -82,7 +82,7 @@ class InsightReportServiceTest {
         when(insightReportRepository.save(any(InsightReport.class))).thenReturn(savedReport);
         
         // When
-        InsightReportResponse response = service.requestBattleReport(memberId, battleId);
+        InsightReportResponse response = service.requestBattleReport(memberId, battleId, "test-key");
         
         // Then
         assertThat(response.getReportId()).isEqualTo(1L);
@@ -111,7 +111,7 @@ class InsightReportServiceTest {
                 .thenReturn(Optional.of(existingReport));
         
         // When
-        InsightReportResponse response = service.requestBattleReport(memberId, battleId);
+        InsightReportResponse response = service.requestBattleReport(memberId, battleId, "test-key");
         
         // Then
         assertThat(response.getReportId()).isEqualTo(1L);
@@ -138,7 +138,7 @@ class InsightReportServiceTest {
                 .thenReturn(Optional.of(processingReport));
         
         // When & Then
-        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId))
+        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INSIGHT_REPORT_ALREADY_PROCESSING);
@@ -165,7 +165,7 @@ class InsightReportServiceTest {
         when(battleClient.getBattleInfo(battleId)).thenReturn(openBattle);
         
         // When & Then
-        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId))
+        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INSIGHT_REPORT_SOURCE_NOT_CLOSED);
@@ -193,7 +193,7 @@ class InsightReportServiceTest {
                 .when(memberPointClient).spendPoints(eq(memberId), eq(80), anyString());
         
         // When & Then
-        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId))
+        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.POINT_INSUFFICIENT);
@@ -389,7 +389,7 @@ class InsightReportServiceTest {
         when(insightReportRepository.save(any(InsightReport.class))).thenReturn(savedReport);
         
         // When
-        InsightReportResponse response = service.requestMarketReport(memberId, marketId);
+        InsightReportResponse response = service.requestMarketReport(memberId, marketId, "test-key");
         
         // Then
         assertThat(response.getReportId()).isEqualTo(1L);
@@ -419,7 +419,7 @@ class InsightReportServiceTest {
                 .thenReturn(Optional.of(existingReport));
         
         // When
-        InsightReportResponse response = service.requestMarketReport(memberId, marketId);
+        InsightReportResponse response = service.requestMarketReport(memberId, marketId, "test-key");
         
         // Then
         assertThat(response.getReportId()).isEqualTo(1L);
@@ -447,7 +447,7 @@ class InsightReportServiceTest {
                 .thenReturn(Optional.of(processingReport));
         
         // When & Then
-        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId))
+        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INSIGHT_REPORT_ALREADY_PROCESSING);
@@ -476,7 +476,7 @@ class InsightReportServiceTest {
         doNothing().when(memberPointClient).refundPoints(eq(memberId), eq(80), anyString());
         
         // When & Then
-        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId))
+        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INSIGHT_REPORT_SOURCE_DATA_NOT_READY);
@@ -500,7 +500,7 @@ class InsightReportServiceTest {
                 .when(memberPointClient).spendPoints(eq(memberId), eq(80), anyString());
         
         // When & Then
-        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId))
+        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.POINT_INSUFFICIENT);

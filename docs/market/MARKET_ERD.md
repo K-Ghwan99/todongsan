@@ -362,6 +362,10 @@ Market 단위의 정산 결과를 저장한다.
 
 정산 멱등성은 batch 단위가 아니라 `market_settlement_detail.idempotency_key`로 보장한다.
 
+`burned_point_amount`는 승자 없음 또는 소수점 둘째 자리 버림 처리로 인해 지급되지 않은 `settlement_pool` 잔여 금액을 기록한다. 이 금액은 실제 Member-Point 지급 대상이 아니다.
+
+Member-Point 정산 batch 요청의 Header `Idempotency-Key`는 batch 요청 전체 추적용 필수 헤더지만, Market DB에는 저장하지 않는다. 실제 유저별 중복 지급 방지는 `market_settlement_detail.idempotency_key`로 보장한다.
+
 ```sql
 CREATE TABLE market_settlement (
     id                              BIGINT          NOT NULL AUTO_INCREMENT,
@@ -378,6 +382,8 @@ CREATE TABLE market_settlement (
     payout_per_contract             DECIMAL(18,8)   NOT NULL,
 
     burned_point_amount             DECIMAL(10,2)   NOT NULL DEFAULT 0.00,
+    -- 승자 없음 또는 소수점 둘째 자리 버림 처리로 인해 지급되지 않은 settlement_pool 잔여 금액
+    -- 실제 Member-Point 지급 대상이 아니다.
 
     status                          VARCHAR(30)     NOT NULL DEFAULT 'PENDING',
     -- PENDING, IN_PROGRESS, COMPLETED, FAILED
@@ -411,6 +417,7 @@ CREATE TABLE market_settlement (
 사용자별 정산 지급 상세를 저장한다.
 
 승리 선택지에 참여한 사용자별로 하나씩 생성된다.  
+패자는 Member-Point 지급 대상이 아니므로 detail을 생성하지 않는다. 패자 Prediction은 `settled_amount = 0.00`, `status = SETTLED`로 처리한다.
 정산 지급 멱등성은 이 테이블의 `idempotency_key`가 담당한다.
 
 ```sql

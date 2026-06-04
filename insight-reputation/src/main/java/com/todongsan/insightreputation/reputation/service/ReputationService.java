@@ -156,7 +156,7 @@ public class ReputationService {
         // 정확도 계산 (소수점 버림)
         double predictionAccuracy = 0.0;
         if (newPredictionCount > 0) {
-            predictionAccuracy = Math.floor((double) newPredictionCorrect / newPredictionCount * 100 * 100) / 100;
+            predictionAccuracy = Math.floor((double) newPredictionCorrect * 100 * 100 / newPredictionCount) / 100;
         }
 
         // 동일 트랜잭션으로 모든 필드 업데이트

@@ -7,6 +7,7 @@ import com.todongsan.insightreputation.visitcertification.dto.VisitCertification
 import com.todongsan.insightreputation.visitcertification.entity.VisitCertification;
 import com.todongsan.insightreputation.visitcertification.repository.VisitCertificationRepository;
 import com.todongsan.insightreputation.visitcertification.util.RegionCenterCoordinateProvider;
+import com.todongsan.insightreputation.visitcertification.exception.VisitCertCooldownException;
 import com.todongsan.insightreputation.global.client.BattleClient;
 import com.todongsan.insightreputation.global.client.BattleCommentResponse;
 import com.todongsan.insightreputation.global.client.BattleResponse;
@@ -180,7 +181,7 @@ class VisitCertificationServiceTest {
 
         // When & Then
         assertThatThrownBy(() -> service.registerGps(memberId, sido, sigu, latitude, longitude))
-            .isInstanceOf(CustomException.class)
+            .isInstanceOf(VisitCertCooldownException.class)
             .hasFieldOrPropertyWithValue("errorCode", ErrorCode.VISIT_CERT_COOLDOWN);
 
         verify(repository, never()).save(any(VisitCertification.class));
@@ -239,7 +240,7 @@ class VisitCertificationServiceTest {
 
         // When & Then
         assertThatThrownBy(() -> service.registerGps(memberId, sido, sigu, latitude, longitude))
-            .isInstanceOf(CustomException.class)
+            .isInstanceOf(VisitCertCooldownException.class)
             .hasFieldOrPropertyWithValue("errorCode", ErrorCode.VISIT_CERT_COOLDOWN);
     }
 
@@ -458,7 +459,7 @@ class VisitCertificationServiceTest {
 
         // When & Then
         assertThatThrownBy(() -> service.registerComment(memberId, sido, sigu, commentId))
-            .isInstanceOf(CustomException.class)
+            .isInstanceOf(VisitCertCooldownException.class)
             .hasFieldOrPropertyWithValue("errorCode", ErrorCode.VISIT_CERT_COOLDOWN);
 
         verify(battleClient, never()).getComment(any());
