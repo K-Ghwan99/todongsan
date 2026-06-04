@@ -291,7 +291,7 @@ DATA_PENDING → CLOSED
 ## 8. 포인트 차감 연동 실패 시나리오
 
 현재 2차 구현에서는 실제 Member-Point HTTP 연동 없이 `MemberPointClient` 내부 예외 모델로 아래 상태 전이를 처리한다.
-Scheduler 대사와 Member-Point 거래 상태 조회 API 연동은 아직 구현하지 않는다.
+예측 차감 대사 API 구현 시에는 Member-Point 거래 상태 조회 API로 `POINT_UNKNOWN`과 3분 이상 고착된 `POINT_PENDING`을 보정한다.
 
 ### 8-1. 포인트 부족
 
@@ -319,7 +319,7 @@ HTTP Status = 409
 ```text
 PredictionStatus = POINT_UNKNOWN
 Retry = 즉시 재시도하지 않음
-보정 방식 = Idempotency-Key로 Member-Point 처리 이력 조회
+보정 방식 = 예측 차감 대사 API가 Idempotency-Key로 Member-Point 거래 상태 조회
 ```
 
 사용 ErrorCode:
@@ -335,7 +335,7 @@ EXTERNAL_SERVICE_TIMEOUT
 ```text
 PredictionStatus = POINT_UNKNOWN
 Retry = O
-보정 방식 = Idempotency-Key로 Member-Point 처리 이력 조회
+보정 방식 = 예측 차감 대사 API가 Idempotency-Key로 Member-Point 거래 상태 조회
 ```
 
 사용 ErrorCode:
@@ -351,7 +351,7 @@ EXTERNAL_SERVICE_ERROR
 ```text
 PredictionStatus = POINT_UNKNOWN
 Retry = O
-보정 방식 = Idempotency-Key로 Member-Point 처리 이력 조회
+보정 방식 = 예측 차감 대사 API가 Idempotency-Key로 Member-Point 거래 상태 조회
 ```
 
 사용 ErrorCode:
@@ -365,25 +365,43 @@ EXTERNAL_SERVICE_UNAVAILABLE
 처리:
 
 ```text
-updatedAt 기준 3분 이상 지난 POINT_PENDING을 Scheduler 대사 대상으로 포함
-Idempotency-Key로 Member-Point 처리 이력 조회
+updatedAt 기준 3분 이상 지난 POINT_PENDING을 예측 차감 대사 대상으로 포함
+Idempotency-Key로 Member-Point 거래 상태 조회
 ```
 
 상태 전이:
 
 ```text
-차감 성공 확인
+PROCESSED
 → Market row + 모든 MarketOption row 락 획득
 → priceSnapshot, contractQuantity 확정
 → pool 갱신, 가격 재계산, PriceHistory 저장
 → CONFIRMED
 
-차감 실패 확인
+FAILED
 → FAILED
 
-처리 이력 없음
-→ 포인트 차감 재시도 또는 다음 주기로 보류
+NOT_FOUND
+→ 자동 재차감하지 않고 FAILED
+
+UNKNOWN 또는 조회 timeout/5xx
+→ POINT_UNKNOWN 유지
 ```
+
+### 8-6. 예측 차감 대사 API ErrorCode 정책
+
+예측 차감 대사 API는 chunk 처리 API이므로 개별 Prediction 처리 실패 때문에 전체 API가 실패하지 않는다.
+개별 Prediction의 Market 상태 불일치, 데이터 불일치, Member-Point 조회 실패는 응답 count로 집계하고 다음 대상을 계속 처리한다.
+
+| 상황 | ErrorCode |
+|---|---|
+| limit 값이 0 이하 또는 최대값 초과 | `VALIDATION_FAILED` |
+| DB 장애 | `INTERNAL_ERROR` |
+| 개별 Prediction의 Market 상태 불일치 | 전체 실패 아님, `skippedCount` 증가 |
+| Member-Point 조회 timeout/5xx | 전체 실패 아님, `unknownCount` 증가 |
+
+전체 API 실패는 limit 검증 실패, DB 장애, 서버 내부 오류 같은 전체 처리 불가 상황에 한정한다.
+예측 차감 대사 API만을 위한 새 Market ErrorCode는 추가하지 않는다.
 
 ---
 
@@ -550,7 +568,7 @@ MarketStatus = SETTLED
 대상 API:
 
 ```http
-POST /internal/api/v1/markets/predictions/reconcile-point?limit=100
+POST /api/v1/internal/markets/predictions/reconcile?limit=100
 POST /internal/api/v1/markets/settlements/retry-failed?limit=100
 POST /internal/api/v1/markets/refunds/retry-failed?limit=100
 POST /internal/api/v1/markets/settlement-data/retry-fetch?limit=100
