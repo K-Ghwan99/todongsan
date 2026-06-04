@@ -684,5 +684,9 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 
 [운영]
 [ ] Scheduler가 limit 기반 chunk 처리를 하는가?
+[ ] Scheduler가 Controller를 HTTP로 호출하지 않고 기존 Service를 직접 호출하는가?
+[ ] 테스트 환경에서 Scheduler가 비활성화되어 있는가?
+[ ] Scheduler 내부에 새 대사/정산 비즈니스 로직을 만들지 않았는가?
+[ ] 단일 인스턴스 중복 실행은 AtomicBoolean guard로 방지하고, 분산락이나 scheduler_lock 테이블은 추가하지 않았는가?
 [ ] H2 테스트 스키마와 실제 MySQL DDL 컬럼명이 일치하는가?
 ```

@@ -1,5 +1,6 @@
 package com.todongsan.marketservice.market.service;
 
+import com.todongsan.marketservice.global.exception.CustomException;
 import com.todongsan.marketservice.market.client.MemberPointClient;
 import com.todongsan.marketservice.market.client.MemberPointSettlementBatchRequest;
 import com.todongsan.marketservice.market.client.MemberPointSettlementBatchResponse;
@@ -7,6 +8,7 @@ import com.todongsan.marketservice.market.client.MemberPointSettlementItem;
 import com.todongsan.marketservice.market.client.exception.MemberPointExternalException;
 import com.todongsan.marketservice.market.client.exception.MemberPointTimeoutException;
 import com.todongsan.marketservice.market.client.exception.MemberPointUnavailableException;
+import com.todongsan.marketservice.market.dto.response.RetrySettlementBatchResponse;
 import com.todongsan.marketservice.market.dto.response.SettleMarketResponse;
 import com.todongsan.marketservice.market.entity.MarketSettlementDetail;
 import com.todongsan.marketservice.market.type.MarketStatus;
@@ -14,8 +16,10 @@ import com.todongsan.marketservice.market.type.SettlementStatus;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MarketSettlementService {
@@ -89,6 +93,31 @@ public class MarketSettlementService {
         }
     }
 
+    public RetrySettlementBatchResponse retryFailedSettlements(int limit) {
+        List<Long> marketIds = transactionService.selectMarketIdsForSettlementRetry(limit);
+        RetrySettlementBatchCounts counts = new RetrySettlementBatchCounts(limit, marketIds.size());
+        for (Long marketId : marketIds) {
+            counts.retriedMarketCount++;
+            try {
+                SettleMarketResponse response = retryMarketSettlement(marketId);
+                if (response.marketStatus() == MarketStatus.SETTLED) {
+                    counts.settledMarketCount++;
+                } else if (response.marketStatus() == MarketStatus.SETTLEMENT_IN_PROGRESS) {
+                    counts.stillInProgressCount++;
+                } else {
+                    counts.skippedCount++;
+                }
+            } catch (CustomException e) {
+                counts.skippedCount++;
+                log.info("Settlement retry skipped. marketId={}, errorCode={}", marketId, e.getErrorCode().getCode());
+            } catch (RuntimeException e) {
+                counts.failedCount++;
+                log.error("Settlement retry failed. marketId={}", marketId, e);
+            }
+        }
+        return counts.toResponse();
+    }
+
     private List<MemberPointSettlementItem> toItems(List<MarketSettlementDetail> details, String reason) {
         return details.stream()
                 .map(detail -> new MemberPointSettlementItem(
@@ -117,5 +146,32 @@ public class MarketSettlementService {
         String message = exception.getMessage();
         String reason = message == null || message.isBlank() ? fallback : message;
         return reason.length() <= 255 ? reason : reason.substring(0, 255);
+    }
+
+    private static class RetrySettlementBatchCounts {
+        private final int requestedLimit;
+        private final int scannedMarketCount;
+        private int retriedMarketCount;
+        private int settledMarketCount;
+        private int stillInProgressCount;
+        private int skippedCount;
+        private int failedCount;
+
+        private RetrySettlementBatchCounts(int requestedLimit, int scannedMarketCount) {
+            this.requestedLimit = requestedLimit;
+            this.scannedMarketCount = scannedMarketCount;
+        }
+
+        private RetrySettlementBatchResponse toResponse() {
+            return new RetrySettlementBatchResponse(
+                    requestedLimit,
+                    scannedMarketCount,
+                    retriedMarketCount,
+                    settledMarketCount,
+                    stillInProgressCount,
+                    skippedCount,
+                    failedCount
+            );
+        }
     }
 }
