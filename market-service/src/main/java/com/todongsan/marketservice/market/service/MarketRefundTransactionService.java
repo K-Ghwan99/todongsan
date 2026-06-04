@@ -20,12 +20,16 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MarketRefundTransactionService {
+
+    private static final int RETRY_PENDING_THRESHOLD_MINUTES = 3;
 
     private final MarketMapper marketMapper;
 
@@ -118,6 +122,103 @@ public class MarketRefundTransactionService {
         return preparation.toResponse(0, 0, preparation.refundDetails().size(), RefundStatus.IN_PROGRESS);
     }
 
+    @Transactional
+    public MarketRefundRetryPreparation prepareRefundRetry(long marketId) {
+        LocalDateTime now = LocalDateTime.now();
+        Market market = marketMapper.lockMarketById(marketId);
+        if (market == null) {
+            throw new CustomException(MarketErrorCode.MARKET_NOT_FOUND);
+        }
+        if (market.getStatus() != MarketStatus.VOIDED) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+        }
+
+        MarketVoid marketVoid = marketMapper.selectMarketVoidByMarketId(marketId);
+        if (marketVoid == null) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_SETTLEMENT_DATA);
+        }
+        long detailCount = marketMapper.countRefundDetailsByVoidId(marketVoid.getId());
+        if (detailCount == 0) {
+            throw new CustomException(MarketErrorCode.MARKET_REFUND_NOT_ALLOWED);
+        }
+
+        LocalDateTime pendingThreshold = now.minusMinutes(RETRY_PENDING_THRESHOLD_MINUTES);
+        List<MarketRefundDetail> retryDetails = marketMapper.selectRetryableRefundDetails(
+                marketVoid.getId(),
+                pendingThreshold
+        );
+        if (retryDetails.isEmpty()) {
+            if (marketMapper.countNonSuccessRefundDetails(marketVoid.getId()) == 0) {
+                marketMapper.updateMarketVoidRefundStatus(marketVoid.getId(), RefundStatus.COMPLETED, now);
+                return new MarketRefundRetryPreparation(marketId, marketVoid.getId(), List.of(), true);
+            }
+            throw new CustomException(MarketErrorCode.MARKET_REFUND_NOT_ALLOWED);
+        }
+
+        return new MarketRefundRetryPreparation(marketId, marketVoid.getId(), retryDetails, false);
+    }
+
+    @Transactional
+    public RefundMarketResponse applyRefundRetryResult(
+            MarketRefundRetryPreparation preparation,
+            MemberPointRefundBatchResponse response
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        Map<Long, MemberPointRefundItemResult> resultsByPredictionId = response.results().stream()
+                .collect(Collectors.toMap(
+                        MemberPointRefundItemResult::predictionId,
+                        Function.identity(),
+                        (first, ignored) -> first
+                ));
+
+        int successCount = 0;
+        int failedCount = 0;
+        int unknownCount = 0;
+        for (MarketRefundDetail detail : preparation.retryDetails()) {
+            MemberPointRefundItemResult result = resultsByPredictionId.get(detail.getPredictionId());
+            if (result == null) {
+                if (markRetryRefundUnknown(detail, "MEMBER_POINT_RESULT_MISSING", now)) {
+                    unknownCount++;
+                }
+                continue;
+            }
+            if (result.status() == null) {
+                if (markRetryRefundUnknown(detail, "MEMBER_POINT_RESULT_STATUS_MISSING", now)) {
+                    unknownCount++;
+                }
+                continue;
+            }
+            if (isSuccess(result.status())) {
+                if (markRetryRefundSuccess(detail, now)) {
+                    successCount++;
+                }
+                continue;
+            }
+            if (markRetryRefundFailed(detail, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now)) {
+                failedCount++;
+            }
+        }
+
+        RefundStatus refundStatus = resolveRefundStatus(preparation.voidId(), now);
+        return preparation.toResponse(successCount, failedCount, unknownCount, refundStatus);
+    }
+
+    @Transactional
+    public RefundMarketResponse applyRefundRetryUnknown(
+            MarketRefundRetryPreparation preparation,
+            String failReason
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        int unknownCount = 0;
+        for (MarketRefundDetail detail : preparation.retryDetails()) {
+            if (markRetryRefundUnknown(detail, failReason, now)) {
+                unknownCount++;
+            }
+        }
+        marketMapper.updateMarketVoidRefundStatus(preparation.voidId(), RefundStatus.IN_PROGRESS, now);
+        return preparation.toResponse(0, 0, unknownCount, RefundStatus.IN_PROGRESS);
+    }
+
     private MarketRefundDetail toPendingDetail(
             long marketId,
             Long voidId,
@@ -150,6 +251,33 @@ public class MarketRefundTransactionService {
         marketMapper.markPredictionRefundUnknown(detail.getPredictionId(), failReason, now);
     }
 
+    private boolean markRetryRefundSuccess(MarketRefundDetail detail, LocalDateTime now) {
+        if (!updateRetryDetail(detail, TransactionItemStatus.SUCCESS, null, now)) {
+            return false;
+        }
+        int updatedRows = marketMapper.markPredictionRefunded(detail.getPredictionId(), detail.getRefundAmount(), now);
+        logSkippedPredictionUpdateIfNeeded(detail, "REFUNDED", updatedRows);
+        return true;
+    }
+
+    private boolean markRetryRefundFailed(MarketRefundDetail detail, String failReason, LocalDateTime now) {
+        if (!updateRetryDetail(detail, TransactionItemStatus.FAILED, failReason, now)) {
+            return false;
+        }
+        int updatedRows = marketMapper.markPredictionRefundPending(detail.getPredictionId(), failReason, now);
+        logSkippedPredictionUpdateIfNeeded(detail, "REFUND_PENDING", updatedRows);
+        return true;
+    }
+
+    private boolean markRetryRefundUnknown(MarketRefundDetail detail, String failReason, LocalDateTime now) {
+        if (!updateRetryDetail(detail, TransactionItemStatus.UNKNOWN, failReason, now)) {
+            return false;
+        }
+        int updatedRows = marketMapper.markPredictionRefundUnknown(detail.getPredictionId(), failReason, now);
+        logSkippedPredictionUpdateIfNeeded(detail, "REFUND_UNKNOWN", updatedRows);
+        return true;
+    }
+
     private String refundIdempotencyKey(long marketId, MarketPrediction prediction) {
         return "MARKET_REFUND:market:%d:prediction:%d:member:%d"
                 .formatted(marketId, prediction.getId(), prediction.getMemberId());
@@ -158,6 +286,48 @@ public class MarketRefundTransactionService {
     private boolean isSuccess(MemberPointRefundItemStatus status) {
         return status == MemberPointRefundItemStatus.PROCESSED
                 || status == MemberPointRefundItemStatus.ALREADY_PROCESSED;
+    }
+
+    private RefundStatus resolveRefundStatus(Long voidId, LocalDateTime now) {
+        RefundStatus refundStatus = marketMapper.countNonSuccessRefundDetails(voidId) == 0
+                ? RefundStatus.COMPLETED
+                : RefundStatus.IN_PROGRESS;
+        marketMapper.updateMarketVoidRefundStatus(voidId, refundStatus, now);
+        return refundStatus;
+    }
+
+    private boolean updateRetryDetail(
+            MarketRefundDetail detail,
+            TransactionItemStatus status,
+            String failReason,
+            LocalDateTime now
+    ) {
+        int updatedRows = marketMapper.updateRetryRefundDetailStatus(detail.getId(), status, failReason, now);
+        if (updatedRows == 0) {
+            log.warn(
+                    "Refund retry detail update skipped. detailId={}, predictionId={}, targetStatus={}",
+                    detail.getId(),
+                    detail.getPredictionId(),
+                    status
+            );
+            return false;
+        }
+        return true;
+    }
+
+    private void logSkippedPredictionUpdateIfNeeded(
+            MarketRefundDetail detail,
+            String targetStatus,
+            int updatedRows
+    ) {
+        if (updatedRows == 0) {
+            log.warn(
+                    "Refund retry prediction update skipped. detailId={}, predictionId={}, targetStatus={}",
+                    detail.getId(),
+                    detail.getPredictionId(),
+                    targetStatus
+            );
+        }
     }
 
     private String failureReason(String reason, String fallback) {

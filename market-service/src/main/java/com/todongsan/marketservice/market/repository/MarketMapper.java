@@ -262,12 +262,26 @@ public interface MarketMapper {
 
     List<MarketRefundDetail> selectPendingRefundDetailsByVoidId(@Param("marketVoidId") long marketVoidId);
 
+    List<MarketRefundDetail> selectRetryableRefundDetails(
+            @Param("marketVoidId") long marketVoidId,
+            @Param("pendingThreshold") LocalDateTime pendingThreshold
+    );
+
+    long countNonSuccessRefundDetails(@Param("marketVoidId") long marketVoidId);
+
     int updatePredictionToRefundPending(
             @Param("predictionId") long predictionId,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 
     int updateRefundDetailStatus(
+            @Param("detailId") long detailId,
+            @Param("status") TransactionItemStatus status,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateRetryRefundDetailStatus(
             @Param("detailId") long detailId,
             @Param("status") TransactionItemStatus status,
             @Param("failReason") String failReason,
@@ -281,6 +295,12 @@ public interface MarketMapper {
     );
 
     int markPredictionRefundUnknown(
+            @Param("predictionId") long predictionId,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int markPredictionRefundPending(
             @Param("predictionId") long predictionId,
             @Param("failReason") String failReason,
             @Param("updatedAt") LocalDateTime updatedAt

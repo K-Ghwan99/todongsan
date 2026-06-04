@@ -346,6 +346,28 @@
         FOR UPDATE
     </select>
 
+    <select id="selectRetryableRefundDetails" resultType="com.todongsan.marketservice.market.entity.MarketRefundDetail">
+        SELECT *
+        FROM market_refund_detail
+        WHERE market_void_id = #{marketVoidId}
+          AND (
+                status IN ('FAILED', 'UNKNOWN')
+                OR (
+                    status = 'PENDING'
+                    AND updated_at &lt;= #{pendingThreshold}
+                )
+          )
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <select id="countNonSuccessRefundDetails" resultType="long">
+        SELECT COUNT(*)
+        FROM market_refund_detail
+        WHERE market_void_id = #{marketVoidId}
+          AND status != 'SUCCESS'
+    </select>
+
     <update id="updatePredictionToRefundPending">
         UPDATE market_prediction
         SET status = 'REFUND_PENDING',
@@ -361,6 +383,15 @@
             updated_at = #{updatedAt}
         WHERE id = #{detailId}
           AND status = 'PENDING'
+    </update>
+
+    <update id="updateRetryRefundDetailStatus">
+        UPDATE market_refund_detail
+        SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{detailId}
+          AND status IN ('FAILED', 'UNKNOWN', 'PENDING')
     </update>
 
     <update id="markPredictionRefunded">
@@ -380,6 +411,15 @@
             updated_at = #{updatedAt}
         WHERE id = #{predictionId}
           AND status = 'REFUND_PENDING'
+    </update>
+
+    <update id="markPredictionRefundPending">
+        UPDATE market_prediction
+        SET status = 'REFUND_PENDING',
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status IN ('REFUND_PENDING', 'REFUND_UNKNOWN')
     </update>
 
     <update id="updateMarketVoidRefundStatus">

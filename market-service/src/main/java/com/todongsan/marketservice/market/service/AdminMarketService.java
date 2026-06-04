@@ -158,6 +158,10 @@ public class AdminMarketService {
         return marketRefundService.refundMarket(marketId);
     }
 
+    public RefundMarketResponse retryRefundMarket(long marketId) {
+        return marketRefundService.retryRefundMarket(marketId);
+    }
+
     @Transactional
     public VoidMarketResponse voidMarket(long marketId, VoidMarketRequest request) {
         MarketVoidReasonType reasonType = parseVoidReasonType(request.reasonCode());

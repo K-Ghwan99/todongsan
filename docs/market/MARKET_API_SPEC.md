@@ -1580,12 +1580,16 @@ Market.status는 계속 `VOIDED`로 유지한다.
 POST /api/v1/admin/markets/{marketId}/refunds/retry
 ```
 
-기존 환불 실행 중 `FAILED` 또는 `UNKNOWN`으로 남은 `market_refund_detail`만 재시도한다.
+기존 환불 실행 중 `FAILED`, `UNKNOWN` 또는 3분 이상 `PENDING`으로 남은 `market_refund_detail`만 재시도한다.
 
 재시도 대상:
 
 ```text
 market_refund_detail.status IN ('FAILED', 'UNKNOWN')
+OR (
+    market_refund_detail.status = 'PENDING'
+    AND market_refund_detail.updated_at <= now - 3 minutes
+)
 ```
 
 재시도 금지:
@@ -1619,7 +1623,7 @@ PROCESSED / ALREADY_PROCESSED:
 
 FAILED:
 - refund_detail FAILED
-- Prediction REFUND_PENDING 또는 REFUND_UNKNOWN 유지
+- Prediction REFUND_PENDING 유지
 
 timeout / 응답 불명확:
 - refund_detail UNKNOWN
@@ -1634,13 +1638,17 @@ timeout / 응답 불명확:
 POST /api/v1/internal/markets/refunds/retry?limit=100
 ```
 
-VOIDED Market 중 `FAILED` 또는 `UNKNOWN` refund_detail이 남아 있는 Market을 limit 단위로 조회하여 환불 재시도를 수행한다.
+VOIDED Market 중 `FAILED`, `UNKNOWN` 또는 3분 이상 `PENDING` refund_detail이 남아 있는 Market을 limit 단위로 조회하여 환불 재시도를 수행한다.
 
 대상:
 
 ```text
 market.status = VOIDED
 market_refund_detail.status IN ('FAILED', 'UNKNOWN')
+OR (
+    market_refund_detail.status = 'PENDING'
+    AND market_refund_detail.updated_at <= now - 3 minutes
+)
 ```
 
 처리:
@@ -2111,6 +2119,10 @@ POST /api/v1/internal/markets/refunds/retry?limit=100
 
 ```text
 market_refund_detail.status IN ('FAILED', 'UNKNOWN')
+OR (
+    market_refund_detail.status = 'PENDING'
+    AND market_refund_detail.updated_at <= now - 3 minutes
+)
 ```
 
 처리:

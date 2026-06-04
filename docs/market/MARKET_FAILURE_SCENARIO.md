@@ -1156,7 +1156,7 @@ Member-Point 응답의 item별 `results[]` 처리 기준:
 
 | 항목 | 내용 |
 |---|---|
-| 발생 시점 | 환불 실패 또는 UNKNOWN detail 재시도 |
+| 발생 시점 | 환불 실패, UNKNOWN detail 또는 3분 이상 PENDING detail 재시도 |
 | 상황 | 같은 Prediction에 대해 같은 item.idempotencyKey로 재시도 |
 | Member-Point 응답 | ALREADY_PROCESSED |
 | 상태 변화 | detail SUCCESS, Prediction REFUNDED |
@@ -1164,6 +1164,9 @@ Member-Point 응답의 item별 `results[]` 처리 기준:
 | 관련 ErrorCode | 없음 |
 
 이미 환불된 item 재시도는 성공으로 간주한다.
+
+환불 실행 API가 `market_refund_detail`을 `PENDING`으로 생성한 뒤 Member-Point 호출 전 서버 장애가 발생하면,
+3분 이상 지난 `PENDING` detail도 고착 상태로 보고 환불 재시도 대상에 포함한다.
 
 ---
 

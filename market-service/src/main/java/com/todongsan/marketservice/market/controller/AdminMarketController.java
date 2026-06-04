@@ -70,6 +70,13 @@ public class AdminMarketController {
         return ApiResponse.ok(adminMarketService.refundMarket(marketId));
     }
 
+    @PostMapping("/{marketId}/refunds/retry")
+    public ApiResponse<RefundMarketResponse> retryRefundMarket(
+            @PathVariable long marketId
+    ) {
+        return ApiResponse.ok(adminMarketService.retryRefundMarket(marketId));
+    }
+
     @PatchMapping("/{marketId}/void")
     public ApiResponse<VoidMarketResponse> voidMarket(
             @PathVariable long marketId,
