@@ -3,6 +3,7 @@ package com.todongsan.memberpointservice.member.service;
 import com.todongsan.memberpointservice.global.exception.CustomException;
 import com.todongsan.memberpointservice.global.exception.ErrorCode;
 import com.todongsan.memberpointservice.member.dto.request.MemberUpdateRequest;
+import com.todongsan.memberpointservice.member.dto.response.MemberBatchItemResponse;
 import com.todongsan.memberpointservice.member.dto.response.MemberResponse;
 import com.todongsan.memberpointservice.member.dto.response.MemberUpdateResponse;
 import com.todongsan.memberpointservice.member.entity.Member;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -61,8 +63,6 @@ public class MemberServiceImpl implements MemberService {
         return new MemberUpdateResponse(member);
     }
 
-
-
     @Override
     @Transactional
     public Long withdraw(Long memberId) {
@@ -73,5 +73,12 @@ public class MemberServiceImpl implements MemberService {
         member.delete(LocalDateTime.now());
 
         return memberId;
+    }
+
+    @Override
+    public List<MemberBatchItemResponse> getBatch(List<Long> memberIds) {
+        return memberRepository.findAllByIdIn(memberIds).stream()
+                .map(MemberBatchItemResponse::new)
+                .toList();
     }
 }
