@@ -236,16 +236,18 @@ public class MarketPredictionTransactionService {
                 .findFirst()
                 .orElseThrow(() -> new CustomException(MarketErrorCode.MARKET_OPTION_NOT_FOUND));
 
-        BigDecimal currentPrice = selectedOption.getCurrentPrice().setScale(PRICE_SCALE, QUOTE_ROUNDING);
+        BigDecimal currentPrice = requireOptionAmount(selectedOption.getCurrentPrice())
+                .setScale(PRICE_SCALE, QUOTE_ROUNDING);
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) {
             throw new CustomException(MarketErrorCode.MARKET_INVALID_OPTION);
         }
 
-        BigDecimal selectedOptionEffectivePoolBefore = effectivePool(selectedOption).setScale(MONEY_SCALE);
+        BigDecimal selectedOptionEffectivePoolBefore = effectivePool(selectedOption)
+                .setScale(MONEY_SCALE, QUOTE_ROUNDING);
         BigDecimal totalEffectivePoolBefore = options.stream()
                 .map(this::effectivePool)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(MONEY_SCALE);
+                .setScale(MONEY_SCALE, QUOTE_ROUNDING);
         if (totalEffectivePoolBefore.compareTo(BigDecimal.ZERO) <= 0) {
             throw new CustomException(MarketErrorCode.MARKET_INVALID_OPTION);
         }
@@ -253,10 +255,10 @@ public class MarketPredictionTransactionService {
         BigDecimal estimatedContractQuantity = pointAmount.divide(currentPrice, QUANTITY_SCALE, QUOTE_ROUNDING);
         BigDecimal selectedOptionEffectivePoolAfter = selectedOptionEffectivePoolBefore
                 .add(pointAmount)
-                .setScale(MONEY_SCALE);
+                .setScale(MONEY_SCALE, QUOTE_ROUNDING);
         BigDecimal totalEffectivePoolAfter = totalEffectivePoolBefore
                 .add(pointAmount)
-                .setScale(MONEY_SCALE);
+                .setScale(MONEY_SCALE, QUOTE_ROUNDING);
         BigDecimal estimatedAfterPrice = selectedOptionEffectivePoolAfter
                 .divide(totalEffectivePoolAfter, PRICE_SCALE, QUOTE_ROUNDING);
         BigDecimal priceImpactRate = estimatedAfterPrice
@@ -282,7 +284,15 @@ public class MarketPredictionTransactionService {
     }
 
     private BigDecimal effectivePool(MarketOption option) {
-        return option.getRealPoolAmount().add(option.getVirtualPoolAmount());
+        return requireOptionAmount(option.getRealPoolAmount())
+                .add(requireOptionAmount(option.getVirtualPoolAmount()));
+    }
+
+    private BigDecimal requireOptionAmount(BigDecimal value) {
+        if (value == null) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_OPTION);
+        }
+        return value;
     }
 
     private PredictionConfirmationResult confirmPredictionInternal(

@@ -124,6 +124,22 @@ class MarketPredictionQuoteControllerTest {
     }
 
     @Test
+    void quotePredictionRejectsNullMarketOptionIdByValidation() throws Exception {
+        insertActiveMarketWithQuoteOptions();
+
+        mockMvc.perform(post("/api/v1/markets/{marketId}/predictions/quote", MARKET_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "marketOptionId": null,
+                                  "pointAmount": "100.00"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_FAILED"));
+    }
+
+    @Test
     void quotePredictionRejectsOptionFromDifferentMarket() throws Exception {
         insertActiveMarketWithQuoteOptions();
         insertMarket(2L, "ACTIVE", LocalDateTime.now().plusDays(1));
