@@ -444,7 +444,7 @@ Authorization: Bearer {JWT}
 ### 3-0. 회원 정보 배치 조회
 
 ```
-POST /api/v1/members/batch
+POST /internal/api/v1/members/batch
 ```
 
 Insight Service가 Battle/Market 투표·예측 데이터를 분석할 때
@@ -505,7 +505,7 @@ memberId 목록으로 회원의 연령대/성별/거주지 정보를 한 번에 
 ### 3-1. 거래 상태 조회
 
 ```
-GET /api/v1/points/transactions?idempotencyKey={key}
+GET /internal/api/v1/points/transactions?idempotencyKey={key}
 ```
 
 Market이 포인트 차감 요청 후 Timeout 발생 시 처리 여부를 확인하기 위해 호출한다.
@@ -596,7 +596,7 @@ Market이 포인트 차감 요청 후 Timeout 발생 시 처리 여부를 확인
 ### 3-1. Point 적립
 
 ```
-POST /api/v1/points/earn
+POST /internal/api/v1/points/earn
 ```
 
 Battle 투표 완료, 댓글 작성, Battle 주제 승인 시 Battle Service가 호출한다.
@@ -684,7 +684,7 @@ X-Member-Id: {memberId}
 ### 3-2. Point 차감
 
 ```
-POST /api/v1/points/spend
+POST /internal/api/v1/points/spend
 ```
 
 Market 예측 참여 시 Market Service가 호출한다.
@@ -769,7 +769,7 @@ X-Member-Id: {memberId}
 ### 3-3. Market 정산 일괄 지급
 
 ```
-POST /api/v1/points/settlements
+POST /internal/api/v1/points/settlements
 ```
 
 Market 정산 완료 시 Market Service가 호출한다.
@@ -885,7 +885,7 @@ items 순회하며 각 prediction에 대해:
 ### 3-4. Market 무효 환불 / AI 리포트 생성 실패 환불
 
 ```
-POST /api/v1/points/refunds
+POST /internal/api/v1/points/refunds
 ```
 
 다음 두 가지 상황에서 호출한다.

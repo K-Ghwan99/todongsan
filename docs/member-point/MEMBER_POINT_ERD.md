@@ -259,8 +259,8 @@ WHERE id = :memberId;
 시스템 보정성 API는 탈퇴 회원도 처리 가능하다.
 
 ```
-POST /api/v1/points/settlements
-POST /api/v1/points/refunds
+POST /internal/api/v1/points/settlements
+POST /internal/api/v1/points/refunds
 
   → deleted_at 무시 (WHERE id = :memberId 만 사용)
   → 탈퇴 전 발생한 거래에 대한 정산/환불 책임 유지
