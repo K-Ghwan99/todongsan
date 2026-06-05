@@ -2,16 +2,19 @@ package com.todongsan.marketservice.market.controller;
 
 import com.todongsan.marketservice.global.response.ApiResponse;
 import com.todongsan.marketservice.market.dto.request.CreatePredictionRequest;
+import com.todongsan.marketservice.market.dto.request.QuoteMarketPredictionRequest;
 import com.todongsan.marketservice.market.dto.response.CreatePredictionResponse;
 import com.todongsan.marketservice.market.dto.response.MarketDetailResponse;
 import com.todongsan.marketservice.market.dto.response.MarketListResponse;
 import com.todongsan.marketservice.market.dto.response.MarketPredictionResponse;
 import com.todongsan.marketservice.market.dto.response.MarketPriceHistoryResponse;
+import com.todongsan.marketservice.market.dto.response.QuoteMarketPredictionResponse;
 import com.todongsan.marketservice.market.service.MarketPredictionQueryService;
 import com.todongsan.marketservice.market.service.MarketPredictionService;
 import com.todongsan.marketservice.market.service.MarketService;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.PredictionStatus;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
@@ -79,6 +82,14 @@ public class MarketController {
             return ApiResponse.ok(response, "예측 참여 처리 상태를 확인 중입니다.");
         }
         return ApiResponse.ok(response);
+    }
+
+    @PostMapping("/{marketId}/predictions/quote")
+    public ApiResponse<QuoteMarketPredictionResponse> quotePrediction(
+            @PathVariable @Min(1) long marketId,
+            @Valid @RequestBody QuoteMarketPredictionRequest request
+    ) {
+        return ApiResponse.ok(marketPredictionService.quotePrediction(marketId, request));
     }
 
     @GetMapping("/{marketId}/predictions/me")

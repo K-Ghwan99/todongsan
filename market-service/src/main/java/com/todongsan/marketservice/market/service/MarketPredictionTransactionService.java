@@ -3,7 +3,9 @@ package com.todongsan.marketservice.market.service;
 import com.todongsan.marketservice.global.exception.CustomException;
 import com.todongsan.marketservice.global.exception.errorcode.MarketErrorCode;
 import com.todongsan.marketservice.market.dto.request.CreatePredictionRequest;
+import com.todongsan.marketservice.market.dto.request.QuoteMarketPredictionRequest;
 import com.todongsan.marketservice.market.dto.response.CreatePredictionResponse;
+import com.todongsan.marketservice.market.dto.response.QuoteMarketPredictionResponse;
 import com.todongsan.marketservice.market.entity.Market;
 import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
@@ -27,9 +29,13 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class MarketPredictionTransactionService {
 
-    private static final BigDecimal MIN_POINT_AMOUNT = new BigDecimal("10.00");
-    private static final BigDecimal MAX_POINT_AMOUNT = new BigDecimal("500.00");
+    private static final int MONEY_SCALE = 2;
     private static final int PRICE_SCALE = 8;
+    private static final int QUANTITY_SCALE = 8;
+    private static final int RATE_SCALE = 8;
+    private static final RoundingMode QUOTE_ROUNDING = RoundingMode.HALF_UP;
+    private static final String QUOTE_NOTICE =
+            "현재 가격은 실시간으로 변동될 수 있으며, 실제 참여 시점의 가격 기준으로 계약 수량이 확정됩니다.";
 
     private final MarketMapper marketMapper;
 
@@ -211,12 +217,68 @@ public class MarketPredictionTransactionService {
     }
 
     private void validatePointAmount(BigDecimal pointAmount) {
-        if (pointAmount == null
-                || pointAmount.scale() > 2
-                || pointAmount.compareTo(MIN_POINT_AMOUNT) < 0
-                || pointAmount.compareTo(MAX_POINT_AMOUNT) > 0) {
-            throw new CustomException(MarketErrorCode.MARKET_INVALID_BET_AMOUNT);
+        PredictionPointAmountValidator.validate(pointAmount);
+    }
+
+    @Transactional(readOnly = true)
+    public QuoteMarketPredictionResponse quotePrediction(
+            long marketId,
+            QuoteMarketPredictionRequest request
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        Market market = getMarket(marketId);
+        validateMarketForPrediction(market, now);
+        BigDecimal pointAmount = PredictionPointAmountValidator.parseAndValidate(request.pointAmount());
+
+        List<MarketOption> options = marketMapper.selectOptionsByMarketId(marketId);
+        MarketOption selectedOption = options.stream()
+                .filter(option -> option.getId().equals(request.marketOptionId()))
+                .findFirst()
+                .orElseThrow(() -> new CustomException(MarketErrorCode.MARKET_OPTION_NOT_FOUND));
+
+        BigDecimal currentPrice = selectedOption.getCurrentPrice().setScale(PRICE_SCALE, QUOTE_ROUNDING);
+        if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_OPTION);
         }
+
+        BigDecimal selectedOptionEffectivePoolBefore = effectivePool(selectedOption).setScale(MONEY_SCALE);
+        BigDecimal totalEffectivePoolBefore = options.stream()
+                .map(this::effectivePool)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(MONEY_SCALE);
+        if (totalEffectivePoolBefore.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_OPTION);
+        }
+
+        BigDecimal estimatedContractQuantity = pointAmount.divide(currentPrice, QUANTITY_SCALE, QUOTE_ROUNDING);
+        BigDecimal selectedOptionEffectivePoolAfter = selectedOptionEffectivePoolBefore
+                .add(pointAmount)
+                .setScale(MONEY_SCALE);
+        BigDecimal totalEffectivePoolAfter = totalEffectivePoolBefore
+                .add(pointAmount)
+                .setScale(MONEY_SCALE);
+        BigDecimal estimatedAfterPrice = selectedOptionEffectivePoolAfter
+                .divide(totalEffectivePoolAfter, PRICE_SCALE, QUOTE_ROUNDING);
+        BigDecimal priceImpactRate = estimatedAfterPrice
+                .subtract(currentPrice)
+                .divide(currentPrice, RATE_SCALE, QUOTE_ROUNDING)
+                .multiply(new BigDecimal("100"))
+                .setScale(RATE_SCALE, QUOTE_ROUNDING);
+
+        return new QuoteMarketPredictionResponse(
+                market.getId(),
+                selectedOption.getId(),
+                pointAmount,
+                currentPrice,
+                estimatedContractQuantity,
+                estimatedAfterPrice,
+                priceImpactRate,
+                selectedOptionEffectivePoolBefore,
+                selectedOptionEffectivePoolAfter,
+                totalEffectivePoolBefore,
+                totalEffectivePoolAfter,
+                QUOTE_NOTICE
+        );
     }
 
     private BigDecimal effectivePool(MarketOption option) {

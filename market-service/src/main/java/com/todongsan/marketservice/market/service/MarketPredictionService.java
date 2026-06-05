@@ -11,7 +11,9 @@ import com.todongsan.marketservice.market.client.exception.MemberPointTimeoutExc
 import com.todongsan.marketservice.market.client.exception.MemberPointUnavailableException;
 import com.todongsan.marketservice.market.client.exception.PointInsufficientException;
 import com.todongsan.marketservice.market.dto.request.CreatePredictionRequest;
+import com.todongsan.marketservice.market.dto.request.QuoteMarketPredictionRequest;
 import com.todongsan.marketservice.market.dto.response.CreatePredictionResponse;
+import com.todongsan.marketservice.market.dto.response.QuoteMarketPredictionResponse;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
@@ -65,6 +67,13 @@ public class MarketPredictionService {
             ));
         }
         return transactionService.confirmPrediction(prediction.getId());
+    }
+
+    public QuoteMarketPredictionResponse quotePrediction(
+            long marketId,
+            QuoteMarketPredictionRequest request
+    ) {
+        return transactionService.quotePrediction(marketId, request);
     }
 
     private CreatePredictionResponse toResponse(MarketPrediction prediction) {
