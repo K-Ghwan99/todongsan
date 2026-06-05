@@ -31,6 +31,7 @@
 
 battle-service            ──→ member-point-service:8080         POST /internal/api/v1/points/earn
 battle-service            ──→ insight-reputation-service:8083   POST /internal/api/v1/reputations/activity
+battle-service            ──→ insight-reputation-service:8083   POST /internal/api/v1/insights/battles/{battleId}/report
 market-service            ──→ member-point-service:8080         POST /internal/api/v1/points/spend|settlements|refunds
 market-service            ──→ insight-reputation-service:8083   POST /internal/api/v1/reputations/prediction
 insight-reputation-service ──→ member-point-service:8080        POST /internal/api/v1/members/batch
@@ -334,6 +335,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       BATTLE_SERVICE_BASE_URL: http://battle-service:8081
       MEMBER_POINT_SERVICE_BASE_URL: http://member-point-service:8080
+      MARKET_SERVICE_BASE_URL: http://market-service:8082
       CLAUDE_API_KEY: ${CLAUDE_API_KEY}
       CLAUDE_API_URL: ${CLAUDE_API_URL}
       CLAUDE_MODEL: ${CLAUDE_MODEL}
@@ -454,6 +456,11 @@ REB_API_BASE_URL=https://...
 Client → Gateway(:9000) → battle-service(:8081)
 battle-service → member-point-service(:8080)         POST /internal/api/v1/points/earn
 battle-service → insight-reputation-service(:8083)   POST /internal/api/v1/reputations/activity
+```
+
+### Battle 종료
+```
+battle-service → insight-reputation-service(:8083)   POST /internal/api/v1/insights/battles/{battleId}/report
 ```
 
 ### Market 예측 참여

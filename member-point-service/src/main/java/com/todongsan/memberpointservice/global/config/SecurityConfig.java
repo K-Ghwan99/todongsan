@@ -31,13 +31,8 @@ public class SecurityConfig {
                         // 외부 공개 API
                         .requestMatchers(HttpMethod.POST, "/api/v1/members/oauth/kakao").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/members/token/refresh").permitAll()
-                        // 내부 연계 API (서비스 간 호출, JWT 없이 호출됨)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/members/batch").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/points/earn").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/points/spend").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/points/settlements").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/points/refunds").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/points/transactions").permitAll()
+                        // 내부 연계 API (서비스 간 호출, JWT 없이 호출됨 — Gateway에 /internal/** 경로 없어 외부 접근 자동 차단)
+                        .requestMatchers("/internal/**").permitAll()
                         // Swagger
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         // 나머지 외부 API는 JWT 인증 필수
