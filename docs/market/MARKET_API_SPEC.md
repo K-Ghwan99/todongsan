@@ -1,4 +1,4 @@
-# MARKET_API_SPEC_v3.md
+# MARKET_API_SPEC_v4.md
 
 > Market 서비스 API 명세서.  
 > 본 버전은 다음 피드백을 반영한다.
@@ -9,6 +9,11 @@
 > - Member-Point 연동 시 `referenceType=MARKET_PREDICTION`, `referenceId=predictionId`를 전달한다.
 > - 정산/환불은 batch API를 유지하되, item별 `idempotencyKey`로 멱등성을 보장한다.
 > - Insight-Reputation Service 연계를 위해 SETTLED Market 기준 요약/Prediction 페이지 조회 내부 API를 제공한다.
+> - 본 버전은 기존 Pool Share 모델을 **Pool Share 기반 즉시 참여형 예측시장**으로 명확히 정의한다.
+> - `initialVirtualLiquidity`는 초기 가격뿐 아니라 시장 깊이 역할을 수행한다.
+> - 예측 참여 전 예상 가격/계약 수량을 확인하는 Quote API를 추가한다.
+> - 실제 예측 참여는 Quote가 아니라 체결 시점의 최신 Pool 상태를 기준으로 확정한다.
+> - MVP에서는 가격 변동 허용 범위(slippage tolerance)를 필수로 두지 않고, 실제 체결 가격이 달라질 수 있음을 안내한다.
 
 ---
 
@@ -269,7 +274,133 @@ Prediction CONFIRMED 변경
 
 ---
 
-### 1-8. 내부 Scheduler Chunk 처리 원칙
+
+### 1-8. Pool Share 기반 즉시 참여형 예측시장 정책
+
+Market Service는 Polymarket과 같은 주문장 기반 CLOB(Central Limit Order Book) 모델을 사용하지 않는다.
+
+본 MVP는 선택지별 유동성 풀을 기반으로 가격이 자동 조정되는 **Pool Share 기반 즉시 참여형 예측시장** 모델을 사용한다.
+
+```text
+optionEffectivePoolAmount = market_option.virtual_pool_amount + market_option.real_pool_amount
+totalEffectivePoolAmount = sum(all optionEffectivePoolAmount)
+currentPrice = optionEffectivePoolAmount / totalEffectivePoolAmount
+```
+
+처리 기준:
+
+```text
+1. 사용자는 지정가 주문을 등록하지 않는다.
+2. 사용자는 현재 Pool Share 가격 기준으로 즉시 예측 참여한다.
+3. 예측 참여가 확정되면 선택한 option의 realPoolAmount가 증가한다.
+4. 모든 option의 currentPrice가 전체 effective pool 기준으로 재계산된다.
+5. 예측 참여 확정 결과는 market_prediction과 market_price_history에 기록된다.
+```
+
+Polymarket식 CLOB과의 차이:
+
+| 구분 | Polymarket식 CLOB | Market MVP |
+|---|---|---|
+| 가격 형성 | 사용자의 bid/ask 주문과 체결가 | 선택지별 Pool Share 공식 |
+| 사용자 행위 | 지정가 주문, 매수/매도, 주문 취소 | 현재 가격 기준 즉시 참여 |
+| 핵심 테이블 | order, trade, position | prediction, option, price_history |
+| 정산 기준 | position | prediction |
+| MVP 선택 이유 | 구현 범위 큼 | 정산 안정성과 구현 가능성 우선 |
+
+현재 MVP에는 `order`, `trade`, `position`, `bid`, `ask`, `order cancel`, `matching engine`, `limit order` 개념을 두지 않는다.
+
+pool 용어는 다음 기준으로 구분한다.
+
+| 용어 | 의미 | 정산/환불 포함 여부 | 가격 계산 포함 여부 |
+|---|---|---:|---:|
+| `realPoolAmount` | 실제 사용자가 예측 참여에 사용한 포인트 누적합 | O | O |
+| `virtualPoolAmount` | Market 생성 시 선택지별로 부여하는 가상 유동성 | X | O |
+| `effectivePoolAmount` | `realPoolAmount + virtualPoolAmount` | X | O |
+| `totalRealPoolAmount` | 모든 option의 `realPoolAmount` 합 | O | O |
+| `totalVirtualPoolAmount` | 모든 option의 `virtualPoolAmount` 합 | X | O |
+| `totalEffectivePoolAmount` | `totalRealPoolAmount + totalVirtualPoolAmount` | X | O |
+
+주의:
+
+```text
+Pool Share 가격 계산에서 사용하는 totalEffectivePoolAmount와
+정산/Insight에서 사용하는 totalPoolAmount는 같은 개념이 아니다.
+
+정산/Insight의 totalPoolAmount는 실제 참여 포인트 총합이다.
+가격 계산용 전체 pool은 totalEffectivePoolAmount라고 표현한다.
+```
+
+---
+
+### 1-9. 초기 가격과 시장 깊이 정책
+
+모든 Market이 50:50 또는 균등 가격으로 시작하지 않는다.
+
+각 선택지의 초기 가격은 `market_option.virtual_pool_amount` 비율로 결정한다.
+
+```text
+initialPrice = option.virtualPoolAmount / sum(all option.virtualPoolAmount)
+```
+
+예시:
+
+```text
+상승 option virtualPoolAmount = 800
+하락/보합 option virtualPoolAmount = 200
+
+상승 초기 가격 = 800 / 1000 = 0.80000000
+하락/보합 초기 가격 = 200 / 1000 = 0.20000000
+```
+
+`virtualPoolAmount`는 두 가지 역할을 가진다.
+
+```text
+1. 초기 사전 확률 반영
+2. 초기 시장 깊이 제공
+```
+
+정배/역배가 명확한 주제는 `virtualPoolAmount`를 다르게 설정하여 초기 가격에 반영한다.
+다만 결과가 이미 사실상 확정된 주제는 예측시장으로서 의미가 낮으므로 관리자 검수 단계에서 개설하지 않는 것을 원칙으로 한다.
+
+`virtualPoolAmount`는 Market 생성 이후 수정하지 않는다.
+Market 오픈 이후 가격은 실제 사용자 참여에 따른 `realPoolAmount` 변화로만 재계산한다.
+
+---
+
+### 1-10. Quote와 실제 체결 가격 정책
+
+Quote API는 사용자가 예측 참여 전에 현재 가격, 예상 계약 수량, 참여 후 예상 가격, 가격 영향도를 확인하기 위한 **미리보기 기능**이다.
+
+Quote API는 다음 작업을 수행하지 않는다.
+
+```text
+1. Prediction 생성 안 함
+2. Member-Point 포인트 차감 안 함
+3. 포인트 잔액 조회 안 함
+4. market_option pool 변경 안 함
+5. price_history 저장 안 함
+```
+
+Quote 결과는 확정 체결 결과가 아니다.
+
+실제 예측 참여에서는 포인트 차감 성공 후 가격 확정 트랜잭션에서 Market row와 모든 option row의 lock을 획득한 시점의 최신 Pool 상태를 기준으로 `priceSnapshot`, `contractQuantity`를 확정한다.
+
+```text
+Quote 조회 시점 가격 != 실제 예측 참여 확정 시점 가격일 수 있음
+```
+
+MVP에서는 빠른 참여 경험을 우선하여 가격 변동 허용 범위(slippage tolerance)를 필수로 두지 않는다.
+대신 클라이언트는 다음 안내 문구를 표시한다.
+
+```text
+현재 가격은 실시간으로 변동될 수 있으며, 실제 참여 시점의 가격 기준으로 계약 수량이 확정됩니다.
+```
+
+추후 필요하면 예측 참여 요청에 `maxAcceptedPrice` 또는 `minContractQuantity`를 선택 필드로 추가할 수 있다.
+
+---
+
+### 1-11. 내부 Scheduler Chunk 처리 원칙
 
 대사, 정산 재시도, 환불 재시도 API는 한 번에 전체 대상을 처리하지 않는다.
 
@@ -319,7 +450,9 @@ GET /api/v1/markets?page=0&size=20&status=ACTIVE
         "title": "이번 주 OO구 아파트 가격 변동률은?",
         "status": "ACTIVE",
         "closeAt": "2026-06-01T18:00:00",
-        "totalPoolAmount": "25000.00",
+        "totalRealPoolAmount": "25000.00",
+        "totalVirtualPoolAmount": "10000.00",
+        "totalEffectivePoolAmount": "35000.00",
         "options": [
           {
             "optionId": 1,
@@ -346,10 +479,20 @@ GET /api/v1/markets?page=0&size=20&status=ACTIVE
 
 ---
 
+
 ## 3. Market 상세 조회
 
 ```http
 GET /api/v1/markets/{marketId}
+```
+
+Market 상세 조회는 사용자가 예측 참여 전 현재 가격과 시장 흐름을 판단할 수 있도록 선택지별 가격 지표를 함께 제공한다.
+
+`initialPrice`, `priceChangeRate`는 별도 컬럼이 아니라 기존 `virtualPoolAmount`, `currentPrice`를 이용해 계산한 응답 필드다.
+
+```text
+initialPrice = option.virtualPoolAmount / sum(all option.virtualPoolAmount)
+priceChangeRate = (currentPrice - initialPrice) / initialPrice * 100
 ```
 
 ### Response
@@ -364,29 +507,58 @@ GET /api/v1/markets/{marketId}
     "title": "이번 주 OO구 아파트 가격 변동률은?",
     "description": "한국부동산원 데이터를 기준으로 정산합니다.",
     "status": "ACTIVE",
+    "priceModel": "POOL_SHARE",
     "closeAt": "2026-06-01T18:00:00",
-    "resultAnnounceAt": "2026-06-04T18:00:00",
-    "totalPoolAmount": "25000.00",
+    "judgeDate": "2026-06-04",
+    "settleDueAt": "2026-06-04T18:00:00",
+    "totalRealPoolAmount": "25000.00",
+    "totalVirtualPoolAmount": "10000.00",
+    "totalEffectivePoolAmount": "35000.00",
+    "totalPredictionCount": 184,
     "options": [
       {
         "optionId": 1,
         "content": "0.0% 미만",
+        "initialPrice": "0.50000000",
         "currentPrice": "0.31250000",
+        "priceChangeRate": "-37.50000000",
         "realPoolAmount": "10000.00",
-        "virtualPoolAmount": "5000.00"
+        "virtualPoolAmount": "5000.00",
+        "effectivePoolAmount": "15000.00",
+        "totalContractQuantity": "15272.72727272",
+        "predictionCount": 64
       },
       {
         "optionId": 2,
         "content": "0.0% 이상 ~ 0.3% 미만",
+        "initialPrice": "0.50000000",
         "currentPrice": "0.68750000",
+        "priceChangeRate": "37.50000000",
         "realPoolAmount": "15000.00",
-        "virtualPoolAmount": "5000.00"
+        "virtualPoolAmount": "5000.00",
+        "effectivePoolAmount": "20000.00",
+        "totalContractQuantity": "21818.18181818",
+        "predictionCount": 120
       }
     ]
   },
   "timestamp": "2026-05-29T15:30:00"
 }
 ```
+
+pool 관련 조회 필드는 다음 의미로 사용한다.
+
+| 필드 | 설명 |
+|---|---|
+| `totalRealPoolAmount` | 실제 유저 참여 포인트 총합. `market.total_pool`과 같은 의미 |
+| `totalVirtualPoolAmount` | 선택지별 가상 유동성 총합. 정산/환불 금액에는 포함하지 않음 |
+| `totalEffectivePoolAmount` | 가격 계산용 전체 유효 풀. `totalRealPoolAmount + totalVirtualPoolAmount` |
+| `realPoolAmount` | 선택지별 실제 참여 포인트 누적합 |
+| `virtualPoolAmount` | 선택지별 가상 유동성 |
+| `effectivePoolAmount` | 선택지별 가격 계산용 유효 풀. `realPoolAmount + virtualPoolAmount` |
+| `judgeDate` | 결과 판정 기준일 |
+| `settleDueAt` | 정산 예정 또는 정산 마감 기준 시각 |
+| `resultAnnounceAt` | 신규 응답 예시에서는 사용하지 않음. 필요한 경우 `settleDueAt` 기반 alias로만 취급 |
 
 ### 발생 가능한 ErrorCode
 
@@ -396,13 +568,51 @@ GET /api/v1/markets/{marketId}
 
 ---
 
+
 ## 4. 가격 이력 조회
 
 가격 이력은 예측 참여, 풀 금액 변경, 가격 재계산 시 계속 누적되므로 반드시 페이징한다.
 
+이 API는 프론트엔드의 배당률/가격 변화 그래프를 위한 조회 API다.
+각 이력은 특정 예측 참여 전후의 가격과 pool 변화를 포함한다.
+
 ```http
-GET /api/v1/markets/{marketId}/price-history?page=0&size=50
+GET /api/v1/markets/{marketId}/price-history?page=0&size=50&optionId=1
 ```
+
+PriceHistory는 특정 Market의 선택지별 가격 변화 이력을 저장한다.
+프론트엔드는 `priceAfter`를 시간순으로 연결하여 option별 가격 그래프를 그린다.
+`priceBefore`, `priceAfter`, `priceChangeRate`, `realPoolBefore`, `realPoolAfter`, `contractQuantityBefore`, `contractQuantityAfter`는 사용자가 가격 변화 원인을 이해할 수 있도록 제공한다.
+
+PriceHistory는 정산/환불 금액 계산의 원천 데이터가 아니다.
+정산은 `market_prediction`, `market_settlement`, `market_settlement_detail`을 기준으로 하고, 환불은 `market_prediction.point_amount`, `market_refund_detail`을 기준으로 한다.
+
+저장 단위:
+
+```text
+market_price_history row 1건 = 특정 Market의 특정 option에 대한 특정 가격 변경 이벤트 1건
+```
+
+Prediction CONFIRMED 시 해당 Market의 모든 option에 대해 `market_price_history` row를 생성한다.
+Pool Share에서는 선택한 option의 참여만으로도 `totalEffectivePoolAmount`가 변하므로 선택되지 않은 option의 `currentPrice`도 함께 변할 수 있다.
+
+```text
+Market option 3개
+사용자가 option B에 예측 참여
+→ option B realPoolAmount 증가
+→ totalEffectivePoolAmount 증가
+→ A, B, C 모든 option currentPrice 재계산
+→ market_price_history 3건 생성
+```
+
+MVP v4 eventType:
+
+```text
+PREDICTION_CONFIRMED
+```
+
+MVP v4에서는 `QUOTE_VIEWED`, `MARKET_CREATED`, `MARKET_ACTIVATED`, `RESULT_CONFIRMED`, `SETTLEMENT_STARTED`, `SETTLEMENT_COMPLETED`, `MARKET_VOIDED`, `REFUND_STARTED`, `REFUND_COMPLETED` 이벤트를 저장하지 않는다.
+Quote, Market 생성/활성화, 결과 확정, 정산, 환불, 무효 처리는 PriceHistory를 생성하지 않는다.
 
 ### Query Parameters
 
@@ -411,6 +621,25 @@ GET /api/v1/markets/{marketId}/price-history?page=0&size=50
 | `page` | int | X | 페이지 번호. 기본값 0 |
 | `size` | int | X | 페이지 크기. 기본값 50 |
 | `optionId` | long | X | 특정 선택지 이력만 조회 |
+
+조회 조건:
+
+```text
+Market이 존재해야 한다.
+optionId가 주어진 경우 해당 option은 marketId에 속해야 한다.
+```
+
+정렬:
+
+```text
+createdAt ASC, historyId ASC
+```
+
+가격 그래프는 시간순 연결이 필요하므로 기본 조회 순서는 오래된 이력부터 최신 이력 순서로 한다.
+
+응답은 flat list를 유지한다.
+`optionId` 파라미터가 없으면 모든 option history row를 시간순으로 반환하고, 프론트엔드는 `optionId` 기준으로 grouping해서 option별 라인을 그린다.
+`optionId` 파라미터가 있으면 해당 option의 history만 반환한다.
 
 ### Response
 
@@ -423,11 +652,19 @@ GET /api/v1/markets/{marketId}/price-history?page=0&size=50
     "content": [
       {
         "historyId": 1,
+        "marketId": 1,
         "optionId": 1,
-        "price": "0.31250000",
-        "realPoolAmount": "10000.00",
+        "optionContent": "0.0% 미만",
+        "predictionId": 1001,
+        "eventType": "PREDICTION_CONFIRMED",
+        "priceBefore": "0.50000000",
+        "priceAfter": "0.31250000",
+        "priceChangeRate": "-37.50000000",
+        "realPoolBefore": "0.00",
+        "realPoolAfter": "10000.00",
         "virtualPoolAmount": "5000.00",
-        "contractQuantity": "10.00000000",
+        "contractQuantityBefore": "0.00000000",
+        "contractQuantityAfter": "15272.72727272",
         "createdAt": "2026-05-29T15:30:00"
       }
     ],
@@ -440,6 +677,296 @@ GET /api/v1/markets/{marketId}/price-history?page=0&size=50
   "timestamp": "2026-05-29T15:30:00"
 }
 ```
+
+### 필드 설명
+
+| 필드 | 설명 |
+|---|---|
+| `historyId` | 가격 이력 ID |
+| `marketId` | Market ID |
+| `optionId` | 선택지 ID |
+| `optionContent` | 선택지 표시명 |
+| `predictionId` | 가격 변경을 유발한 Prediction ID |
+| `eventType` | 가격 변경 이벤트 타입. MVP v4에서는 `PREDICTION_CONFIRMED` |
+| `priceBefore` | 이벤트 전 선택지 가격 |
+| `priceAfter` | 이벤트 후 선택지 가격 |
+| `priceChangeRate` | `(priceAfter - priceBefore) / priceBefore * 100` |
+| `realPoolBefore` | 이벤트 전 선택지 실제 pool |
+| `realPoolAfter` | 이벤트 후 선택지 실제 pool |
+| `virtualPoolAmount` | 선택지 가상 pool. `market_option`에서 조회 |
+| `contractQuantityBefore` | 이벤트 전 option 누적 계약 수량 |
+| `contractQuantityAfter` | 이벤트 후 option 누적 계약 수량 |
+| `createdAt` | 이력 생성 시각 |
+
+`contractQuantityBefore`, `contractQuantityAfter`는 사용자 1명의 계약 수량이 아니라 option의 누적 `totalContractQuantity` snapshot이다.
+한 사용자의 체결 계약 수량은 `market_prediction.contract_quantity`에 저장한다.
+
+`priceChangeRate` 계산 시 `priceBefore <= 0`이면 데이터 정합성 오류이므로 0으로 나누지 않는다.
+정상 생성된 Market에서는 `priceBefore > 0`이어야 한다.
+
+Decimal scale:
+
+| 필드 | Scale |
+|---|---:|
+| `priceBefore` | 8 |
+| `priceAfter` | 8 |
+| `priceChangeRate` | 8 |
+| `realPoolBefore` | 2 |
+| `realPoolAfter` | 2 |
+| `virtualPoolAmount` | 2 |
+| `contractQuantityBefore` | 8 |
+| `contractQuantityAfter` | 8 |
+
+### 그래프 표시 기준
+
+프론트엔드는 `priceAfter`를 시간순으로 연결하여 선택지별 가격 변화 그래프를 그린다.
+`priceChangeRate`는 해당 이력 한 건의 직전 가격 대비 변화율이다.
+초기 가격 대비 변화율이 필요한 경우 Market 상세 조회의 `initialPrice`, `currentPrice`, `priceChangeRate`를 사용한다.
+
+초기 가격 처리 정책:
+
+```text
+Market 생성/활성화 시 market_price_history row를 생성하지 않는다.
+초기 가격은 Market 상세 조회의 initialPrice로 제공한다.
+가격 이력 조회 API는 Prediction CONFIRMED 이후의 가격 변화 이벤트를 반환한다.
+```
+
+프론트엔드가 그래프 시작점을 초기 가격부터 보여주고 싶다면, Market 상세 조회의 `initialPrice`를 시작점으로 사용하고 이후 PriceHistory의 `priceAfter`를 시간순으로 연결한다.
+
+### 발생 가능한 ErrorCode
+
+| ErrorCode | HTTP Status | 설명 |
+|---|---:|---|
+| `MARKET_NOT_FOUND` | 404 | Market 없음 |
+| `MARKET_OPTION_NOT_FOUND` | 404 | option 없음 또는 해당 Market 소속 아님 |
+
+---
+
+
+## 4-1. 예측 참여 Quote 조회
+
+```http
+POST /api/v1/markets/{marketId}/predictions/quote
+```
+
+Quote API는 사용자가 예측 참여 전에 현재 가격 기준 예상 결과를 확인하기 위한 미리보기 API다.
+
+이 API는 Market 내부 데이터만 사용한다.
+Member-Point Service를 호출하지 않으며, 포인트 차감/잔액 조회/Prediction 생성/가격 이력 저장을 수행하지 않는다.
+또한 `market_option` pool과 `market_prediction` 상태를 변경하지 않는다.
+
+Quote API 구현은 PriceHistory v4 schema/migration 작업과 독립적으로 진행할 수 있다.
+Quote API는 `market`, `market_option` 조회 기반 계산 API이며, `market_price_history`를 읽거나 쓰지 않는다.
+따라서 PriceHistory v4 저장 정책이 확정되지 않아도 Quote API는 구현 가능하다.
+
+Quote 결과는 확정 견적이 아니다.
+실제 예측 참여 API는 포인트 차감 성공 후 가격 확정 트랜잭션에서 Market row와 모든 option row lock을 획득한 시점의 최신 Pool 상태를 기준으로 `priceSnapshot`, `contractQuantity`를 확정한다.
+
+### Request
+
+```json
+{
+  "marketOptionId": 2,
+  "pointAmount": "100.00"
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `marketOptionId` | long | O | 예측하려는 선택지 ID |
+| `pointAmount` | String decimal | O | 예측 참여에 사용할 포인트 금액 |
+
+`pointAmount`는 Decimal 요청/응답 정책과 동일하게 문자열로 표현한다.
+
+### 성공 조건
+
+Quote API는 아래 조건을 모두 만족해야 성공한다.
+
+```text
+1. Market이 존재해야 한다.
+2. Market.status = ACTIVE 여야 한다.
+3. Market.closeAt > now 여야 한다.
+4. marketOptionId가 존재해야 한다.
+5. marketOptionId는 해당 marketId에 속해야 한다.
+6. pointAmount가 유효해야 한다.
+7. 선택지 currentPrice가 0보다 커야 한다.
+8. totalEffectivePoolAmount가 0보다 커야 한다.
+```
+
+상태 정책:
+
+```text
+Market.status != ACTIVE
+→ MARKET_NOT_ACTIVE
+
+Market.status = ACTIVE 이지만 closeAt <= now
+→ MARKET_CLOSED
+```
+
+`pointAmount` 검증은 실제 예측 참여 API와 동일한 금액 검증 정책을 따른다.
+Quote에서 허용된 금액이 실제 예측 참여에서 거부되거나, 실제 예측 참여에서 허용되는 금액이 Quote에서 거부되지 않도록 두 API의 검증 정책을 동기화한다.
+
+```text
+1. pointAmount > 0
+2. 최소 예측 참여 금액 이상
+3. 최대 예측 참여 금액 이하
+4. 허용 소수점 자리수 준수
+```
+
+현재 정책:
+
+```text
+최소 10P
+최대 500P
+소수점 둘째 자리까지 허용
+```
+
+검증 실패 시 `MARKET_INVALID_BET_AMOUNT`를 반환한다.
+
+구현 시 기존 예측 참여 API의 금액 검증 상수 또는 검증 로직이 있다면 Quote API도 이를 재사용한다.
+문서와 코드가 다르면 기존 예측 참여 API 정책을 기준으로 문서를 다시 확인한다.
+
+### 계산 기준
+
+```text
+currentPrice = 조회 시점 selected option의 currentPrice
+estimatedContractQuantity = pointAmount / currentPrice
+
+selectedOptionEffectivePoolBefore =
+    selectedOption.realPoolAmount + selectedOption.virtualPoolAmount
+
+totalEffectivePoolBefore =
+    sum(all option.realPoolAmount + option.virtualPoolAmount)
+
+selectedOptionEffectivePoolAfter = selectedOptionEffectivePoolBefore + pointAmount
+totalEffectivePoolAfter = totalEffectivePoolBefore + pointAmount
+estimatedAfterPrice = selectedOptionEffectivePoolAfter / totalEffectivePoolAfter
+
+priceImpactRate = (estimatedAfterPrice - currentPrice) / currentPrice * 100
+```
+
+`selectedOptionEffectivePoolBefore`는 `virtualPoolAmount + realPoolAmount` 기준이다.
+선택하지 않은 option의 `effectivePoolAmount`는 그대로 유지된다고 가정한다.
+`currentPrice`는 Quote 조회 시점의 `market_option.current_price`를 사용한다.
+
+방어 정책:
+
+```text
+currentPrice <= 0
+→ MARKET_INVALID_OPTION
+
+totalEffectivePoolAmount <= 0
+→ MARKET_INVALID_OPTION
+```
+
+정상 생성된 Market에서는 발생하면 안 되는 데이터 정합성 오류지만, 0 나눗셈 방지를 위해 문서상 방어 정책을 둔다.
+
+구현 주의:
+
+```text
+Quote API는 currentPrice <= 0 또는 totalEffectivePoolAmount <= 0인 데이터 정합성 오류 상황에서 MARKET_INVALID_OPTION을 사용한다.
+만약 코드 enum에 MARKET_INVALID_OPTION이 없다면, 이는 새 정책 추가가 아니라 문서에 이미 정의된 ErrorCode의 구현 누락 보정으로 보고 동기화한다.
+새로운 ErrorCode를 임의로 만들지 않는다.
+```
+
+### Decimal scale / RoundingMode
+
+Quote API 계산 결과 scale은 아래 기준을 따른다.
+
+| 필드 | Scale | 설명 |
+|---|---:|---|
+| `pointAmount` | 2 | 포인트 금액 |
+| `currentPrice` | 8 | 가격 |
+| `estimatedContractQuantity` | 8 | 예상 계약 수량 |
+| `estimatedAfterPrice` | 8 | 예상 가격 |
+| `priceImpactRate` | 8 | 가격 영향도 |
+| `selectedOptionEffectivePoolBefore` | 2 | Pool 금액 |
+| `selectedOptionEffectivePoolAfter` | 2 | Pool 금액 |
+| `totalEffectivePoolBefore` | 2 | Pool 금액 |
+| `totalEffectivePoolAfter` | 2 | Pool 금액 |
+
+RoundingMode:
+
+```text
+나눗셈 계산은 RoundingMode.HALF_UP을 사용한다.
+정산/환불 금액 지급처럼 실제 포인트 지급 금액을 계산하는 경우에는 기존 정산 정책대로 RoundingMode.DOWN을 유지한다.
+```
+
+Quote는 사용자 화면 표시용 예상값이다.
+정산 지급 금액처럼 실제 지급 포인트를 확정하는 계산이 아니므로 HALF_UP을 사용한다.
+
+### Response
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "marketId": 1,
+    "selectedOptionId": 2,
+    "pointAmount": "100.00",
+    "currentPrice": "0.20000000",
+    "estimatedContractQuantity": "500.00000000",
+    "estimatedAfterPrice": "0.27272727",
+    "priceImpactRate": "36.36363500",
+    "selectedOptionEffectivePoolBefore": "200.00",
+    "selectedOptionEffectivePoolAfter": "300.00",
+    "totalEffectivePoolBefore": "1000.00",
+    "totalEffectivePoolAfter": "1100.00",
+    "notice": "현재 가격은 실시간으로 변동될 수 있으며, 실제 참여 시점의 가격 기준으로 계약 수량이 확정됩니다."
+  },
+  "timestamp": "2026-05-29T15:30:00"
+}
+```
+
+| 필드 | 설명 |
+|---|---|
+| `marketId` | Market ID |
+| `selectedOptionId` | 선택한 option ID |
+| `pointAmount` | 요청 포인트 금액 |
+| `currentPrice` | Quote 조회 시점의 현재 선택지 가격 |
+| `estimatedContractQuantity` | 현재 가격 기준 예상 계약 수량 |
+| `estimatedAfterPrice` | 해당 포인트가 반영된다고 가정했을 때의 예상 선택지 가격 |
+| `priceImpactRate` | 현재 가격 대비 예상 가격 변화율 |
+| `selectedOptionEffectivePoolBefore` | 선택 option의 참여 전 effective pool |
+| `selectedOptionEffectivePoolAfter` | 선택 option의 참여 후 예상 effective pool |
+| `totalEffectivePoolBefore` | 참여 전 전체 effective pool |
+| `totalEffectivePoolAfter` | 참여 후 예상 전체 effective pool |
+| `notice` | 실제 참여 시점 가격 변동 가능성 안내 |
+
+Quote 응답에는 `totalPoolAmount`라는 모호한 필드를 사용하지 않는다.
+가격 계산용 전체 pool은 `totalEffectivePoolBefore`, `totalEffectivePoolAfter`로 표현한다.
+
+### DB lock 정책
+
+Quote API는 상태 변경이 없는 미리보기 API다.
+
+```text
+Quote API는 SELECT ... FOR UPDATE를 사용하지 않는다.
+Quote API는 일반 SELECT로 현재 Market과 option 상태를 조회한다.
+Quote 결과는 확정 체결 결과가 아니므로, 조회 중 다른 사용자의 참여로 가격이 바뀔 수 있다.
+실제 예측 참여 API에서만 Market row와 모든 option row를 FOR UPDATE로 잠근다.
+```
+
+### 주의 사항
+
+Quote 결과는 확정 체결 결과가 아니다.
+실제 예측 참여 API는 포인트 차감 성공 후 가격 확정 트랜잭션에서 lock을 획득한 시점의 최신 가격 기준으로 `priceSnapshot`, `contractQuantity`를 확정한다.
+
+MVP에서는 별도의 slippage tolerance를 필수로 받지 않는다.
+빠른 참여 경험을 우선하며, 클라이언트 안내 문구로 가격 변동 가능성을 고지한다.
+
+### 발생 가능한 ErrorCode
+
+| ErrorCode | HTTP Status | 설명 |
+|---|---:|---|
+| `MARKET_NOT_FOUND` | 404 | Market 없음 |
+| `MARKET_NOT_ACTIVE` | 409 | Quote 조회 가능한 상태가 아님 |
+| `MARKET_CLOSED` | 409 | 마감된 Market |
+| `MARKET_OPTION_NOT_FOUND` | 404 | 선택지 없음 |
+| `MARKET_INVALID_BET_AMOUNT` | 400 | 예측 금액 오류 |
+| `MARKET_INVALID_OPTION` | 400 | currentPrice 또는 totalEffectivePoolAmount가 0 이하 |
 
 ---
 
@@ -593,8 +1120,16 @@ priceSnapshot = lock 획득 후 selected option의 currentPrice
 contractQuantity = pointAmount / priceSnapshot
 ```
 
-MVP에서는 가격 변동 허용 범위(slippage) 기능을 두지 않는다.  
-추후 필요하면 요청값에 `maxAcceptedPrice` 또는 `minContractQuantity`를 추가할 수 있다.
+MVP에서는 가격 변동 허용 범위(slippage tolerance) 기능을 필수로 두지 않는다.
+Quote API를 통해 확인한 예상 가격과 실제 예측 참여 확정 가격은 다를 수 있다.
+
+클라이언트는 예측 참여 화면에 다음 안내를 표시한다.
+
+```text
+현재 가격은 실시간으로 변동될 수 있으며, 실제 참여 시점의 가격 기준으로 계약 수량이 확정됩니다.
+```
+
+추후 필요하면 요청값에 `maxAcceptedPrice` 또는 `minContractQuantity`를 선택 필드로 추가할 수 있다.
 
 ---
 
@@ -1691,7 +2226,7 @@ SETTLED가 아닌 Market에 대해 Insight 데이터 조회를 요청하면 `MAR
 
 ---
 
-### 12-1. Market Insight 요약 및 선택지 집계 조회
+### 11-1. Market Insight 요약 및 선택지 집계 조회
 
 ```http
 GET /internal/api/v1/markets/{marketId}/insight-summary
@@ -1781,6 +2316,8 @@ Market 기본 정보와 선택지별 집계 데이터를 조회한다.
 | `optionStatistics` | 선택지별 참여 수, Pool 금액, 최종 가격, 정답 여부 집계 |
 | `optionLabel` | `market_option.option_text`를 응답 DTO에서 사용하는 이름 |
 | `participantCount` | 해당 선택지를 선택한 회원 수. 현재 정책상 한 회원은 한 Market에 하나의 Prediction만 가지므로 `predictionCount`와 동일할 수 있다. |
+| `totalPoolAmount` | Insight 문맥에서는 실제 참여 포인트 총합. 가격 계산용 `totalEffectivePoolAmount`가 아님 |
+| `poolAmount` | 선택지별 실제 참여 포인트 합. `virtualPoolAmount`를 포함하지 않음 |
 | `finalPrice` | SETTLED 시점의 선택지 최종 가격. `market_option.current_price` 기준 |
 | `isResult` | 정답 선택지 여부 |
 
@@ -1794,7 +2331,7 @@ Market 기본 정보와 선택지별 집계 데이터를 조회한다.
 
 ---
 
-### 12-2. Market Insight Prediction 페이지 조회
+### 11-2. Market Insight Prediction 페이지 조회
 
 ```http
 GET /internal/api/v1/markets/{marketId}/insight-predictions?page=0&size=500
@@ -1886,7 +2423,7 @@ Insight-Reputation Service가 회원별 예측 참여 원본 데이터를 페이
 
 ---
 
-### 12-3. Insight 연계 책임 범위
+### 11-3. Insight 연계 책임 범위
 
 | 항목 | Market Service | Insight-Reputation Service |
 |---|---|---|
@@ -2163,6 +2700,11 @@ limit 건만 조회
 
 - [ ] Decimal 필드는 JSON String으로 응답한다.
 - [ ] 가격 이력 조회 API는 page/size 페이징을 지원한다.
+- [ ] Market 상세 조회는 `initialPrice`, `currentPrice`, `priceChangeRate`, pool/참여 지표를 제공한다.
+- [ ] Quote API는 예상 계약 수량, 참여 후 예상 가격, 가격 영향도를 제공한다.
+- [ ] Quote API는 Prediction 생성, 포인트 차감, 잔액 조회, price_history 저장을 수행하지 않는다.
+- [ ] 실제 예측 참여는 Quote가 아니라 최신 Pool 상태 기준으로 `priceSnapshot`, `contractQuantity`를 확정한다.
+- [ ] MVP에서는 slippage tolerance를 필수로 두지 않고 가격 변동 안내 문구를 제공한다.
 - [ ] 예측 참여 API는 `Idempotency-Key`를 필수로 받는다.
 - [ ] 예측 참여 API는 Prediction을 먼저 `POINT_PENDING`으로 저장하고 커밋한다.
 - [ ] DB 비관적 락을 잡은 상태로 Member-Point HTTP API를 호출하지 않는다.

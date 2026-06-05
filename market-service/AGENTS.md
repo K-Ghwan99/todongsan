@@ -156,13 +156,24 @@ AGENTS.md는 공식 정책 문서가 아니다.
 ### 3.1 기본 가격 모델
 
 Market Service는 `POOL_SHARE` 가격 모델만 사용한다.
+Market MVP는 Polymarket식 CLOB이 아니라 Pool Share 기반 즉시 참여형 예측시장이다.
+사용자는 order, bid, ask, limit order를 등록하지 않고 현재 Pool Share 가격 기준으로 즉시 예측에 참여한다.
 
 ```text
-각 선택지의 effectivePool = realPoolAmount + virtualPoolAmount
-전체 effectivePool = 모든 선택지의 effectivePool 합
+effectivePoolAmount = realPoolAmount + virtualPoolAmount
+totalEffectivePoolAmount = 모든 선택지의 effectivePoolAmount 합
 
-currentPrice = 해당 선택지 effectivePool / 전체 effectivePool
+currentPrice = 해당 선택지 effectivePoolAmount / totalEffectivePoolAmount
 ```
+
+`market.total_pool`은 실제 참여 포인트 총합이다.
+
+```text
+market.total_pool = sum(all market_option.real_pool_amount)
+```
+
+가격 계산용 전체 pool은 `totalEffectivePoolAmount`라고 표현한다.
+정산/Insight의 `totalPoolAmount`는 실제 참여 포인트 총합 의미로만 사용한다.
 
 ### 3.2 realPoolAmount
 
@@ -196,25 +207,76 @@ virtualPoolAmount = Market 생성 시 부여되는 가상 유동성
 
 ### 3.4 가격 이력 저장 기준
 
-가격 변경 이벤트가 발생하면 `market_price_history`에 가격 변경 결과를 저장한다.
+PriceHistory는 프론트엔드의 option별 가격 그래프를 위한 원천 데이터다.
+정산/환불 금액 계산의 원천 데이터가 아니다.
+
+PriceHistory v4 구현 시 주의:
+
+- Prediction CONFIRMED 시 모든 option에 대해 history row를 생성한다.
+- 선택되지 않은 option도 priceBefore/priceAfter가 달라질 수 있으므로 저장한다.
+- PriceHistory row 1건은 특정 option의 특정 가격 변경 이벤트 1건이다.
+- MVP eventType은 `PREDICTION_CONFIRMED`만 사용한다.
+- Quote, Market 생성/활성화, 결과 확정, 정산, 환불, 무효 처리는 PriceHistory를 생성하지 않는다.
+- 초기 가격은 history row가 아니라 Market 상세 조회 `initialPrice`로 제공한다.
+- `contractQuantityBefore`, `contractQuantityAfter`는 사용자 1명의 계약 수량이 아니라 option 누적 `totalContractQuantity` snapshot이다.
+- `virtualPoolAmount`는 history에 저장하지 않고 `market_option`에서 조회한다.
+- `priceChangeRate`는 저장하지 않고 `priceBefore`, `priceAfter`로 계산한다.
+- PriceHistory v4 구현 시 migration 필요 여부를 실제 schema에서 확인한다.
 
 저장 대상:
 
+- marketId
 - optionId
-- price
-- realPoolAmount
-- contractQuantity
+- predictionId
+- eventType
+- priceBefore / priceAfter
+- realPoolBefore / realPoolAfter
+- contractQuantityBefore / contractQuantityAfter
 - createdAt
 
 저장하지 않는 대상:
 
 - virtualPoolAmount
+- priceChangeRate
+- totalEffectivePoolBefore / totalEffectivePoolAfter
 
-이유:
+이번 문서 정리에서는 migration 파일을 추가하지 않는다.
+구현 단계에서 Docker MySQL DDL과 test schema를 확인한 뒤 `SQL_MIGRATION_POLICY.md`에 따라 새 migration 파일을 추가한다.
+
+---
+
+### 3.5 Quote API 구현 시 주의
+
+Quote는 예측 참여 전 현재 Pool 상태 기준 예상 결과를 계산하는 미리보기 API다.
+
+반드시 지킬 것:
+
+- Prediction을 생성하지 않는다.
+- Member-Point를 호출하지 않는다.
+- Member-Point 포인트 잔액을 조회하지 않는다.
+- MarketOption pool을 변경하지 않는다.
+- PriceHistory를 저장하지 않는다.
+- market_prediction 상태를 변경하지 않는다.
+- `SELECT ... FOR UPDATE`를 사용하지 않는다.
+- Quote 가능 조건은 `Market.status = ACTIVE` 그리고 `closeAt > now`이다.
+- Quote 계산에는 `effectivePoolAmount`, `totalEffectivePoolAmount` 용어를 사용한다.
+- Quote 응답에는 `totalPoolAmount` 같은 모호한 필드를 사용하지 않는다.
+- Quote 실패 시 새 ErrorCode를 만들지 않고 기존 Market ErrorCode를 재사용한다.
+- Quote pointAmount 검증은 실제 예측 참여 API의 검증 상수 또는 검증 로직을 재사용한다.
+- Quote는 `market_price_history`를 읽거나 쓰지 않으므로 PriceHistory v4 schema/migration 작업과 독립적으로 구현할 수 있다.
+
+Quote 계산 방어:
 
 ```text
-virtualPoolAmount는 생성 후 변경 불가이므로 market_option에 있는 원본 값을 참조하면 충분하다.
+currentPrice <= 0 -> MARKET_INVALID_OPTION
+totalEffectivePoolAmount <= 0 -> MARKET_INVALID_OPTION
 ```
+
+`MARKET_INVALID_OPTION`이 코드 enum에 없다면 새 ErrorCode 추가가 아니라 문서에 이미 정의된 ErrorCode의 구현 누락 보정으로 보고 동기화한다.
+이번 문서 보강만 보고 새로운 ErrorCode를 만들지 않는다.
+
+Quote 나눗셈 계산은 표시용 예상값이므로 `RoundingMode.HALF_UP`을 사용한다.
+정산/환불처럼 실제 지급 포인트를 확정하는 계산은 기존 정산 정책대로 `RoundingMode.DOWN`을 유지한다.
 
 ---
 
@@ -517,9 +579,12 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 ```json
 {
   "currentPrice": "0.31250000",
-  "totalPoolAmount": "25000.00",
+  "totalRealPoolAmount": "25000.00",
+  "totalVirtualPoolAmount": "10000.00",
+  "totalEffectivePoolAmount": "35000.00",
   "realPoolAmount": "15000.00",
-  "virtualPoolAmount": "10000.00"
+  "virtualPoolAmount": "5000.00",
+  "effectivePoolAmount": "20000.00"
 }
 ```
 
@@ -629,6 +694,7 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 ✗ Insight-Reputation용 분석 결과를 Market Service에 저장하지 않는다.
 ✗ virtualPoolAmount를 정산·환불 금액에 포함하지 않는다.
 ✗ Market 생성 이후 virtualPoolAmount를 수정하지 않는다.
+✗ PriceHistory v4 schema 변경을 이 문서만 보고 확정하지 않는다.
 ```
 
 ---
