@@ -1464,6 +1464,7 @@ Controller를 HTTP로 호출하지 않고 기존 Service를 직접 호출한다.
 |---|---|---:|---:|
 | 예측 차감 대사 | `PredictionSpendReconciliationService.reconcile(limit)` | 60초 | 100 |
 | 정산 재시도 | `MarketSettlementService.retryFailedSettlements(limit)` | 180초 | 50 |
+| 환불 재시도 | `MarketRefundService.retryFailedRefunds(limit)` | 180초 | 50 |
 
 예시:
 

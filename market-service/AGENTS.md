@@ -670,6 +670,13 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 - 승자 없음은 정산 실패로 처리하지 않음
 - 일부 지급 실패 시 기존 FAILED/UNKNOWN detail만 재시도
 
+[환불 재시도 Scheduler]
+- `MarketRefundRetryScheduler`
+- `MarketRefundService.retryFailedRefunds(limit)`를 직접 호출한다.
+- Controller를 HTTP로 자기 호출하지 않는다.
+- 대상은 VOIDED Market 중 `market_void.refund_status = IN_PROGRESS`이고, refund_detail이 FAILED/UNKNOWN 또는 3분 이상 PENDING인 Market이다.
+- 기본 주기는 180초, 기본 limit은 50이다.
+
 [DATA_PENDING 상태]
 - 정산일 API 미수신 → DATA_PENDING 전환
 - 예상 수집일로부터 최대 3일간 유지

@@ -267,6 +267,11 @@ public interface MarketMapper {
             @Param("pendingThreshold") LocalDateTime pendingThreshold
     );
 
+    List<Long> selectMarketIdsForRefundRetry(
+            @Param("pendingThreshold") LocalDateTime pendingThreshold,
+            @Param("limit") int limit
+    );
+
     long countNonSuccessRefundDetails(@Param("marketVoidId") long marketVoidId);
 
     int updatePredictionToRefundPending(

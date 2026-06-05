@@ -361,6 +361,28 @@
         FOR UPDATE
     </select>
 
+    <select id="selectMarketIdsForRefundRetry" resultType="long">
+        SELECT m.id
+        FROM market m
+        JOIN market_void mv
+          ON mv.market_id = m.id
+        JOIN market_refund_detail mrd
+          ON mrd.market_void_id = mv.id
+        WHERE m.status = 'VOIDED'
+          AND m.deleted_at IS NULL
+          AND mv.refund_status = 'IN_PROGRESS'
+          AND (
+                mrd.status IN ('FAILED', 'UNKNOWN')
+                OR (
+                    mrd.status = 'PENDING'
+                    AND mrd.updated_at &lt;= #{pendingThreshold}
+                )
+          )
+        GROUP BY m.id
+        ORDER BY MIN(mv.updated_at) ASC, MIN(m.id) ASC
+        LIMIT #{limit}
+    </select>
+
     <select id="countNonSuccessRefundDetails" resultType="long">
         SELECT COUNT(*)
         FROM market_refund_detail

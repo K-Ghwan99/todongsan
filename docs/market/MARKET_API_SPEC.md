@@ -2450,6 +2450,7 @@ Insight-Reputation Service가 회원별 예측 참여 원본 데이터를 페이
 |---|---|---:|---:|
 | 예측 차감 대사 | `PredictionSpendReconciliationService.reconcile(limit)` | 60초 | 100 |
 | 정산 재시도 | `MarketSettlementService.retryFailedSettlements(limit)` | 180초 | 50 |
+| 환불 재시도 | `MarketRefundService.retryFailedRefunds(limit)` | 180초 | 50 |
 
 테스트 환경에서는 Scheduler를 비활성화한다.
 

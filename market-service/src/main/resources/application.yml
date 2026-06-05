@@ -22,3 +22,7 @@ market:
       enabled: true
       fixed-delay-ms: 180000
       limit: 50
+    refund-retry:
+      enabled: true
+      fixed-delay-ms: 180000
+      limit: 50
