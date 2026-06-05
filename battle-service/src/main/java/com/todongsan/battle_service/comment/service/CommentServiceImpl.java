@@ -47,12 +47,11 @@ public class CommentServiceImpl implements CommentService {
             throw new CustomException(ErrorCode.BATTLE_COMMENT_TOO_LONG);
         }
 
-        Comment comment = Comment.builder()
+        Comment comment = commentRepository.save(Comment.builder()
                 .battleId(battleId)
                 .memberId(memberId)
                 .content(request.getContent())
-                .build();
-        commentRepository.save(comment);
+                .build());
 
         String idempotencyKey = "battle:comment:" + comment.getId() + ":member:" + memberId;
         try {

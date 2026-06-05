@@ -2,6 +2,7 @@ package com.todongsan.battle_service.comment.service;
 
 import com.todongsan.battle_service.battle.entity.Battle;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
+import com.todongsan.battle_service.client.MemberPointClient;
 import com.todongsan.battle_service.comment.dto.request.CommentCreateRequest;
 import com.todongsan.battle_service.comment.dto.response.CommentInternalResponse;
 import com.todongsan.battle_service.comment.dto.response.CommentResponse;
@@ -9,6 +10,7 @@ import com.todongsan.battle_service.comment.entity.Comment;
 import com.todongsan.battle_service.comment.repository.CommentRepository;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
+import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,15 +31,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class CommentServiceImplTest {
 
-    @Mock
-    private BattleRepository battleRepository;
-
-    @Mock
-    private CommentRepository commentRepository;
+    @Mock private BattleRepository battleRepository;
+    @Mock private CommentRepository commentRepository;
+    @Mock private MemberPointClient memberPointClient;
+    @Mock private PointRewardRetryQueueRepository retryQueueRepository;
 
     @InjectMocks
     private CommentServiceImpl commentService;
@@ -45,26 +49,56 @@ class CommentServiceImplTest {
     // ===================== createComment =====================
 
     @Test
-    @DisplayName("댓글 작성 성공")
+    @DisplayName("댓글 작성 성공 + 보상 지급")
     void createComment_success() {
-        Battle battle = activeBattle();
-        Comment comment = Comment.builder().battleId(1L).memberId(1L).content("좋아요!").build();
-        ReflectionTestUtils.setField(comment, "id", 1L);
-
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        Comment comment = comment(1L);
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(activeBattle()));
         given(commentRepository.save(any(Comment.class))).willReturn(comment);
 
         CommentResponse response = commentService.createComment(1L, 1L,
                 CommentCreateRequest.builder().content("좋아요!").build());
 
-        assertThat(response.getContent()).isEqualTo("좋아요!");
+        assertThat(response.getContent()).isEqualTo("테스트 댓글");
+        verify(memberPointClient).earnPoint(any());
     }
 
     @Test
-    @DisplayName("댓글 작성 실패 - PENDING 상태 Battle")
+    @DisplayName("댓글 작성 성공 - 보상 Timeout 시 RetryQueue 적재")
+    void createComment_success_rewardTimeout_enqueued() {
+        Comment comment = comment(1L);
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(activeBattle()));
+        given(commentRepository.save(any(Comment.class))).willReturn(comment);
+        willThrow(new CustomException(ErrorCode.EXTERNAL_SERVICE_TIMEOUT))
+                .given(memberPointClient).earnPoint(any());
+        given(retryQueueRepository.existsByIdempotencyKey(any())).willReturn(false);
+
+        CommentResponse response = commentService.createComment(1L, 1L,
+                CommentCreateRequest.builder().content("좋아요!").build());
+
+        assertThat(response.getContent()).isEqualTo("테스트 댓글");
+        verify(retryQueueRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("댓글 작성 성공 - 보상 4xx 실패 시 RetryQueue 미적재 (로그만)")
+    void createComment_success_reward4xx_notEnqueued() {
+        Comment comment = comment(1L);
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(activeBattle()));
+        given(commentRepository.save(any(Comment.class))).willReturn(comment);
+        willThrow(new CustomException(ErrorCode.POINT_INSUFFICIENT))
+                .given(memberPointClient).earnPoint(any());
+
+        CommentResponse response = commentService.createComment(1L, 1L,
+                CommentCreateRequest.builder().content("좋아요!").build());
+
+        assertThat(response.getContent()).isEqualTo("테스트 댓글");
+        verify(retryQueueRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("댓글 작성 실패 - PENDING 상태 Battle → BATTLE_NOT_FOUND")
     void createComment_fail_pendingBattle() {
-        Battle battle = pendingBattle();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(pendingBattle()));
 
         assertThatThrownBy(() -> commentService.createComment(1L, 1L,
                 CommentCreateRequest.builder().content("내용").build()))
@@ -74,10 +108,9 @@ class CommentServiceImplTest {
     }
 
     @Test
-    @DisplayName("댓글 작성 실패 - CLOSED 상태 Battle")
+    @DisplayName("댓글 작성 실패 - CLOSED 상태 Battle → BATTLE_CLOSED")
     void createComment_fail_closedBattle() {
-        Battle battle = closedBattle();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(closedBattle()));
 
         assertThatThrownBy(() -> commentService.createComment(1L, 1L,
                 CommentCreateRequest.builder().content("내용").build()))
@@ -87,18 +120,28 @@ class CommentServiceImplTest {
     }
 
     @Test
-    @DisplayName("댓글 작성 실패 - 500자 초과")
+    @DisplayName("댓글 작성 실패 - 500자 초과 → BATTLE_COMMENT_TOO_LONG")
     void createComment_fail_tooLong() {
-        Battle battle = activeBattle();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
-
-        String longContent = "가".repeat(501);
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(activeBattle()));
 
         assertThatThrownBy(() -> commentService.createComment(1L, 1L,
-                CommentCreateRequest.builder().content(longContent).build()))
+                CommentCreateRequest.builder().content("가".repeat(501)).build()))
                 .isInstanceOf(CustomException.class)
                 .satisfies(e -> assertThat(((CustomException) e).getErrorCode())
                         .isEqualTo(ErrorCode.BATTLE_COMMENT_TOO_LONG));
+    }
+
+    @Test
+    @DisplayName("댓글 작성 실패 - 정확히 500자는 성공")
+    void createComment_success_exactly500chars() {
+        Comment comment = comment(1L);
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(activeBattle()));
+        given(commentRepository.save(any(Comment.class))).willReturn(comment);
+
+        CommentResponse response = commentService.createComment(1L, 1L,
+                CommentCreateRequest.builder().content("가".repeat(500)).build());
+
+        assertThat(response).isNotNull();
     }
 
     // ===================== getComments =====================
@@ -106,13 +149,9 @@ class CommentServiceImplTest {
     @Test
     @DisplayName("댓글 목록 조회 성공")
     void getComments_success() {
-        Comment comment = Comment.builder().battleId(1L).memberId(1L).content("댓글").build();
-        ReflectionTestUtils.setField(comment, "id", 1L);
-
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L))
-                .willReturn(Optional.of(activeBattle()));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(activeBattle()));
         given(commentRepository.findByBattleIdAndDeletedAtIsNull(eq(1L), any(Pageable.class)))
-                .willReturn(new PageImpl<>(List.of(comment)));
+                .willReturn(new PageImpl<>(List.of(comment(1L))));
 
         Page<CommentResponse> result = commentService.getComments(1L, 0, 10);
 
@@ -133,7 +172,7 @@ class CommentServiceImplTest {
     // ===================== deleteComment =====================
 
     @Test
-    @DisplayName("댓글 삭제 성공")
+    @DisplayName("댓글 삭제 성공 - soft delete 확인")
     void deleteComment_success() {
         Comment comment = comment(1L);
         given(commentRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(comment));
@@ -155,12 +194,12 @@ class CommentServiceImplTest {
     }
 
     @Test
-    @DisplayName("댓글 삭제 실패 - 본인 댓글 아님")
+    @DisplayName("댓글 삭제 실패 - 본인 댓글 아님 → BATTLE_COMMENT_FORBIDDEN")
     void deleteComment_fail_forbidden() {
-        Comment comment = comment(1L); // memberId = 1L
+        Comment comment = comment(1L);
         given(commentRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(comment));
 
-        assertThatThrownBy(() -> commentService.deleteComment(1L, 1L, 2L)) // 요청자 memberId = 2L
+        assertThatThrownBy(() -> commentService.deleteComment(1L, 1L, 2L))
                 .isInstanceOf(CustomException.class)
                 .satisfies(e -> assertThat(((CustomException) e).getErrorCode())
                         .isEqualTo(ErrorCode.BATTLE_COMMENT_FORBIDDEN));
@@ -171,8 +210,7 @@ class CommentServiceImplTest {
     @Test
     @DisplayName("댓글 내부 조회 성공")
     void getCommentInternal_success() {
-        Comment comment = comment(1L);
-        given(commentRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(comment));
+        given(commentRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(comment(1L)));
 
         CommentInternalResponse response = commentService.getCommentInternal(1L);
 
@@ -181,7 +219,7 @@ class CommentServiceImplTest {
     }
 
     @Test
-    @DisplayName("댓글 내부 조회 실패 - soft delete된 댓글")
+    @DisplayName("댓글 내부 조회 실패 - soft delete된 댓글 → BATTLE_COMMENT_NOT_FOUND")
     void getCommentInternal_fail_deleted() {
         given(commentRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.empty());
 
@@ -195,10 +233,7 @@ class CommentServiceImplTest {
 
     private Battle pendingBattle() {
         Battle battle = Battle.builder()
-                .title("테스트")
-                .optionA("A")
-                .optionB("B")
-                .createdBy(1L)
+                .title("테스트").optionA("A").optionB("B").createdBy(1L)
                 .startAt(LocalDateTime.now().minusDays(1))
                 .endAt(LocalDateTime.now().plusDays(7))
                 .build();
@@ -221,9 +256,7 @@ class CommentServiceImplTest {
 
     private Comment comment(Long memberId) {
         Comment comment = Comment.builder()
-                .battleId(1L)
-                .memberId(memberId)
-                .content("테스트 댓글")
+                .battleId(1L).memberId(memberId).content("테스트 댓글")
                 .build();
         ReflectionTestUtils.setField(comment, "id", 1L);
         return comment;
