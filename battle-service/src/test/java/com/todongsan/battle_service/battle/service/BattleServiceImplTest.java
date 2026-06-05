@@ -7,8 +7,10 @@ import com.todongsan.battle_service.battle.dto.response.BattleStatusResponse;
 import com.todongsan.battle_service.battle.entity.Battle;
 import com.todongsan.battle_service.battle.entity.BattleStatus;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
+import com.todongsan.battle_service.client.MemberPointClient;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
+import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,13 +31,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class BattleServiceImplTest {
 
-    @Mock
-    private BattleRepository battleRepository;
+    @Mock private BattleRepository battleRepository;
+    @Mock private MemberPointClient memberPointClient;
+    @Mock private PointRewardRetryQueueRepository retryQueueRepository;
 
     @InjectMocks
     private BattleServiceImpl battleService;
@@ -76,9 +81,7 @@ class BattleServiceImplTest {
     @DisplayName("Battle 생성 실패 - endAt이 startAt 이전")
     void createBattle_fail_endAtBeforeStartAt() {
         BattleCreateRequest request = BattleCreateRequest.builder()
-                .title("테스트")
-                .optionA("A")
-                .optionB("B")
+                .title("테스트").optionA("A").optionB("B")
                 .startAt(LocalDateTime.now().plusDays(7))
                 .endAt(LocalDateTime.now().plusDays(1))
                 .build();
@@ -93,9 +96,7 @@ class BattleServiceImplTest {
     @DisplayName("Battle 생성 실패 - endAt이 현재 시각 이전")
     void createBattle_fail_endAtInPast() {
         BattleCreateRequest request = BattleCreateRequest.builder()
-                .title("테스트")
-                .optionA("A")
-                .optionB("B")
+                .title("테스트").optionA("A").optionB("B")
                 .startAt(LocalDateTime.now().minusDays(10))
                 .endAt(LocalDateTime.now().minusDays(1))
                 .build();
@@ -111,8 +112,7 @@ class BattleServiceImplTest {
     @Test
     @DisplayName("Battle 목록 조회 성공 - ACTIVE")
     void getBattles_activeStatus() {
-        Battle battle = activeBattle();
-        Page<Battle> page = new PageImpl<>(List.of(battle));
+        Page<Battle> page = new PageImpl<>(List.of(activeBattle()));
         given(battleRepository.findByStatusAndDeletedAtIsNull(eq(BattleStatus.ACTIVE), any(Pageable.class)))
                 .willReturn(page);
 
@@ -135,9 +135,8 @@ class BattleServiceImplTest {
     @Test
     @DisplayName("Battle 상세 조회 성공")
     void getBattle_success() {
-        Battle battle = activeBattle();
         given(battleRepository.findByIdAndStatusInAndDeletedAtIsNull(eq(1L), any()))
-                .willReturn(Optional.of(battle));
+                .willReturn(Optional.of(activeBattle()));
 
         BattleDetailResponse response = battleService.getBattle(1L);
 
@@ -145,7 +144,7 @@ class BattleServiceImplTest {
     }
 
     @Test
-    @DisplayName("Battle 상세 조회 실패 - 존재하지 않음")
+    @DisplayName("Battle 상세 조회 실패 - 존재하지 않음 (PENDING/CANCELLED 포함)")
     void getBattle_fail_notFound() {
         given(battleRepository.findByIdAndStatusInAndDeletedAtIsNull(any(), any()))
                 .willReturn(Optional.empty());
@@ -159,7 +158,7 @@ class BattleServiceImplTest {
     // ===================== approveBattle =====================
 
     @Test
-    @DisplayName("Battle 승인 성공 - PENDING → ACTIVE")
+    @DisplayName("Battle 승인 성공 - PENDING → ACTIVE + 보상 지급")
     void approveBattle_success() {
         Battle battle = pendingBattle();
         given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
@@ -167,6 +166,36 @@ class BattleServiceImplTest {
         BattleStatusResponse response = battleService.approveBattle(1L);
 
         assertThat(response.getStatus()).isEqualTo("ACTIVE");
+        verify(memberPointClient).earnPoint(any());
+    }
+
+    @Test
+    @DisplayName("Battle 승인 성공 - 보상 Timeout 시 RetryQueue 적재")
+    void approveBattle_success_rewardTimeout_enqueued() {
+        Battle battle = pendingBattle();
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        willThrow(new CustomException(ErrorCode.EXTERNAL_SERVICE_TIMEOUT))
+                .given(memberPointClient).earnPoint(any());
+        given(retryQueueRepository.existsByIdempotencyKey(any())).willReturn(false);
+
+        BattleStatusResponse response = battleService.approveBattle(1L);
+
+        assertThat(response.getStatus()).isEqualTo("ACTIVE");
+        verify(retryQueueRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("Battle 승인 성공 - 보상 4xx 실패 시 RetryQueue 미적재 (로그만)")
+    void approveBattle_success_reward4xx_notEnqueued() {
+        Battle battle = pendingBattle();
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        willThrow(new CustomException(ErrorCode.POINT_INSUFFICIENT))
+                .given(memberPointClient).earnPoint(any());
+
+        BattleStatusResponse response = battleService.approveBattle(1L);
+
+        assertThat(response.getStatus()).isEqualTo("ACTIVE");
+        verify(retryQueueRepository, never()).save(any());
     }
 
     @Test
@@ -186,8 +215,7 @@ class BattleServiceImplTest {
     @Test
     @DisplayName("Battle 거절 성공 - PENDING → CANCELLED")
     void rejectBattle_success() {
-        Battle battle = pendingBattle();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(pendingBattle()));
 
         BattleStatusResponse response = battleService.rejectBattle(1L);
 
@@ -197,8 +225,7 @@ class BattleServiceImplTest {
     @Test
     @DisplayName("Battle 거절 실패 - PENDING 아님")
     void rejectBattle_fail_notPending() {
-        Battle battle = activeBattle();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(activeBattle()));
 
         assertThatThrownBy(() -> battleService.rejectBattle(1L))
                 .isInstanceOf(CustomException.class)
@@ -211,8 +238,7 @@ class BattleServiceImplTest {
     @Test
     @DisplayName("Battle 강제 취소 성공 - ACTIVE → CANCELLED")
     void cancelBattle_success() {
-        Battle battle = activeBattle();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(activeBattle()));
 
         BattleStatusResponse response = battleService.cancelBattle(1L);
 
@@ -220,10 +246,9 @@ class BattleServiceImplTest {
     }
 
     @Test
-    @DisplayName("Battle 강제 취소 실패 - ACTIVE 아님")
+    @DisplayName("Battle 강제 취소 실패 - ACTIVE 아님 (PENDING)")
     void cancelBattle_fail_notActive() {
-        Battle battle = pendingBattle();
-        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(battle));
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(pendingBattle()));
 
         assertThatThrownBy(() -> battleService.cancelBattle(1L))
                 .isInstanceOf(CustomException.class)
@@ -235,9 +260,7 @@ class BattleServiceImplTest {
 
     private Battle pendingBattle() {
         Battle battle = Battle.builder()
-                .title("성수 vs 연남")
-                .optionA("성수")
-                .optionB("연남")
+                .title("성수 vs 연남").optionA("성수").optionB("연남")
                 .createdBy(1L)
                 .startAt(LocalDateTime.now().plusDays(1))
                 .endAt(LocalDateTime.now().plusDays(7))
