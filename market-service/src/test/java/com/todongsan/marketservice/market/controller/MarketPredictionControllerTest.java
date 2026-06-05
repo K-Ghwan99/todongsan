@@ -122,6 +122,34 @@ class MarketPredictionControllerTest {
                 "SELECT prediction_id FROM market_price_history ORDER BY option_id",
                 Long.class
         )).containsExactly(predictionId, predictionId);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT event_type FROM market_price_history ORDER BY option_id",
+                String.class
+        )).containsExactly("PREDICTION_CONFIRMED", "PREDICTION_CONFIRMED");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT price_before FROM market_price_history ORDER BY option_id",
+                String.class
+        )).containsExactly("0.50000000", "0.50000000");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT price_after FROM market_price_history ORDER BY option_id",
+                String.class
+        )).containsExactly("0.66666667", "0.33333333");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT real_pool_before FROM market_price_history ORDER BY option_id",
+                String.class
+        )).containsExactly("0.00", "0.00");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT real_pool_after FROM market_price_history ORDER BY option_id",
+                String.class
+        )).containsExactly("100.00", "0.00");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT contract_quantity_before FROM market_price_history ORDER BY option_id",
+                String.class
+        )).containsExactly("0.00000000", "0.00000000");
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT contract_quantity_after FROM market_price_history ORDER BY option_id",
+                String.class
+        )).containsExactly("200.00000000", "0.00000000");
 
         ArgumentCaptor<PointSpendCommand> commandCaptor = ArgumentCaptor.forClass(PointSpendCommand.class);
         verify(memberPointClient).spend(commandCaptor.capture());

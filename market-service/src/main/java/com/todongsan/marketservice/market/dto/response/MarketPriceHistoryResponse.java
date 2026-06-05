@@ -1,7 +1,8 @@
 package com.todongsan.marketservice.market.dto.response;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.todongsan.marketservice.global.serializer.BigDecimalPlainStringSerializer;
+import com.todongsan.marketservice.market.type.PriceHistoryEventType;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -28,19 +29,35 @@ public class MarketPriceHistoryResponse {
     @AllArgsConstructor
     public static class PriceHistory {
         private Long historyId;
+        private Long marketId;
         private Long optionId;
+        private String optionContent;
+        private Long predictionId;
+        private PriceHistoryEventType eventType;
 
-        @JsonSerialize(using = ToStringSerializer.class)
-        private BigDecimal price;
+        @JsonSerialize(using = BigDecimalPlainStringSerializer.class)
+        private BigDecimal priceBefore;
 
-        @JsonSerialize(using = ToStringSerializer.class)
-        private BigDecimal realPoolAmount;
+        @JsonSerialize(using = BigDecimalPlainStringSerializer.class)
+        private BigDecimal priceAfter;
 
-        @JsonSerialize(using = ToStringSerializer.class)
+        @JsonSerialize(using = BigDecimalPlainStringSerializer.class)
+        private BigDecimal priceChangeRate;
+
+        @JsonSerialize(using = BigDecimalPlainStringSerializer.class)
+        private BigDecimal realPoolBefore;
+
+        @JsonSerialize(using = BigDecimalPlainStringSerializer.class)
+        private BigDecimal realPoolAfter;
+
+        @JsonSerialize(using = BigDecimalPlainStringSerializer.class)
         private BigDecimal virtualPoolAmount;
 
-        @JsonSerialize(using = ToStringSerializer.class)
-        private BigDecimal contractQuantity;
+        @JsonSerialize(using = BigDecimalPlainStringSerializer.class)
+        private BigDecimal contractQuantityBefore;
+
+        @JsonSerialize(using = BigDecimalPlainStringSerializer.class)
+        private BigDecimal contractQuantityAfter;
 
         private LocalDateTime createdAt;
     }

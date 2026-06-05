@@ -789,8 +789,9 @@ Quote API는 아래 조건을 모두 만족해야 성공한다.
 4. marketOptionId가 존재해야 한다.
 5. marketOptionId는 해당 marketId에 속해야 한다.
 6. pointAmount가 유효해야 한다.
-7. 선택지 currentPrice가 0보다 커야 한다.
-8. totalEffectivePoolAmount가 0보다 커야 한다.
+7. 선택지 currentPrice가 null이 아니고 0보다 커야 한다.
+8. option realPoolAmount, virtualPoolAmount가 null이 아니어야 한다.
+9. totalEffectivePoolAmount가 0보다 커야 한다.
 ```
 
 상태 정책:
@@ -852,7 +853,10 @@ priceImpactRate = (estimatedAfterPrice - currentPrice) / currentPrice * 100
 방어 정책:
 
 ```text
-currentPrice <= 0
+currentPrice == null 또는 currentPrice <= 0
+→ MARKET_INVALID_OPTION
+
+option.realPoolAmount == null 또는 option.virtualPoolAmount == null
 → MARKET_INVALID_OPTION
 
 totalEffectivePoolAmount <= 0
@@ -864,7 +868,7 @@ totalEffectivePoolAmount <= 0
 구현 주의:
 
 ```text
-Quote API는 currentPrice <= 0 또는 totalEffectivePoolAmount <= 0인 데이터 정합성 오류 상황에서 MARKET_INVALID_OPTION을 사용한다.
+Quote API는 currentPrice null/0 이하, option pool amount null, totalEffectivePoolAmount 0 이하인 데이터 정합성 오류 상황에서 MARKET_INVALID_OPTION을 사용한다.
 만약 코드 enum에 MARKET_INVALID_OPTION이 없다면, 이는 새 정책 추가가 아니라 문서에 이미 정의된 ErrorCode의 구현 누락 보정으로 보고 동기화한다.
 새로운 ErrorCode를 임의로 만들지 않는다.
 ```
@@ -966,7 +970,7 @@ MVP에서는 별도의 slippage tolerance를 필수로 받지 않는다.
 | `MARKET_CLOSED` | 409 | 마감된 Market |
 | `MARKET_OPTION_NOT_FOUND` | 404 | 선택지 없음 |
 | `MARKET_INVALID_BET_AMOUNT` | 400 | 예측 금액 오류 |
-| `MARKET_INVALID_OPTION` | 400 | currentPrice 또는 totalEffectivePoolAmount가 0 이하 |
+| `MARKET_INVALID_OPTION` | 400 | currentPrice 또는 pool amount가 null이거나 currentPrice/totalEffectivePoolAmount가 0 이하 |
 
 ---
 
