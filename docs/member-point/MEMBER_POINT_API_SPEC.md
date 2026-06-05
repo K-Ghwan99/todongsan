@@ -444,7 +444,7 @@ Authorization: Bearer {JWT}
 ### 3-0. 회원 정보 배치 조회
 
 ```
-POST /api/v1/members/batch
+POST /internal/api/v1/members/batch
 ```
 
 Insight Service가 Battle/Market 투표·예측 데이터를 분석할 때
@@ -505,7 +505,7 @@ memberId 목록으로 회원의 연령대/성별/거주지 정보를 한 번에 
 ### 3-1. 거래 상태 조회
 
 ```
-GET /api/v1/points/transactions?idempotencyKey={key}
+GET /internal/api/v1/points/transactions?idempotencyKey={key}
 ```
 
 Market이 포인트 차감 요청 후 Timeout 발생 시 처리 여부를 확인하기 위해 호출한다.
@@ -581,7 +581,7 @@ Market이 포인트 차감 요청 후 Timeout 발생 시 처리 여부를 확인
 |---|---|---|
 | `PROCESSED` | 차감 성공 (point_history.status = SUCCEEDED) | 가격 확정 트랜잭션 재시도 후 Prediction CONFIRMED |
 | `FAILED` | 차감 시도했으나 실패 (point_history.status = FAILED, 예: POINT_INSUFFICIENT) | Prediction FAILED |
-| `NOT_FOUND` | 처리 이력 없음 (point_history 미존재) | 정책에 따라 재차감 또는 UNKNOWN 유지 |
+| `NOT_FOUND` | 처리 이력 없음 (point_history 미존재) | 자동 재차감하지 않고 Prediction FAILED |
 
 > **Market Scheduler 처리 원칙**: 조회 자체가 timeout/5xx인 경우 Prediction POINT_UNKNOWN 유지.
 
@@ -596,7 +596,7 @@ Market이 포인트 차감 요청 후 Timeout 발생 시 처리 여부를 확인
 ### 3-1. Point 적립
 
 ```
-POST /api/v1/points/earn
+POST /internal/api/v1/points/earn
 ```
 
 Battle 투표 완료, 댓글 작성, Battle 주제 승인 시 Battle Service가 호출한다.
@@ -672,16 +672,19 @@ X-Member-Id: {memberId}
 
 | 에러 코드 | 상황 |
 |---|---|
-| NOT_FOUND | 회원 없음 |
-| DUPLICATE_REQUEST | 동일 idempotency_key 중복 요청 |
-| INTERNAL_ERROR | 포인트 처리 오류 |
+| `IDEMPOTENCY_KEY_REQUIRED` | Idempotency-Key 헤더 누락 |
+| `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 요청 내용 다름 |
+| `POINT_TRANSACTION_ALREADY_PROCESSED` | 동일 키 + 동일 요청 재시도 |
+| `MEMBER_NOT_FOUND` | memberId에 해당하는 회원 없음 |
+| `POINT_INVALID_AMOUNT` | amount <= 0 |
+| `POINT_INVALID_REFERENCE_TYPE` | 유효하지 않은 referenceType |
 
 ---
 
 ### 3-2. Point 차감
 
 ```
-POST /api/v1/points/spend
+POST /internal/api/v1/points/spend
 ```
 
 Market 예측 참여 시 Market Service가 호출한다.
@@ -753,16 +756,20 @@ X-Member-Id: {memberId}
 
 | 에러 코드 | 상황 |
 |---|---|
-| POINT_INSUFFICIENT | member.point_balance 부족 |
-| NOT_FOUND | 회원 없음 |
-| DUPLICATE_REQUEST | 중복 요청 |
+| `IDEMPOTENCY_KEY_REQUIRED` | Idempotency-Key 헤더 누락 |
+| `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 요청 내용 다름 |
+| `POINT_TRANSACTION_ALREADY_PROCESSED` | 동일 키 + 동일 요청 재시도 |
+| `MEMBER_NOT_FOUND` | memberId에 해당하는 회원 없음 |
+| `POINT_INSUFFICIENT` | point_balance 부족 |
+| `POINT_INVALID_AMOUNT` | amount <= 0 |
+| `POINT_INVALID_REFERENCE_TYPE` | 유효하지 않은 referenceType |
 
 ---
 
 ### 3-3. Market 정산 일괄 지급
 
 ```
-POST /api/v1/points/settlements
+POST /internal/api/v1/points/settlements
 ```
 
 Market 정산 완료 시 Market Service가 호출한다.
@@ -878,7 +885,7 @@ items 순회하며 각 prediction에 대해:
 ### 3-4. Market 무효 환불 / AI 리포트 생성 실패 환불
 
 ```
-POST /api/v1/points/refunds
+POST /internal/api/v1/points/refunds
 ```
 
 다음 두 가지 상황에서 호출한다.
