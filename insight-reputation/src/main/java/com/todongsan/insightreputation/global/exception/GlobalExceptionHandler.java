@@ -4,6 +4,8 @@ import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
 import com.todongsan.insightreputation.global.response.ApiResponse;
 import com.todongsan.insightreputation.reputation.dto.response.ResidenceCooldownErrorResponse;
 import com.todongsan.insightreputation.reputation.exception.ResidenceChangeCooldownException;
+import com.todongsan.insightreputation.visitcertification.dto.response.VisitCertCooldownErrorResponse;
+import com.todongsan.insightreputation.visitcertification.exception.VisitCertCooldownException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -23,6 +25,27 @@ public class GlobalExceptionHandler {
                 .build();
         
         ApiResponse<ResidenceCooldownErrorResponse> response = ApiResponse.<ResidenceCooldownErrorResponse>builder()
+                .success(false)
+                .errorCode(e.getErrorCode().getCode())
+                .message(e.getErrorCode().getMessage())
+                .data(errorData)
+                .timestamp(java.time.LocalDateTime.now())
+                .build();
+        
+        return ResponseEntity
+                .status(e.getErrorCode().getHttpStatus())
+                .body(response);
+    }
+
+    @ExceptionHandler(VisitCertCooldownException.class)
+    public ResponseEntity<ApiResponse<VisitCertCooldownErrorResponse>> handleVisitCertCooldownException(VisitCertCooldownException e) {
+        log.warn("VisitCertCooldownException occurred: nextAvailableDate={}", e.getNextAvailableDate());
+        
+        VisitCertCooldownErrorResponse errorData = VisitCertCooldownErrorResponse.builder()
+                .nextAvailableDate(e.getNextAvailableDate())
+                .build();
+        
+        ApiResponse<VisitCertCooldownErrorResponse> response = ApiResponse.<VisitCertCooldownErrorResponse>builder()
                 .success(false)
                 .errorCode(e.getErrorCode().getCode())
                 .message(e.getErrorCode().getMessage())

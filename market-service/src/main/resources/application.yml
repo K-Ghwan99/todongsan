@@ -11,3 +11,18 @@ mybatis:
   mapper-locations: classpath:/mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true
+
+market:
+  scheduler:
+    prediction-reconciliation:
+      enabled: true
+      fixed-delay-ms: 60000
+      limit: 100
+    settlement-retry:
+      enabled: true
+      fixed-delay-ms: 180000
+      limit: 50
+    refund-retry:
+      enabled: true
+      fixed-delay-ms: 180000
+      limit: 50

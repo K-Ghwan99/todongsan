@@ -274,42 +274,45 @@ GET /api/v1/battles/{battleId}/result
 
 ---
 
-### 3-3. 상세 교차분석 조회 (30P 소비)
+### 3-3. 교차분석 조회 (관리자 전용)
 
 ```
 GET /api/v1/battles/{battleId}/result/cross
 ```
 
-**인증**: 필요
+**인증**: 필요 (관리자 `ROLE_ADMIN`)
 
-**Response**: (기존 형식 유지)
+**응답 정책**
 
-**상태 변화 메모**
+- 리포트 원문(개별 투표 데이터)은 반환하지 않는다.
+- 옵션별 비율, 성별/연령대 분포 등 **집계 통계값만** 응답한다.
+- 포인트 차감 없음 (0P).
 
-- Point 차감은 검증 통과 후에만 호출. 검증 실패(4xx)는 Point 차감 없음.
-- `Idempotency-Key` 헤더 필수 (Member-Point spend API 호출 시).
+**Response**: (상세 필드 구현 예정 — Feature 3)
 
 **Error Codes**
 
 | ErrorCode | HTTP | 상황 |
 |---|---:|---|
 | `UNAUTHORIZED` | 401 | — |
+| `FORBIDDEN` | 403 | 관리자 권한 없음 |
 | `BATTLE_NOT_FOUND` | 404 | — |
 | `BATTLE_RESULT_NOT_AVAILABLE` | 409 | `CLOSED` 상태가 아님 |
-| `POINT_INSUFFICIENT` | 400 | 30P 부족 |
-| `IDEMPOTENCY_KEY_REQUIRED` | 400 | 헤더 누락 |
 
 ---
 
-### 3-4. 방문 인증자 필터 결과 (30P 소비)
+### 3-4. 방문 인증자 필터 결과 (관리자 전용)
 
 ```
 GET /api/v1/battles/{battleId}/result/certified
 ```
 
-**인증**: 필요
+**인증**: 필요 (관리자 `ROLE_ADMIN`)
 
-**Response**: (기존 형식 유지)
+**응답 정책**
+
+- 방문 인증자 기준 필터링된 **집계 통계값만** 응답한다.
+- 포인트 차감 없음 (0P).
 
 **Error Codes**: 3-3과 동일
 
@@ -556,3 +559,4 @@ GET /api/v1/battles/{battleId}/info
 | 2026-06-01 | 5-1 응답에 `votes[]` 배열 추가 (Insight 교차분석 지원) |
 | 2026-06-01 | 5-3 Battle 기본 정보 조회 내부 API 신설 (외부 API와 채널 분리) |
 | 2026-06-01 | 5-2 댓글 단건 조회 응답에 sido/sigu 미포함 정책 명시 (Battle 도메인은 지역 비종속) |
+| 2026-06-04 | 3-3/3-4 교차분석·인증자 필터 조회를 관리자 전용으로 변경. 포인트 차감 제거, 집계 통계만 응답 |

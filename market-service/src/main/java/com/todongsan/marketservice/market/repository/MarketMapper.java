@@ -4,8 +4,14 @@ import com.todongsan.marketservice.market.entity.Market;
 import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
 import com.todongsan.marketservice.market.entity.MarketPriceHistory;
+import com.todongsan.marketservice.market.entity.MarketRefundDetail;
+import com.todongsan.marketservice.market.entity.MarketSettlement;
+import com.todongsan.marketservice.market.entity.MarketSettlementDetail;
+import com.todongsan.marketservice.market.entity.MarketVoid;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.PredictionStatus;
+import com.todongsan.marketservice.market.type.RefundStatus;
+import com.todongsan.marketservice.market.type.TransactionItemStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -87,6 +93,13 @@ public interface MarketMapper {
 
     MarketPrediction selectPredictionById(@Param("predictionId") long predictionId);
 
+    MarketPrediction lockPredictionById(@Param("predictionId") long predictionId);
+
+    List<MarketPrediction> selectPredictionsForSpendReconciliation(
+            @Param("pendingThreshold") LocalDateTime pendingThreshold,
+            @Param("limit") int limit
+    );
+
     void insertPrediction(MarketPrediction prediction);
 
     int retryFailedPrediction(
@@ -119,10 +132,188 @@ public interface MarketMapper {
             @Param("updatedAt") LocalDateTime updatedAt
     );
 
+    int updatePredictionConfirmedForReconciliation(
+            @Param("predictionId") long predictionId,
+            @Param("priceSnapshot") BigDecimal priceSnapshot,
+            @Param("contractQuantity") BigDecimal contractQuantity,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
     int updatePendingPredictionStatus(
             @Param("predictionId") long predictionId,
             @Param("status") PredictionStatus status,
             @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updatePredictionFailedForReconciliation(
+            @Param("predictionId") long predictionId,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updatePredictionUnknownFromPending(
+            @Param("predictionId") long predictionId,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int startSettlement(
+            @Param("marketId") long marketId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    List<MarketPrediction> selectConfirmedPredictionsForSettlement(@Param("marketId") long marketId);
+
+    void insertMarketSettlement(MarketSettlement settlement);
+
+    void insertMarketSettlementDetails(@Param("details") List<MarketSettlementDetail> details);
+
+    MarketSettlement selectMarketSettlementByMarketId(@Param("marketId") long marketId);
+
+    List<MarketSettlementDetail> selectSettlementDetailsBySettlementId(@Param("settlementId") long settlementId);
+
+    List<MarketSettlementDetail> selectRetryableSettlementDetails(@Param("settlementId") long settlementId);
+
+    List<Long> selectMarketIdsForSettlementRetry(@Param("limit") int limit);
+
+    long countSettlementDetailsBySettlementId(@Param("settlementId") long settlementId);
+
+    long countNonSuccessSettlementDetails(@Param("settlementId") long settlementId);
+
+    long countRetryableSettlementDetails(@Param("settlementId") long settlementId);
+
+    long countSettledLoserPredictions(
+            @Param("marketId") long marketId,
+            @Param("resultOptionId") long resultOptionId
+    );
+
+    int updateMarketSettlementAmounts(
+            @Param("marketId") long marketId,
+            @Param("feeAmount") BigDecimal feeAmount,
+            @Param("settlementPool") BigDecimal settlementPool,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateSettlementDetailStatus(
+            @Param("detailId") long detailId,
+            @Param("status") TransactionItemStatus status,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateRetrySettlementDetailStatus(
+            @Param("detailId") long detailId,
+            @Param("status") TransactionItemStatus status,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int settlePrediction(
+            @Param("predictionId") long predictionId,
+            @Param("settledAmount") BigDecimal settledAmount,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int settleLoserPredictions(
+            @Param("marketId") long marketId,
+            @Param("resultOptionId") long resultOptionId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int settleAllConfirmedPredictionsZero(
+            @Param("marketId") long marketId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int completeMarketSettlement(
+            @Param("settlementId") long settlementId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int touchMarketSettlement(
+            @Param("settlementId") long settlementId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int completeMarket(
+            @Param("marketId") long marketId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    long countUnresolvedPredictionsForVoid(@Param("marketId") long marketId);
+
+    long countConfirmedPredictionsForRefund(@Param("marketId") long marketId);
+
+    List<MarketPrediction> selectConfirmedPredictionsForRefund(@Param("marketId") long marketId);
+
+    MarketVoid selectMarketVoidByMarketId(@Param("marketId") long marketId);
+
+    void insertMarketVoid(MarketVoid marketVoid);
+
+    int updateMarketStatusToVoided(
+            @Param("marketId") long marketId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    long countRefundDetailsByVoidId(@Param("marketVoidId") long marketVoidId);
+
+    void insertMarketRefundDetails(@Param("details") List<MarketRefundDetail> details);
+
+    List<MarketRefundDetail> selectPendingRefundDetailsByVoidId(@Param("marketVoidId") long marketVoidId);
+
+    List<MarketRefundDetail> selectRetryableRefundDetails(
+            @Param("marketVoidId") long marketVoidId,
+            @Param("pendingThreshold") LocalDateTime pendingThreshold
+    );
+
+    List<Long> selectMarketIdsForRefundRetry(
+            @Param("pendingThreshold") LocalDateTime pendingThreshold,
+            @Param("limit") int limit
+    );
+
+    long countNonSuccessRefundDetails(@Param("marketVoidId") long marketVoidId);
+
+    int updatePredictionToRefundPending(
+            @Param("predictionId") long predictionId,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateRefundDetailStatus(
+            @Param("detailId") long detailId,
+            @Param("status") TransactionItemStatus status,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateRetryRefundDetailStatus(
+            @Param("detailId") long detailId,
+            @Param("status") TransactionItemStatus status,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int markPredictionRefunded(
+            @Param("predictionId") long predictionId,
+            @Param("refundAmount") BigDecimal refundAmount,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int markPredictionRefundUnknown(
+            @Param("predictionId") long predictionId,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int markPredictionRefundPending(
+            @Param("predictionId") long predictionId,
+            @Param("failReason") String failReason,
+            @Param("updatedAt") LocalDateTime updatedAt
+    );
+
+    int updateMarketVoidRefundStatus(
+            @Param("marketVoidId") long marketVoidId,
+            @Param("refundStatus") RefundStatus refundStatus,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 }

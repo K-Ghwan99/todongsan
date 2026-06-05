@@ -62,6 +62,8 @@ class MarketPredictionControllerTest {
     void setUp() {
         reset(memberPointClient);
         jdbcTemplate.update("DELETE FROM market_price_history");
+        jdbcTemplate.update("DELETE FROM market_refund_detail");
+        jdbcTemplate.update("DELETE FROM market_void");
         jdbcTemplate.update("DELETE FROM market_prediction");
         jdbcTemplate.update("DELETE FROM market_option");
         jdbcTemplate.update("DELETE FROM market");

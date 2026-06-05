@@ -243,6 +243,214 @@
           AND status IN ('POINT_PENDING', 'POINT_UNKNOWN')
     </select>
 
+    <select id="countUnresolvedPredictionsForVoid" resultType="long">
+        SELECT COUNT(*)
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status IN ('POINT_PENDING', 'POINT_UNKNOWN')
+    </select>
+
+    <select id="countConfirmedPredictionsForRefund" resultType="long">
+        SELECT COUNT(*)
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status = 'CONFIRMED'
+    </select>
+
+    <select id="selectConfirmedPredictionsForRefund" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status = 'CONFIRMED'
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <select id="selectMarketVoidByMarketId" resultType="com.todongsan.marketservice.market.entity.MarketVoid">
+        SELECT *
+        FROM market_void
+        WHERE market_id = #{marketId}
+        FOR UPDATE
+    </select>
+
+    <insert id="insertMarketVoid" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO market_void (
+            market_id,
+            reason_type,
+            reason_detail,
+            refund_status,
+            voided_by,
+            voided_at,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{marketId},
+            #{reasonType},
+            #{reasonDetail},
+            #{refundStatus},
+            #{voidedBy},
+            #{voidedAt},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateMarketStatusToVoided">
+        UPDATE market
+        SET status = 'VOIDED',
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND status IN ('PENDING', 'ACTIVE', 'CLOSED', 'DATA_PENDING')
+          AND deleted_at IS NULL
+    </update>
+
+    <select id="countRefundDetailsByVoidId" resultType="long">
+        SELECT COUNT(*)
+        FROM market_refund_detail
+        WHERE market_void_id = #{marketVoidId}
+    </select>
+
+    <insert id="insertMarketRefundDetails">
+        INSERT INTO market_refund_detail (
+            market_void_id,
+            prediction_id,
+            member_id,
+            refund_amount,
+            status,
+            idempotency_key,
+            fail_reason,
+            created_at,
+            updated_at
+        ) VALUES
+        <foreach collection="details" item="detail" separator=",">
+            (
+                #{detail.marketVoidId},
+                #{detail.predictionId},
+                #{detail.memberId},
+                #{detail.refundAmount},
+                #{detail.status},
+                #{detail.idempotencyKey},
+                #{detail.failReason},
+                #{detail.createdAt},
+                #{detail.updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectPendingRefundDetailsByVoidId" resultType="com.todongsan.marketservice.market.entity.MarketRefundDetail">
+        SELECT *
+        FROM market_refund_detail
+        WHERE market_void_id = #{marketVoidId}
+          AND status = 'PENDING'
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <select id="selectRetryableRefundDetails" resultType="com.todongsan.marketservice.market.entity.MarketRefundDetail">
+        SELECT *
+        FROM market_refund_detail
+        WHERE market_void_id = #{marketVoidId}
+          AND (
+                status IN ('FAILED', 'UNKNOWN')
+                OR (
+                    status = 'PENDING'
+                    AND updated_at &lt;= #{pendingThreshold}
+                )
+          )
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <select id="selectMarketIdsForRefundRetry" resultType="long">
+        SELECT m.id
+        FROM market m
+        JOIN market_void mv
+          ON mv.market_id = m.id
+        JOIN market_refund_detail mrd
+          ON mrd.market_void_id = mv.id
+        WHERE m.status = 'VOIDED'
+          AND m.deleted_at IS NULL
+          AND mv.refund_status = 'IN_PROGRESS'
+          AND (
+                mrd.status IN ('FAILED', 'UNKNOWN')
+                OR (
+                    mrd.status = 'PENDING'
+                    AND mrd.updated_at &lt;= #{pendingThreshold}
+                )
+          )
+        GROUP BY m.id
+        ORDER BY MIN(mv.updated_at) ASC, MIN(m.id) ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="countNonSuccessRefundDetails" resultType="long">
+        SELECT COUNT(*)
+        FROM market_refund_detail
+        WHERE market_void_id = #{marketVoidId}
+          AND status != 'SUCCESS'
+    </select>
+
+    <update id="updatePredictionToRefundPending">
+        UPDATE market_prediction
+        SET status = 'REFUND_PENDING',
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'CONFIRMED'
+    </update>
+
+    <update id="updateRefundDetailStatus">
+        UPDATE market_refund_detail
+        SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{detailId}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="updateRetryRefundDetailStatus">
+        UPDATE market_refund_detail
+        SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{detailId}
+          AND status IN ('FAILED', 'UNKNOWN', 'PENDING')
+    </update>
+
+    <update id="markPredictionRefunded">
+        UPDATE market_prediction
+        SET status = 'REFUNDED',
+            refund_amount = #{refundAmount},
+            fail_reason = NULL,
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status IN ('REFUND_PENDING', 'REFUND_UNKNOWN')
+    </update>
+
+    <update id="markPredictionRefundUnknown">
+        UPDATE market_prediction
+        SET status = 'REFUND_UNKNOWN',
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'REFUND_PENDING'
+    </update>
+
+    <update id="markPredictionRefundPending">
+        UPDATE market_prediction
+        SET status = 'REFUND_PENDING',
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status IN ('REFUND_PENDING', 'REFUND_UNKNOWN')
+    </update>
+
+    <update id="updateMarketVoidRefundStatus">
+        UPDATE market_void
+        SET refund_status = #{refundStatus},
+            updated_at = #{updatedAt}
+        WHERE id = #{marketVoidId}
+    </update>
+
     <update id="clearResultOptions">
         UPDATE market_option
         SET is_result = FALSE,
@@ -294,6 +502,25 @@
         SELECT *
         FROM market_prediction
         WHERE id = #{predictionId}
+    </select>
+
+    <select id="lockPredictionById" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE id = #{predictionId}
+        FOR UPDATE
+    </select>
+
+    <select id="selectPredictionsForSpendReconciliation" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE status = 'POINT_UNKNOWN'
+           OR (
+                status = 'POINT_PENDING'
+                AND updated_at &lt;= #{pendingThreshold}
+           )
+        ORDER BY updated_at ASC, id ASC
+        LIMIT #{limit}
     </select>
 
     <insert id="insertPrediction" useGeneratedKeys="true" keyProperty="id">
@@ -415,6 +642,17 @@
           AND status = 'POINT_PENDING'
     </update>
 
+    <update id="updatePredictionConfirmedForReconciliation">
+        UPDATE market_prediction
+        SET price_snapshot = #{priceSnapshot},
+            contract_quantity = #{contractQuantity},
+            status = 'CONFIRMED',
+            fail_reason = NULL,
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status IN ('POINT_PENDING', 'POINT_UNKNOWN')
+    </update>
+
     <update id="updatePendingPredictionStatus">
         UPDATE market_prediction
         SET status = #{status},
@@ -422,6 +660,262 @@
             updated_at = #{updatedAt}
         WHERE id = #{predictionId}
           AND status = 'POINT_PENDING'
+    </update>
+
+    <update id="updatePredictionFailedForReconciliation">
+        UPDATE market_prediction
+        SET status = 'FAILED',
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status IN ('POINT_PENDING', 'POINT_UNKNOWN')
+    </update>
+
+    <update id="updatePredictionUnknownFromPending">
+        UPDATE market_prediction
+        SET status = 'POINT_UNKNOWN',
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'POINT_PENDING'
+    </update>
+
+    <update id="startSettlement">
+        UPDATE market
+        SET status = 'SETTLEMENT_IN_PROGRESS',
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND status = 'CLOSED'
+          AND deleted_at IS NULL
+    </update>
+
+    <select id="selectConfirmedPredictionsForSettlement" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
+        SELECT *
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status = 'CONFIRMED'
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <insert id="insertMarketSettlement" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO market_settlement (
+            market_id,
+            result_option_id,
+            total_pool,
+            fee_rate,
+            fee_amount,
+            settlement_pool,
+            winning_contract_quantity,
+            payout_per_contract,
+            burned_point_amount,
+            status,
+            settled_by,
+            settled_at,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{marketId},
+            #{resultOptionId},
+            #{totalPool},
+            #{feeRate},
+            #{feeAmount},
+            #{settlementPool},
+            #{winningContractQuantity},
+            #{payoutPerContract},
+            #{burnedPointAmount},
+            #{status},
+            #{settledBy},
+            #{settledAt},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <insert id="insertMarketSettlementDetails">
+        INSERT INTO market_settlement_detail (
+            settlement_id,
+            prediction_id,
+            member_id,
+            original_point_amount,
+            contract_quantity,
+            payout_per_contract,
+            settled_amount,
+            profit_amount,
+            status,
+            idempotency_key,
+            fail_reason,
+            created_at,
+            updated_at
+        ) VALUES
+        <foreach collection="details" item="detail" separator=",">
+            (
+                #{detail.settlementId},
+                #{detail.predictionId},
+                #{detail.memberId},
+                #{detail.originalPointAmount},
+                #{detail.contractQuantity},
+                #{detail.payoutPerContract},
+                #{detail.settledAmount},
+                #{detail.profitAmount},
+                #{detail.status},
+                #{detail.idempotencyKey},
+                #{detail.failReason},
+                #{detail.createdAt},
+                #{detail.updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectSettlementDetailsBySettlementId" resultType="com.todongsan.marketservice.market.entity.MarketSettlementDetail">
+        SELECT *
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+        ORDER BY id ASC
+    </select>
+
+    <select id="selectMarketSettlementByMarketId" resultType="com.todongsan.marketservice.market.entity.MarketSettlement">
+        SELECT *
+        FROM market_settlement
+        WHERE market_id = #{marketId}
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
+    <select id="selectRetryableSettlementDetails" resultType="com.todongsan.marketservice.market.entity.MarketSettlementDetail">
+        SELECT *
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+          AND status IN ('FAILED', 'UNKNOWN')
+        ORDER BY id ASC
+        FOR UPDATE
+    </select>
+
+    <select id="selectMarketIdsForSettlementRetry" resultType="long">
+        SELECT market_settlement.market_id
+        FROM market_settlement
+        JOIN market_settlement_detail
+          ON market_settlement.id = market_settlement_detail.settlement_id
+        JOIN market
+          ON market.id = market_settlement.market_id
+        WHERE market.status = 'SETTLEMENT_IN_PROGRESS'
+          AND market.deleted_at IS NULL
+          AND market_settlement.status = 'IN_PROGRESS'
+          AND market_settlement_detail.status IN ('FAILED', 'UNKNOWN')
+        GROUP BY market_settlement.market_id
+        ORDER BY MIN(market_settlement.updated_at) ASC, MIN(market_settlement.id) ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="countSettlementDetailsBySettlementId" resultType="long">
+        SELECT COUNT(*)
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+    </select>
+
+    <select id="countNonSuccessSettlementDetails" resultType="long">
+        SELECT COUNT(*)
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+          AND status != 'SUCCESS'
+    </select>
+
+    <select id="countRetryableSettlementDetails" resultType="long">
+        SELECT COUNT(*)
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+          AND status IN ('FAILED', 'UNKNOWN')
+    </select>
+
+    <select id="countSettledLoserPredictions" resultType="long">
+        SELECT COUNT(*)
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND option_id != #{resultOptionId}
+          AND status = 'SETTLED'
+    </select>
+
+    <update id="updateMarketSettlementAmounts">
+        UPDATE market
+        SET fee_amount = #{feeAmount},
+            settlement_pool = #{settlementPool},
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND status = 'SETTLEMENT_IN_PROGRESS'
+          AND deleted_at IS NULL
+    </update>
+
+    <update id="updateSettlementDetailStatus">
+        UPDATE market_settlement_detail
+        SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{detailId}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="updateRetrySettlementDetailStatus">
+        UPDATE market_settlement_detail
+        SET status = #{status},
+            fail_reason = #{failReason},
+            updated_at = #{updatedAt}
+        WHERE id = #{detailId}
+          AND status IN ('FAILED', 'UNKNOWN')
+    </update>
+
+    <update id="settlePrediction">
+        UPDATE market_prediction
+        SET status = 'SETTLED',
+            settled_amount = #{settledAmount},
+            updated_at = #{updatedAt}
+        WHERE id = #{predictionId}
+          AND status = 'CONFIRMED'
+    </update>
+
+    <update id="settleLoserPredictions">
+        UPDATE market_prediction
+        SET status = 'SETTLED',
+            settled_amount = 0.00,
+            updated_at = #{updatedAt}
+        WHERE market_id = #{marketId}
+          AND option_id != #{resultOptionId}
+          AND status = 'CONFIRMED'
+    </update>
+
+    <update id="settleAllConfirmedPredictionsZero">
+        UPDATE market_prediction
+        SET status = 'SETTLED',
+            settled_amount = 0.00,
+            updated_at = #{updatedAt}
+        WHERE market_id = #{marketId}
+          AND status = 'CONFIRMED'
+    </update>
+
+    <update id="completeMarketSettlement">
+        UPDATE market_settlement
+        SET status = 'COMPLETED',
+            settled_at = #{updatedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{settlementId}
+          AND status = 'IN_PROGRESS'
+    </update>
+
+    <update id="touchMarketSettlement">
+        UPDATE market_settlement
+        SET updated_at = #{updatedAt}
+        WHERE id = #{settlementId}
+          AND status = 'IN_PROGRESS'
+    </update>
+
+    <update id="completeMarket">
+        UPDATE market
+        SET status = 'SETTLED',
+            settled_at = #{updatedAt},
+            updated_at = #{updatedAt}
+        WHERE id = #{marketId}
+          AND status = 'SETTLEMENT_IN_PROGRESS'
+          AND deleted_at IS NULL
     </update>
 
 </mapper>

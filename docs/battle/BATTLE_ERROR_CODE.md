@@ -87,15 +87,14 @@
 |---|---|
 | `BATTLE_NOT_FOUND` | — |
 
-### 3-6. 포인트 소비 결과 — `GET /api/v1/battles/{id}/result/{cross|certified}`
+### 3-6. 관리자 전용 분석 결과 — `GET /api/v1/battles/{id}/result/{cross|certified}`
 
 | ErrorCode | 메모 |
 |---|---|
 | `UNAUTHORIZED` (공통) | — |
+| `FORBIDDEN` (공통) | 관리자(`ROLE_ADMIN`) 권한 없음 |
 | `BATTLE_NOT_FOUND` | — |
-| `BATTLE_RESULT_NOT_AVAILABLE` | 진행 중인 Battle (Point 차감 전에 차단) |
-| `POINT_INSUFFICIENT` (공통) | 30P 부족 |
-| `IDEMPOTENCY_KEY_REQUIRED` (공통) | 헤더 누락 |
+| `BATTLE_RESULT_NOT_AVAILABLE` | `CLOSED` 상태가 아님 (포인트 차감 없음, 관리자도 동일) |
 
 ### 3-7. 댓글 작성 — `POST /api/v1/battles/{id}/comments`
 
@@ -269,3 +268,4 @@ CONVENTION 담당자(Insight)와 협의해서 통일 필요.
 | v2 | `BATTLE_CLOSED` 발생 조건에서 `SETTLED` 제거 (Status enum에 SETTLED 없음) |
 | v2 | 5-4 섹션 추가: Member-Point 호출 시 referenceType/referenceId/idempotency_key 정책 명확화 |
 | v2 | 6번 충돌 항목 확장: NOT_FOUND, POINT_INSUFFICIENT HTTP 코드 등 추가 |
+| v3 | 3-6 교차분석·인증자 필터 에러 코드를 관리자 전용 기준으로 변경. POINT_INSUFFICIENT/IDEMPOTENCY_KEY_REQUIRED 제거, FORBIDDEN 추가 |

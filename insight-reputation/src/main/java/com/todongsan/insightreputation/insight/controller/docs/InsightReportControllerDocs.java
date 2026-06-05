@@ -13,6 +13,55 @@ import org.springframework.http.ResponseEntity;
 public interface InsightReportControllerDocs {
 
     @Operation(
+        summary = "Battle AI 분석 자동 트리거 (내부 API)", 
+        description = "Battle Service에서 Battle 종료 시 호출하는 내부 API. " +
+                     "Point 차감 없이 자동으로 AI 분석 리포트를 생성한다. " +
+                     "중복 트리거는 무시되며, 비동기로 분석을 수행한다."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200", 
+            description = "자동 트리거 성공 (중복 트리거는 무시하고 200 반환)"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400", 
+            description = "INSIGHT_REPORT_SOURCE_NOT_CLOSED (Battle이 아직 종료되지 않음)"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404", 
+            description = "RESOURCE_NOT_FOUND (존재하지 않는 battleId)"
+        )
+    })
+    ResponseEntity<ApiResponse<Void>> triggerBattleReport(
+        @Parameter(description = "Battle ID", example = "123") Long battleId
+    );
+
+    @Operation(
+        summary = "Battle AI 분석 리포트 관리자 조회", 
+        description = "관리자가 Battle AI 분석 리포트를 조회한다. " +
+                     "모든 상태(PENDING, PROCESSING, DONE, FAILED)의 리포트를 조회 가능하며, " +
+                     "재시도 횟수, 실패 사유 등 상세 정보를 포함한다."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200", 
+            description = "관리자 리포트 조회 성공"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403", 
+            description = "FORBIDDEN (ADMIN 권한 없음)"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404", 
+            description = "RESOURCE_NOT_FOUND (Battle 없거나 리포트 없음)"
+        )
+    })
+    ResponseEntity<ApiResponse<InsightReportResponse>> getAdminBattleReport(
+        @Parameter(description = "Battle ID", example = "123") Long battleId,
+        @Parameter(description = "회원 권한 (ADMIN 필수)", example = "ADMIN") String memberRole
+    );
+
+    @Operation(
         summary = "Battle AI 분석 리포트 생성 요청", 
         description = "종료된 Battle에 대해 AI 분석 리포트를 생성한다. " +
                      "80포인트가 차감되며, 기존 완료 리포트가 있는 경우 즉시 반환한다. " +
@@ -46,7 +95,8 @@ public interface InsightReportControllerDocs {
     })
     ResponseEntity<ApiResponse<InsightReportResponse>> requestBattleReport(
         @Parameter(description = "Battle ID", example = "123") Long battleId,
-        @Parameter(hidden = true) Long memberId
+        @Parameter(hidden = true) Long memberId,
+        @Parameter(description = "멱등성 키 (중복 요청 방지)", example = "battle-report-123-20241201-user456") String idempotencyKey
     );
     
     @Operation(
@@ -123,7 +173,8 @@ public interface InsightReportControllerDocs {
     })
     ResponseEntity<ApiResponse<InsightReportResponse>> requestMarketReport(
         @Parameter(description = "Market ID", example = "456") Long marketId,
-        @Parameter(hidden = true) Long memberId
+        @Parameter(hidden = true) Long memberId,
+        @Parameter(description = "멱등성 키 (중복 요청 방지)", example = "market-report-456-20241201-user789") String idempotencyKey
     );
     
     @Operation(

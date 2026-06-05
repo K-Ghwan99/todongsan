@@ -52,6 +52,252 @@ class InsightReportServiceTest {
     @Mock
     ClaudeApiClient claudeApiClient;
 
+    // ========== Battle 자동 트리거 테스트 (신규) ==========
+
+    @Test
+    @DisplayName("Battle 자동 트리거 - 최초 트리거 → insight_report PENDING INSERT")
+    void triggerBattleReport_initialTrigger_success() {
+        // Given
+        Long battleId = 100L;
+        
+        // 기존 리포트 없음
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.BATTLE, battleId))
+                .thenReturn(Optional.empty());
+        
+        // 종료된 Battle
+        BattleResponse closedBattle = BattleResponse.builder()
+                .battleId(battleId)
+                .title("성수 vs 연남")
+                .isClosed(true)
+                .status("CLOSED")
+                .build();
+        when(battleClient.getBattleInfo(battleId)).thenReturn(closedBattle);
+        
+        // 새 리포트 저장
+        InsightReport savedReport = mock(InsightReport.class);
+        when(savedReport.getId()).thenReturn(1L);
+        when(insightReportRepository.save(any(InsightReport.class))).thenReturn(savedReport);
+        
+        // When
+        service.triggerBattleReport(battleId);
+        
+        // Then
+        verify(insightReportRepository).save(argThat(report ->
+                report.getType() == InsightReportType.BATTLE &&
+                report.getReferenceId().equals(battleId) &&
+                report.getRequestedBy().equals(0L) &&  // 시스템 자동 트리거
+                report.getStatus() == InsightReportStatus.PENDING &&
+                report.getRetryCount() == 0
+        ));
+    }
+
+    @Test
+    @DisplayName("Battle 자동 트리거 - 기존 PENDING 존재 → 중복 무시, INSERT 없음")
+    void triggerBattleReport_existingPending_ignored() {
+        // Given
+        Long battleId = 100L;
+        
+        InsightReport existingReport = mock(InsightReport.class);
+        when(existingReport.getId()).thenReturn(1L);
+        when(existingReport.getStatus()).thenReturn(InsightReportStatus.PENDING);
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.BATTLE, battleId))
+                .thenReturn(Optional.of(existingReport));
+        
+        // When
+        service.triggerBattleReport(battleId);
+        
+        // Then
+        verify(battleClient, never()).getBattleInfo(anyLong());
+        verify(insightReportRepository, never()).save(any(InsightReport.class));
+    }
+
+    @Test
+    @DisplayName("Battle 자동 트리거 - 기존 PROCESSING 존재 → 중복 무시, INSERT 없음")
+    void triggerBattleReport_existingProcessing_ignored() {
+        // Given
+        Long battleId = 100L;
+        
+        InsightReport existingReport = mock(InsightReport.class);
+        when(existingReport.getId()).thenReturn(1L);
+        when(existingReport.getStatus()).thenReturn(InsightReportStatus.PROCESSING);
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.BATTLE, battleId))
+                .thenReturn(Optional.of(existingReport));
+        
+        // When
+        service.triggerBattleReport(battleId);
+        
+        // Then
+        verify(battleClient, never()).getBattleInfo(anyLong());
+        verify(insightReportRepository, never()).save(any(InsightReport.class));
+    }
+
+    @Test
+    @DisplayName("Battle 자동 트리거 - 기존 DONE 존재 → 중복 무시, INSERT 없음")
+    void triggerBattleReport_existingDone_ignored() {
+        // Given
+        Long battleId = 100L;
+        
+        InsightReport existingReport = mock(InsightReport.class);
+        when(existingReport.getId()).thenReturn(1L);
+        when(existingReport.getStatus()).thenReturn(InsightReportStatus.DONE);
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.BATTLE, battleId))
+                .thenReturn(Optional.of(existingReport));
+        
+        // When
+        service.triggerBattleReport(battleId);
+        
+        // Then
+        verify(battleClient, never()).getBattleInfo(anyLong());
+        verify(insightReportRepository, never()).save(any(InsightReport.class));
+    }
+
+    @Test
+    @DisplayName("Battle 자동 트리거 - Battle 미종료 → INSIGHT_REPORT_SOURCE_NOT_CLOSED")
+    void triggerBattleReport_battleNotClosed_throwsSourceNotClosed() {
+        // Given
+        Long battleId = 100L;
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.BATTLE, battleId))
+                .thenReturn(Optional.empty());
+        
+        BattleResponse openBattle = BattleResponse.builder()
+                .battleId(battleId)
+                .title("진행중 Battle")
+                .isClosed(false)
+                .status("ACTIVE")
+                .build();
+        when(battleClient.getBattleInfo(battleId)).thenReturn(openBattle);
+        
+        // When & Then
+        assertThatThrownBy(() -> service.triggerBattleReport(battleId))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.INSIGHT_REPORT_SOURCE_NOT_CLOSED);
+        
+        verify(insightReportRepository, never()).save(any(InsightReport.class));
+    }
+
+    @Test
+    @DisplayName("Battle 자동 트리거 - 존재하지 않는 battleId → RESOURCE_NOT_FOUND")
+    void triggerBattleReport_battleNotFound_throwsResourceNotFound() {
+        // Given
+        Long battleId = 999L;
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.BATTLE, battleId))
+                .thenReturn(Optional.empty());
+        
+        when(battleClient.getBattleInfo(battleId))
+                .thenThrow(new CustomException(ErrorCode.RESOURCE_NOT_FOUND));
+        
+        // When & Then
+        assertThatThrownBy(() -> service.triggerBattleReport(battleId))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.RESOURCE_NOT_FOUND);
+        
+        verify(insightReportRepository, never()).save(any(InsightReport.class));
+    }
+
+    // ========== 관리자 Battle 리포트 조회 테스트 (신규) ==========
+
+    @Test
+    @DisplayName("관리자 Battle 리포트 조회 - DONE 상태 리포트 → summary, failedReason(null) 포함 반환")
+    void getAdminBattleReport_doneStatus_returnsWithSummary() {
+        // Given
+        Long battleId = 100L;
+        String summary = "전체 투표에서는 성수가 61%로 우세했습니다...";
+        
+        InsightReport doneReport = mock(InsightReport.class);
+        when(doneReport.getId()).thenReturn(1L);
+        when(doneReport.getStatus()).thenReturn(InsightReportStatus.DONE);
+        when(doneReport.getSummary()).thenReturn(summary);
+        when(doneReport.getAnalysisData()).thenReturn("{\"votes\": 150}");
+        when(doneReport.getGeneratedAt()).thenReturn(LocalDateTime.now());
+        when(doneReport.getRetryCount()).thenReturn((byte) 0);
+        when(doneReport.getFailedReason()).thenReturn(null);
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.BATTLE, battleId))
+                .thenReturn(Optional.of(doneReport));
+        
+        BattleResponse battleInfo = BattleResponse.builder()
+                .battleId(battleId)
+                .title("성수 vs 연남, 데이트하기 어디가 더 좋을까?")
+                .build();
+        when(battleClient.getBattleInfo(battleId)).thenReturn(battleInfo);
+        
+        // When
+        InsightReportResponse response = service.getAdminBattleReport(battleId);
+        
+        // Then
+        assertThat(response.getReportId()).isEqualTo(1L);
+        assertThat(response.getBattleId()).isEqualTo(battleId);
+        assertThat(response.getStatus()).isEqualTo("DONE");
+        assertThat(response.getTitle()).isEqualTo("성수 vs 연남, 데이트하기 어디가 더 좋을까?");
+        assertThat(response.getSummary()).isEqualTo(summary);
+        assertThat(response.getAnalysisData()).isEqualTo("{\"votes\": 150}");
+        assertThat(response.getRetryCount()).isEqualTo(0);
+        assertThat(response.getFailedReason()).isNull();
+    }
+
+    @Test
+    @DisplayName("관리자 Battle 리포트 조회 - FAILED 상태 리포트 → failedReason 포함 반환")
+    void getAdminBattleReport_failedStatus_returnsWithFailedReason() {
+        // Given
+        Long battleId = 100L;
+        String failedReason = "Claude API 호출 실패";
+        
+        InsightReport failedReport = mock(InsightReport.class);
+        when(failedReport.getId()).thenReturn(1L);
+        when(failedReport.getStatus()).thenReturn(InsightReportStatus.FAILED);
+        when(failedReport.getSummary()).thenReturn(null);
+        when(failedReport.getAnalysisData()).thenReturn(null);
+        when(failedReport.getGeneratedAt()).thenReturn(null);
+        when(failedReport.getRetryCount()).thenReturn((byte) 3);
+        when(failedReport.getFailedReason()).thenReturn(failedReason);
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.BATTLE, battleId))
+                .thenReturn(Optional.of(failedReport));
+        
+        BattleResponse battleInfo = BattleResponse.builder()
+                .battleId(battleId)
+                .title("성수 vs 연남, 데이트하기 어디가 더 좋을까?")
+                .build();
+        when(battleClient.getBattleInfo(battleId)).thenReturn(battleInfo);
+        
+        // When
+        InsightReportResponse response = service.getAdminBattleReport(battleId);
+        
+        // Then
+        assertThat(response.getReportId()).isEqualTo(1L);
+        assertThat(response.getBattleId()).isEqualTo(battleId);
+        assertThat(response.getStatus()).isEqualTo("FAILED");
+        assertThat(response.getTitle()).isEqualTo("성수 vs 연남, 데이트하기 어디가 더 좋을까?");
+        assertThat(response.getSummary()).isNull();
+        assertThat(response.getRetryCount()).isEqualTo(3);
+        assertThat(response.getFailedReason()).isEqualTo(failedReason);
+    }
+
+    @Test
+    @DisplayName("관리자 Battle 리포트 조회 - 리포트 없음 → RESOURCE_NOT_FOUND")
+    void getAdminBattleReport_reportNotFound_throwsResourceNotFound() {
+        // Given
+        Long battleId = 999L;
+        
+        when(insightReportRepository.findByTypeAndReferenceId(InsightReportType.BATTLE, battleId))
+                .thenReturn(Optional.empty());
+        
+        // When & Then
+        assertThatThrownBy(() -> service.getAdminBattleReport(battleId))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.RESOURCE_NOT_FOUND);
+    }
+
+    // ========== 기존 사용자 Battle 리포트 테스트 ==========
+
     @Test
     @DisplayName("Battle 리포트 생성 - 정상 요청 → PENDING 상태 리포트 생성")
     void requestBattleReport_validRequest_success() {
@@ -82,7 +328,7 @@ class InsightReportServiceTest {
         when(insightReportRepository.save(any(InsightReport.class))).thenReturn(savedReport);
         
         // When
-        InsightReportResponse response = service.requestBattleReport(memberId, battleId);
+        InsightReportResponse response = service.requestBattleReport(memberId, battleId, "test-key");
         
         // Then
         assertThat(response.getReportId()).isEqualTo(1L);
@@ -111,7 +357,7 @@ class InsightReportServiceTest {
                 .thenReturn(Optional.of(existingReport));
         
         // When
-        InsightReportResponse response = service.requestBattleReport(memberId, battleId);
+        InsightReportResponse response = service.requestBattleReport(memberId, battleId, "test-key");
         
         // Then
         assertThat(response.getReportId()).isEqualTo(1L);
@@ -138,7 +384,7 @@ class InsightReportServiceTest {
                 .thenReturn(Optional.of(processingReport));
         
         // When & Then
-        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId))
+        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INSIGHT_REPORT_ALREADY_PROCESSING);
@@ -165,7 +411,7 @@ class InsightReportServiceTest {
         when(battleClient.getBattleInfo(battleId)).thenReturn(openBattle);
         
         // When & Then
-        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId))
+        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INSIGHT_REPORT_SOURCE_NOT_CLOSED);
@@ -193,7 +439,7 @@ class InsightReportServiceTest {
                 .when(memberPointClient).spendPoints(eq(memberId), eq(80), anyString());
         
         // When & Then
-        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId))
+        assertThatThrownBy(() -> service.requestBattleReport(memberId, battleId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.POINT_INSUFFICIENT);
@@ -389,7 +635,7 @@ class InsightReportServiceTest {
         when(insightReportRepository.save(any(InsightReport.class))).thenReturn(savedReport);
         
         // When
-        InsightReportResponse response = service.requestMarketReport(memberId, marketId);
+        InsightReportResponse response = service.requestMarketReport(memberId, marketId, "test-key");
         
         // Then
         assertThat(response.getReportId()).isEqualTo(1L);
@@ -419,7 +665,7 @@ class InsightReportServiceTest {
                 .thenReturn(Optional.of(existingReport));
         
         // When
-        InsightReportResponse response = service.requestMarketReport(memberId, marketId);
+        InsightReportResponse response = service.requestMarketReport(memberId, marketId, "test-key");
         
         // Then
         assertThat(response.getReportId()).isEqualTo(1L);
@@ -447,7 +693,7 @@ class InsightReportServiceTest {
                 .thenReturn(Optional.of(processingReport));
         
         // When & Then
-        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId))
+        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INSIGHT_REPORT_ALREADY_PROCESSING);
@@ -476,7 +722,7 @@ class InsightReportServiceTest {
         doNothing().when(memberPointClient).refundPoints(eq(memberId), eq(80), anyString());
         
         // When & Then
-        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId))
+        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INSIGHT_REPORT_SOURCE_DATA_NOT_READY);
@@ -500,7 +746,7 @@ class InsightReportServiceTest {
                 .when(memberPointClient).spendPoints(eq(memberId), eq(80), anyString());
         
         // When & Then
-        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId))
+        assertThatThrownBy(() -> service.requestMarketReport(memberId, marketId, "test-key"))
                 .isInstanceOf(CustomException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.POINT_INSUFFICIENT);

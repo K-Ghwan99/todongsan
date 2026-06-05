@@ -3,6 +3,8 @@ package com.todongsan.battle_service.comment.service;
 import com.todongsan.battle_service.battle.entity.Battle;
 import com.todongsan.battle_service.battle.entity.BattleStatus;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
+import com.todongsan.battle_service.client.MemberPointClient;
+import com.todongsan.battle_service.client.dto.PointEarnRequest;
 import com.todongsan.battle_service.comment.dto.request.CommentCreateRequest;
 import com.todongsan.battle_service.comment.dto.response.CommentInternalResponse;
 import com.todongsan.battle_service.comment.dto.response.CommentResponse;
@@ -10,22 +12,31 @@ import com.todongsan.battle_service.comment.entity.Comment;
 import com.todongsan.battle_service.comment.repository.CommentRepository;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
+import com.todongsan.battle_service.retry.entity.PointRewardRetryQueue;
+import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class CommentServiceImpl implements CommentService {
 
     private static final int MAX_CONTENT_LENGTH = 500;
+    private static final BigDecimal COMMENT_REWARD = BigDecimal.valueOf(2);
 
     private final BattleRepository battleRepository;
     private final CommentRepository commentRepository;
+    private final MemberPointClient memberPointClient;
+    private final PointRewardRetryQueueRepository retryQueueRepository;
 
     @Override
     @Transactional
@@ -36,14 +47,39 @@ public class CommentServiceImpl implements CommentService {
             throw new CustomException(ErrorCode.BATTLE_COMMENT_TOO_LONG);
         }
 
-        Comment comment = Comment.builder()
+        Comment comment = commentRepository.save(Comment.builder()
                 .battleId(battleId)
                 .memberId(memberId)
                 .content(request.getContent())
-                .build();
-        commentRepository.save(comment);
+                .build());
 
-        // TODO: Member-Point EARN_COMMENT 2P 지급 (Feature 5), 실패 시 RetryQueue 적재 (Feature 6)
+        String idempotencyKey = "battle:comment:" + comment.getId() + ":member:" + memberId;
+        try {
+            memberPointClient.earnPoint(PointEarnRequest.builder()
+                    .memberId(memberId)
+                    .type("EARN_COMMENT")
+                    .referenceType("BATTLE")
+                    .referenceId(battleId)
+                    .amount(COMMENT_REWARD)
+                    .idempotencyKey(idempotencyKey)
+                    .build());
+        } catch (CustomException e) {
+            if (e.getErrorCode() == ErrorCode.EXTERNAL_SERVICE_TIMEOUT) {
+                if (!retryQueueRepository.existsByIdempotencyKey(idempotencyKey)) {
+                    retryQueueRepository.save(PointRewardRetryQueue.builder()
+                            .memberId(memberId)
+                            .referenceType("BATTLE")
+                            .referenceId(battleId)
+                            .type("EARN_COMMENT")
+                            .amount(COMMENT_REWARD)
+                            .idempotencyKey(idempotencyKey)
+                            .build());
+                }
+                log.warn("Comment reward enqueued for retry: member={}, comment={}", memberId, comment.getId());
+            } else {
+                log.warn("Comment reward failed (4xx), manual correction needed: member={}, comment={}", memberId, comment.getId());
+            }
+        }
 
         return CommentResponse.from(comment);
     }

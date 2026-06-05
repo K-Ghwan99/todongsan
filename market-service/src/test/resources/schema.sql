@@ -1,4 +1,8 @@
 DROP TABLE IF EXISTS market_price_history;
+DROP TABLE IF EXISTS market_refund_detail;
+DROP TABLE IF EXISTS market_void;
+DROP TABLE IF EXISTS market_settlement_detail;
+DROP TABLE IF EXISTS market_settlement;
 DROP TABLE IF EXISTS market_prediction;
 DROP TABLE IF EXISTS market_option;
 DROP TABLE IF EXISTS market;
@@ -110,6 +114,95 @@ CREATE TABLE market_price_history (
         FOREIGN KEY (option_id)
         REFERENCES market_option(id),
     CONSTRAINT fk_price_history_prediction
+        FOREIGN KEY (prediction_id)
+        REFERENCES market_prediction(id)
+);
+
+CREATE TABLE market_settlement (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    market_id BIGINT NOT NULL,
+    result_option_id BIGINT NOT NULL,
+    total_pool DECIMAL(10,2) NOT NULL,
+    fee_rate DECIMAL(5,2) NOT NULL,
+    fee_amount DECIMAL(10,2) NOT NULL,
+    settlement_pool DECIMAL(10,2) NOT NULL,
+    winning_contract_quantity DECIMAL(24,8) NOT NULL,
+    payout_per_contract DECIMAL(18,8) NOT NULL,
+    burned_point_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    settled_by BIGINT,
+    settled_at DATETIME,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_market_settlement_market (market_id),
+    CONSTRAINT fk_market_settlement_market
+        FOREIGN KEY (market_id)
+        REFERENCES market(id),
+    CONSTRAINT fk_market_settlement_result_option
+        FOREIGN KEY (result_option_id)
+        REFERENCES market_option(id)
+);
+
+CREATE TABLE market_settlement_detail (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    settlement_id BIGINT NOT NULL,
+    prediction_id BIGINT NOT NULL,
+    member_id BIGINT NOT NULL,
+    original_point_amount DECIMAL(10,2) NOT NULL,
+    contract_quantity DECIMAL(24,8) NOT NULL,
+    payout_per_contract DECIMAL(18,8) NOT NULL,
+    settled_amount DECIMAL(10,2) NOT NULL,
+    profit_amount DECIMAL(10,2) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    idempotency_key VARCHAR(150) NOT NULL UNIQUE,
+    fail_reason VARCHAR(255),
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_settlement_detail_prediction (prediction_id),
+    CONSTRAINT fk_settlement_detail_settlement
+        FOREIGN KEY (settlement_id)
+        REFERENCES market_settlement(id),
+    CONSTRAINT fk_settlement_detail_prediction
+        FOREIGN KEY (prediction_id)
+        REFERENCES market_prediction(id)
+);
+
+CREATE TABLE market_void (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    market_id BIGINT NOT NULL,
+    reason_type VARCHAR(50) NOT NULL,
+    reason_detail TEXT,
+    refund_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    voided_by BIGINT,
+    voided_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_market_void_market (market_id),
+    CONSTRAINT fk_market_void_market
+        FOREIGN KEY (market_id)
+        REFERENCES market(id)
+);
+
+CREATE TABLE market_refund_detail (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    market_void_id BIGINT NOT NULL,
+    prediction_id BIGINT NOT NULL,
+    member_id BIGINT NOT NULL,
+    refund_amount DECIMAL(10,2) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    idempotency_key VARCHAR(150) NOT NULL UNIQUE,
+    fail_reason VARCHAR(255),
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_refund_detail_prediction (prediction_id),
+    CONSTRAINT fk_refund_detail_market_void
+        FOREIGN KEY (market_void_id)
+        REFERENCES market_void(id),
+    CONSTRAINT fk_refund_detail_prediction
         FOREIGN KEY (prediction_id)
         REFERENCES market_prediction(id)
 );

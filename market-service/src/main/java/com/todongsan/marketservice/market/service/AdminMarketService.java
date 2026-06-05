@@ -6,17 +6,24 @@ import com.todongsan.marketservice.global.exception.errorcode.MarketErrorCode;
 import com.todongsan.marketservice.market.dto.request.ConfirmMarketResultRequest;
 import com.todongsan.marketservice.market.dto.request.CreateMarketOptionRequest;
 import com.todongsan.marketservice.market.dto.request.CreateMarketRequest;
+import com.todongsan.marketservice.market.dto.request.VoidMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
 import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
+import com.todongsan.marketservice.market.dto.response.RefundMarketResponse;
+import com.todongsan.marketservice.market.dto.response.SettleMarketResponse;
+import com.todongsan.marketservice.market.dto.response.VoidMarketResponse;
 import com.todongsan.marketservice.market.entity.Market;
 import com.todongsan.marketservice.market.entity.MarketOption;
+import com.todongsan.marketservice.market.entity.MarketVoid;
 import com.todongsan.marketservice.market.repository.MarketInsertRow;
 import com.todongsan.marketservice.market.repository.MarketMapper;
 import com.todongsan.marketservice.market.repository.MarketOptionInsertRow;
 import com.todongsan.marketservice.market.type.MarketAnswerType;
 import com.todongsan.marketservice.market.type.MarketPriceModel;
 import com.todongsan.marketservice.market.type.MarketStatus;
+import com.todongsan.marketservice.market.type.MarketVoidReasonType;
+import com.todongsan.marketservice.market.type.RefundStatus;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
@@ -37,8 +44,16 @@ public class AdminMarketService {
     private static final BigDecimal ZERO_AMOUNT = new BigDecimal("0.00");
     private static final BigDecimal ZERO_QUANTITY = new BigDecimal("0.00000000");
     private static final int PRICE_SCALE = 8;
+    private static final Set<MarketStatus> VOIDABLE_STATUSES = Set.of(
+            MarketStatus.PENDING,
+            MarketStatus.ACTIVE,
+            MarketStatus.CLOSED,
+            MarketStatus.DATA_PENDING
+    );
 
     private final MarketMapper marketMapper;
+    private final MarketSettlementService marketSettlementService;
+    private final MarketRefundService marketRefundService;
 
     @Transactional
     public CreateMarketResponse createMarket(CreateMarketRequest request) {
@@ -131,6 +146,67 @@ public class AdminMarketService {
         );
     }
 
+    public SettleMarketResponse settleMarket(long marketId) {
+        return marketSettlementService.settleMarket(marketId);
+    }
+
+    public SettleMarketResponse retryMarketSettlement(long marketId) {
+        return marketSettlementService.retryMarketSettlement(marketId);
+    }
+
+    public RefundMarketResponse refundMarket(long marketId) {
+        return marketRefundService.refundMarket(marketId);
+    }
+
+    public RefundMarketResponse retryRefundMarket(long marketId) {
+        return marketRefundService.retryRefundMarket(marketId);
+    }
+
+    @Transactional
+    public VoidMarketResponse voidMarket(long marketId, VoidMarketRequest request) {
+        MarketVoidReasonType reasonType = parseVoidReasonType(request.reasonCode());
+        LocalDateTime now = LocalDateTime.now();
+
+        Market market = marketMapper.lockMarketById(marketId);
+        if (market == null) {
+            throw new CustomException(MarketErrorCode.MARKET_NOT_FOUND);
+        }
+        validateVoidableMarket(market);
+        if (marketMapper.countUnresolvedPredictionsForVoid(marketId) > 0) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+        }
+        if (marketMapper.selectMarketVoidByMarketId(marketId) != null) {
+            throw new CustomException(MarketErrorCode.MARKET_CANNOT_VOID);
+        }
+
+        long refundablePredictionCount = marketMapper.countConfirmedPredictionsForRefund(marketId);
+        MarketVoid marketVoid = new MarketVoid(
+                null,
+                marketId,
+                reasonType,
+                request.reason(),
+                RefundStatus.PENDING,
+                null,
+                now,
+                now,
+                now
+        );
+        marketMapper.insertMarketVoid(marketVoid);
+        if (marketMapper.updateMarketStatusToVoided(marketId, now) != 1) {
+            throw new CustomException(MarketErrorCode.MARKET_CANNOT_VOID);
+        }
+
+        return new VoidMarketResponse(
+                marketId,
+                marketVoid.getId(),
+                MarketStatus.VOIDED,
+                refundablePredictionCount > 0,
+                Math.toIntExact(refundablePredictionCount),
+                reasonType.name(),
+                request.reason()
+        );
+    }
+
     private Market getMarket(long marketId) {
         Market market = marketMapper.selectMarketById(marketId);
         if (market == null) {
@@ -166,6 +242,25 @@ public class AdminMarketService {
         }
         if (market.getStatus() != MarketStatus.DATA_PENDING) {
             throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+        }
+    }
+
+    private void validateVoidableMarket(Market market) {
+        if (market.getStatus() == MarketStatus.SETTLEMENT_IN_PROGRESS
+                || market.getStatus() == MarketStatus.SETTLED
+                || market.getStatus() == MarketStatus.VOIDED) {
+            throw new CustomException(MarketErrorCode.MARKET_CANNOT_VOID);
+        }
+        if (!VOIDABLE_STATUSES.contains(market.getStatus())) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+        }
+    }
+
+    private MarketVoidReasonType parseVoidReasonType(String reasonCode) {
+        try {
+            return MarketVoidReasonType.valueOf(reasonCode);
+        } catch (IllegalArgumentException e) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
         }
     }
 

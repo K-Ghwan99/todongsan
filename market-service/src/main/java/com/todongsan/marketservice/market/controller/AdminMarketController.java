@@ -3,9 +3,13 @@ package com.todongsan.marketservice.market.controller;
 import com.todongsan.marketservice.global.response.ApiResponse;
 import com.todongsan.marketservice.market.dto.request.ConfirmMarketResultRequest;
 import com.todongsan.marketservice.market.dto.request.CreateMarketRequest;
+import com.todongsan.marketservice.market.dto.request.VoidMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
 import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
+import com.todongsan.marketservice.market.dto.response.RefundMarketResponse;
+import com.todongsan.marketservice.market.dto.response.SettleMarketResponse;
+import com.todongsan.marketservice.market.dto.response.VoidMarketResponse;
 import com.todongsan.marketservice.market.service.AdminMarketService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -43,5 +47,41 @@ public class AdminMarketController {
             @Valid @RequestBody ConfirmMarketResultRequest request
     ) {
         return ApiResponse.ok(adminMarketService.confirmMarketResult(marketId, request));
+    }
+
+    @PostMapping("/{marketId}/settlements")
+    public ApiResponse<SettleMarketResponse> settleMarket(
+            @PathVariable long marketId
+    ) {
+        return ApiResponse.ok(adminMarketService.settleMarket(marketId));
+    }
+
+    @PostMapping("/{marketId}/settlements/retry")
+    public ApiResponse<SettleMarketResponse> retryMarketSettlement(
+            @PathVariable long marketId
+    ) {
+        return ApiResponse.ok(adminMarketService.retryMarketSettlement(marketId));
+    }
+
+    @PostMapping("/{marketId}/refunds")
+    public ApiResponse<RefundMarketResponse> refundMarket(
+            @PathVariable long marketId
+    ) {
+        return ApiResponse.ok(adminMarketService.refundMarket(marketId));
+    }
+
+    @PostMapping("/{marketId}/refunds/retry")
+    public ApiResponse<RefundMarketResponse> retryRefundMarket(
+            @PathVariable long marketId
+    ) {
+        return ApiResponse.ok(adminMarketService.retryRefundMarket(marketId));
+    }
+
+    @PatchMapping("/{marketId}/void")
+    public ApiResponse<VoidMarketResponse> voidMarket(
+            @PathVariable long marketId,
+            @Valid @RequestBody VoidMarketRequest request
+    ) {
+        return ApiResponse.ok(adminMarketService.voidMarket(marketId, request));
     }
 }

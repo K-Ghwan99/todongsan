@@ -11,6 +11,7 @@ import com.todongsan.insightreputation.visitcertification.entity.VisitCertificat
 import com.todongsan.insightreputation.visitcertification.repository.VisitCertificationRepository;
 import com.todongsan.insightreputation.visitcertification.util.GpsDistanceCalculator;
 import com.todongsan.insightreputation.visitcertification.util.RegionCenterCoordinateProvider;
+import com.todongsan.insightreputation.visitcertification.exception.VisitCertCooldownException;
 import com.todongsan.insightreputation.global.client.BattleClient;
 import com.todongsan.insightreputation.global.client.BattleCommentResponse;
 import com.todongsan.insightreputation.global.client.BattleResponse;
@@ -131,7 +132,7 @@ public class VisitCertificationService {
             if (LocalDateTime.now().isBefore(cooldownExpiry)) {
                 log.warn("방문 인증 쿨다운 미경과: memberId={}, lastCertified={}, cooldownExpiry={}", 
                         memberId, lastCertified, cooldownExpiry);
-                throw new CustomException(ErrorCode.VISIT_CERT_COOLDOWN);
+                throw new VisitCertCooldownException(cooldownExpiry);
             }
         }
 
@@ -209,7 +210,7 @@ public class VisitCertificationService {
             if (LocalDateTime.now().isBefore(cooldownExpiry)) {
                 log.warn("방문 인증 쿨다운 미경과: memberId={}, lastCertified={}, cooldownExpiry={}", 
                         memberId, lastCertified, cooldownExpiry);
-                throw new CustomException(ErrorCode.VISIT_CERT_COOLDOWN);
+                throw new VisitCertCooldownException(cooldownExpiry);
             }
         }
 
@@ -324,7 +325,7 @@ public class VisitCertificationService {
             LocalDateTime lastCertified = existingCert.get().getLastCertifiedAt();
             LocalDateTime cooldownEnd = lastCertified.plusDays(CERTIFICATION_COOLDOWN_DAYS);
             if (LocalDateTime.now().isBefore(cooldownEnd)) {
-                throw new CustomException(ErrorCode.VISIT_CERT_COOLDOWN);
+                throw new VisitCertCooldownException(cooldownEnd);
             }
         }
     }

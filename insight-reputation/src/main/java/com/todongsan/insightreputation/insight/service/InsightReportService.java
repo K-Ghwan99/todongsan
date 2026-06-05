@@ -44,14 +44,62 @@ public class InsightReportService {
     private static final int REPORT_COST = 80;
 
     /**
-     * Battle AI 분석 리포트 생성 요청
+     * Battle AI 분석 자동 트리거 (내부 API)
+     * Battle 종료 시 Battle Service에서 호출
+     * Point 차감 없음
+     * 
+     * @param battleId Battle ID
+     */
+    @Transactional
+    public void triggerBattleReport(Long battleId) {
+        log.info("Battle 자동 트리거 요청: battleId={}", battleId);
+        
+        // 1. 기존 리포트 확인 (중복 트리거 방지)
+        Optional<InsightReport> existingReport = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.BATTLE, battleId);
+        
+        if (existingReport.isPresent()) {
+            InsightReport report = existingReport.get();
+            log.info("기존 리포트 존재로 중복 트리거 무시: reportId={}, status={}, battleId={}", 
+                    report.getId(), report.getStatus(), battleId);
+            return; // 중복 트리거 무시
+        }
+        
+        // 2. Battle 상태 확인 (종료된 Battle만 분석 가능)
+        BattleResponse battleInfo = battleClient.getBattleInfo(battleId);
+        
+        if (!battleInfo.getIsClosed()) {
+            log.warn("종료되지 않은 Battle 자동 트리거: battleId={}, status={}", 
+                    battleId, battleInfo.getStatus());
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_SOURCE_NOT_CLOSED);
+        }
+        
+        // 3. 리포트 레코드 생성 (PENDING 상태, requestedBy는 시스템용으로 0)
+        InsightReport newReport = InsightReport.builder()
+                .type(InsightReportType.BATTLE)
+                .referenceId(battleId)
+                .requestedBy(0L) // 시스템 자동 트리거
+                .status(InsightReportStatus.PENDING)
+                .retryCount(0)
+                .build();
+        
+        InsightReport savedReport = insightReportRepository.save(newReport);
+        log.info("자동 트리거 리포트 레코드 생성: reportId={}, battleId={}", savedReport.getId(), battleId);
+        
+        // 4. 비동기 분석 시작
+        generateBattleReportAsync(savedReport.getId());
+    }
+
+    /**
+     * Battle AI 분석 리포트 생성 요청 (사용자 API - 미사용)
      * 
      * @param memberId 요청 회원 ID
      * @param battleId Battle ID
+     * @param idempotencyKey 멱등성 키
      * @return 리포트 응답
      */
     @Transactional
-    public InsightReportResponse requestBattleReport(Long memberId, Long battleId) {
+    public InsightReportResponse requestBattleReport(Long memberId, Long battleId, String idempotencyKey) {
         log.info("Battle 리포트 생성 요청: memberId={}, battleId={}", memberId, battleId);
         
         // 1. 기존 리포트 확인
@@ -92,8 +140,6 @@ public class InsightReportService {
         }
         
         // 3. Point 차감 (멱등성 키 사용)
-        String idempotencyKey = generateIdempotencyKey(memberId, battleId, "BATTLE");
-        
         try {
             memberPointClient.spendPoints(memberId, REPORT_COST, idempotencyKey);
             log.info("포인트 차감 성공: memberId={}, amount={}, battleId={}", 
@@ -132,7 +178,45 @@ public class InsightReportService {
     }
     
     /**
-     * Battle 리포트 조회
+     * Battle 리포트 관리자 조회 (내부 API)
+     * 
+     * @param battleId Battle ID
+     * @return 리포트 응답
+     */
+    @Transactional(readOnly = true)
+    public InsightReportResponse getAdminBattleReport(Long battleId) {
+        Optional<InsightReport> reportOpt = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.BATTLE, battleId);
+        
+        if (reportOpt.isEmpty()) {
+            throw new CustomException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        
+        InsightReport report = reportOpt.get();
+        
+        // Battle 정보도 함께 조회
+        BattleResponse battleInfo = null;
+        try {
+            battleInfo = battleClient.getBattleInfo(battleId);
+        } catch (Exception e) {
+            log.warn("Battle 정보 조회 실패 (관리자 조회는 계속): battleId={}", battleId, e);
+        }
+        
+        return InsightReportResponse.builder()
+                .reportId(report.getId())
+                .battleId(battleId)
+                .status(report.getStatus().name())
+                .title(battleInfo != null ? battleInfo.getTitle() : null)
+                .summary(report.getSummary())
+                .analysisData(report.getAnalysisData())
+                .generatedAt(report.getGeneratedAt())
+                .retryCount((int) report.getRetryCount())
+                .failedReason(report.getFailedReason())
+                .build();
+    }
+
+    /**
+     * Battle 리포트 조회 (사용자 API - 미사용)
      * 
      * @param battleId Battle ID
      * @return 리포트 응답
@@ -281,7 +365,7 @@ public class InsightReportService {
             );
             
             // 5. Claude API를 통한 분석 수행
-            String analysisResult = claudeApiClient.analyzeBattle(prompt);
+            String analysisResult = claudeApiClient.analyze(prompt);
             
             // 6. 분석 완료 처리
             completeAnalysis(reportId, analysisResult);
@@ -324,7 +408,7 @@ public class InsightReportService {
         
         if (newRetryCount >= InsightReport.MAX_RETRY_COUNT) {
             // 최대 재시도 횟수 초과 → 영구 FAILED
-            report.failPermanently(exception.getMessage());
+            report.fail(exception.getMessage());
             
             // Point 환불 (비동기, 실패해도 비즈니스 연속성 유지)
             try {
@@ -352,10 +436,11 @@ public class InsightReportService {
      * 
      * @param memberId 요청 회원 ID
      * @param marketId Market ID
+     * @param idempotencyKey 멱등성 키
      * @return 리포트 응답
      */
     @Transactional
-    public InsightReportResponse requestMarketReport(Long memberId, Long marketId) {
+    public InsightReportResponse requestMarketReport(Long memberId, Long marketId, String idempotencyKey) {
         log.info("Market 리포트 생성 요청: memberId={}, marketId={}", memberId, marketId);
         
         // 1. 기존 리포트 확인
@@ -387,8 +472,6 @@ public class InsightReportService {
         }
         
         // 2. Point 차감 (멱등성 키 사용) - Market 상태 확인 전에 차감
-        String idempotencyKey = generateIdempotencyKey(memberId, marketId, "MARKET");
-        
         try {
             memberPointClient.spendPoints(memberId, REPORT_COST, idempotencyKey);
             log.info("포인트 차감 성공: memberId={}, amount={}, marketId={}", 
@@ -577,7 +660,7 @@ public class InsightReportService {
             );
             
             // 5. Claude API를 통한 분석 수행
-            String analysisResult = claudeApiClient.analyzeBattle(prompt);
+            String analysisResult = claudeApiClient.analyze(prompt);
             
             // 6. 분석 완료 처리
             completeAnalysis(reportId, analysisResult);
