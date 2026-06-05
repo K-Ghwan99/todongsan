@@ -1,4 +1,4 @@
-# MARKET_FAILURE_SCENARIO_v3.md
+# MARKET_FAILURE_SCENARIO_v4.md
 
 > Market 서비스에서 발생할 수 있는 실패 시나리오와 상태 전이, 재시도 정책, 복구 방식을 정의한다.  
 > 이 문서는 `MARKET_ERROR_CODE.md`와 `MARKET_API_SPEC.md` 작성 전 기준 문서로 사용한다.  
@@ -14,6 +14,7 @@ Market 서비스는 다음 흐름을 가진다.
 
 ```text
 Market 생성
+→ 예측 참여 Quote 조회
 → 예측 참여
 → 포인트 차감
 → Market 마감
@@ -235,11 +236,20 @@ MarketPriceHistory
 MarketPrediction
 ```
 
+Market MVP는 Polymarket식 주문장 기반 CLOB 모델이 아니라 Pool Share 기반 즉시 참여형 예측시장 모델이다.
+사용자는 order, bid, ask, limit order를 등록하지 않고 현재 Pool Share 가격 기준으로 즉시 예측에 참여한다.
+
 Pool-Share 방식의 가격 계산은 선택한 옵션 하나만 보지 않는다.
 
 ```text
-선택지 가격 = 해당 선택지 pool / 전체 선택지 pool 합
+optionEffectivePoolAmount = realPoolAmount + virtualPoolAmount
+totalEffectivePoolAmount = sum(all optionEffectivePoolAmount)
+currentPrice = optionEffectivePoolAmount / totalEffectivePoolAmount
 ```
+
+`realPoolAmount`는 실제 참여 포인트 누적합이고, `virtualPoolAmount`는 가격 계산에만 쓰는 가상 유동성이다.
+`market.total_pool`과 정산/Insight의 `totalPoolAmount`는 실제 참여 포인트 총합이며, `virtualPoolAmount`를 포함하지 않는다.
+가격 계산용 전체 pool은 `totalEffectivePoolAmount`라고 표현한다.
 
 따라서 선택한 MarketOption row만 락 잡는 방식은 사용하지 않는다.
 
@@ -349,7 +359,7 @@ SETTLED
 
 ---
 
-### 3-8. Scheduler는 chunk 단위로 처리한다
+### 3-9. Scheduler는 chunk 단위로 처리한다
 
 대사, 정산 재시도, 환불 재시도는 한 번에 전체 대상을 처리하지 않는다.
 
@@ -367,7 +377,7 @@ SETTLED
 
 ---
 
-### 3-9. Decimal 데이터는 String으로 응답한다
+### 3-10. Decimal 데이터는 String으로 응답한다
 
 가격, 계약 수량, 포인트 금액, 정산 금액 등 소수점 정밀도가 중요한 값은 응답 DTO에서 `BigDecimal`로 유지한다.
 JSON 직렬화 시 기본적으로 JSON Number가 아니라 String으로 응답한다.
@@ -388,7 +398,7 @@ refundAmount
 
 ---
 
-### 3-10. Member-Point 연동 referenceType 정책
+### 3-11. Member-Point 연동 referenceType 정책
 
 Market이 Member-Point API를 호출할 때는 다음 값을 전달한다.
 
@@ -414,7 +424,184 @@ Market DB에는 이미 prediction_id가 있으므로 reference_type/reference_id
 
 ---
 
+
+### 3-12. Quote는 확정 견적이 아니라 미리보기다
+
+예측 참여 전 사용자는 Quote API로 현재 가격 기준 예상 결과를 확인할 수 있다.
+
+```text
+Quote 조회
+→ 현재 가격 확인
+→ 예상 계약 수량 확인
+→ 참여 후 예상 가격 확인
+→ 가격 영향도 확인
+```
+
+Quote API는 다음 작업을 수행하지 않는다.
+
+```text
+1. Prediction 생성 안 함
+2. Member-Point 포인트 차감 안 함
+3. 포인트 잔액 조회 안 함
+4. MarketOption pool 변경 안 함
+5. PriceHistory 저장 안 함
+6. market_prediction 상태 변경 안 함
+```
+
+따라서 Quote API 실패는 Market 또는 Prediction 상태를 변경하지 않는다.
+
+Quote 결과는 확정 체결 결과가 아니다.
+실제 예측 참여는 포인트 차감 성공 후 가격 확정 트랜잭션에서 Market row와 모든 option row lock을 획득한 시점의 최신 Pool 상태를 기준으로 확정된다.
+
+```text
+Quote 조회 시점 currentPrice = 0.20000000
+다른 사용자가 먼저 참여하여 가격 변경
+실제 예측 참여 확정 시점 priceSnapshot = 0.23000000
+```
+
+MVP에서는 빠른 참여 경험을 우선하여 slippage tolerance를 필수로 두지 않는다.
+클라이언트는 실제 참여 시점 가격이 달라질 수 있음을 안내한다.
+
+```text
+현재 가격은 실시간으로 변동될 수 있으며, 실제 참여 시점의 가격 기준으로 계약 수량이 확정됩니다.
+```
+
+Quote API는 `SELECT ... FOR UPDATE`를 사용하지 않는다.
+일반 SELECT로 현재 Market과 option 상태를 조회하며, 실제 예측 참여 API에서만 Market row와 모든 option row를 `FOR UPDATE`로 잠근다.
+Quote API는 `market_price_history`를 읽거나 쓰지 않는다.
+따라서 PriceHistory v4 schema/migration 및 저장 정책 확정과 독립적으로 구현할 수 있다.
+
+---
+
 ## 4. 예측 참여 실패 시나리오
+
+
+### 4-0. 예측 참여 Quote 조회
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 사용자가 예측 참여 전 예상 결과 조회 |
+| 조건 | Market ACTIVE, closeAt > now, 선택지 정상, 포인트 금액 정상, currentPrice > 0, totalEffectivePoolAmount > 0 |
+| 처리 | 현재 Pool 상태 기준으로 예상 계약 수량, 참여 후 예상 가격, 가격 영향도 계산 |
+| 상태 변화 | 없음 |
+| Prediction 생성 | 없음 |
+| Member-Point 호출 | 없음 |
+| 포인트 차감 | 수행하지 않음 |
+| MarketOption pool 변경 | 없음 |
+| PriceHistory 저장 | 수행하지 않음 |
+| DB lock | `SELECT ... FOR UPDATE` 사용하지 않음 |
+| 재시도 | 필요 없음 |
+| 관련 ErrorCode | 없음 |
+
+주의:
+
+```text
+Quote API는 확정 견적이 아니다.
+실제 예측 참여 시점의 최신 가격에 따라 priceSnapshot과 contractQuantity가 달라질 수 있다.
+```
+
+---
+
+### 4-0-1. Quote 조회 중 Market 없음
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Quote API 요청 |
+| 실패 원인 | marketId에 해당하는 Market 없음 |
+| 상태 변화 | 없음 |
+| Prediction 생성 | 없음 |
+| Member-Point 호출 | 없음 |
+| MarketOption pool 변경 | 없음 |
+| PriceHistory 저장 | 없음 |
+| 재시도 | 올바른 marketId로 가능 |
+| 관련 ErrorCode | MARKET_NOT_FOUND |
+
+---
+
+### 4-0-2. Quote 조회 중 Market ACTIVE 아님
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Quote API 요청 |
+| 실패 원인 | Market.status != ACTIVE |
+| 상태 변화 | 없음 |
+| Prediction 생성 | 없음 |
+| Member-Point 호출 | 없음 |
+| MarketOption pool 변경 | 없음 |
+| PriceHistory 저장 | 없음 |
+| 재시도 | Market이 ACTIVE가 된 뒤 가능 |
+| 관련 ErrorCode | MARKET_NOT_ACTIVE |
+
+---
+
+### 4-0-3. Quote 조회 중 Market 마감됨
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Quote API 요청 |
+| 실패 원인 | Market.status = ACTIVE 이지만 closeAt <= now |
+| 상태 변화 | 없음 |
+| Prediction 생성 | 없음 |
+| Member-Point 호출 | 없음 |
+| MarketOption pool 변경 | 없음 |
+| PriceHistory 저장 | 없음 |
+| 재시도 | X |
+| 관련 ErrorCode | MARKET_CLOSED |
+
+---
+
+### 4-0-4. Quote 조회 중 option 오류
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Quote API 요청 |
+| 실패 원인 | option 없음 또는 option이 해당 Market에 속하지 않음 |
+| 상태 변화 | 없음 |
+| Prediction 생성 | 없음 |
+| Member-Point 호출 | 없음 |
+| MarketOption pool 변경 | 없음 |
+| PriceHistory 저장 | 없음 |
+| 재시도 | 올바른 option으로 가능 |
+| 관련 ErrorCode | MARKET_OPTION_NOT_FOUND |
+
+---
+
+### 4-0-5. Quote 조회 중 pointAmount 오류
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Quote API 요청 |
+| 실패 원인 | pointAmount가 0 이하, 최소 금액 미만, 최대 금액 초과, 허용 소수점 자리수 위반 |
+| 상태 변화 | 없음 |
+| Prediction 생성 | 없음 |
+| Member-Point 호출 | 없음 |
+| MarketOption pool 변경 | 없음 |
+| PriceHistory 저장 | 없음 |
+| 재시도 | 올바른 금액으로 가능 |
+| 관련 ErrorCode | MARKET_INVALID_BET_AMOUNT |
+
+Quote API의 pointAmount 검증은 실제 예측 참여 API의 pointAmount 검증 정책과 동일하게 유지한다.
+구현 시 기존 예측 참여 API의 금액 검증 상수 또는 검증 로직이 있다면 Quote API도 이를 재사용한다.
+
+---
+
+### 4-0-6. Quote 계산 불가능한 pool 데이터
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Quote API 계산 |
+| 실패 원인 | currentPrice <= 0 또는 totalEffectivePoolAmount <= 0 |
+| 상태 변화 | 없음 |
+| Prediction 생성 | 없음 |
+| Member-Point 호출 | 없음 |
+| MarketOption pool 변경 | 없음 |
+| PriceHistory 저장 | 없음 |
+| 재시도 | 관리자 데이터 보정 후 가능 |
+| 관련 ErrorCode | MARKET_INVALID_OPTION |
+
+Quote API는 Prediction을 생성하지 않으므로 `POINT_PENDING`, `FAILED`, `POINT_UNKNOWN` 상태가 발생하지 않는다.
+
+---
 
 ### 4-1. 정상 예측 참여
 
@@ -1277,6 +1464,7 @@ Controller를 HTTP로 호출하지 않고 기존 Service를 직접 호출한다.
 |---|---|---:|---:|
 | 예측 차감 대사 | `PredictionSpendReconciliationService.reconcile(limit)` | 60초 | 100 |
 | 정산 재시도 | `MarketSettlementService.retryFailedSettlements(limit)` | 180초 | 50 |
+| 환불 재시도 | `MarketRefundService.retryFailedRefunds(limit)` | 180초 | 50 |
 
 예시:
 
@@ -1393,8 +1581,111 @@ Market Service는 조회 API이므로 별도 보상 트랜잭션을 수행하지
 
 ---
 
+## 14. PriceHistory 실패 시나리오
 
-## 14. 관리자 확인 대상
+PriceHistory는 프론트엔드의 선택지별 가격 그래프를 위한 원천 데이터다.
+정산/환불 금액 계산의 원천 데이터가 아니며, 정산은 `market_prediction`, `market_settlement`, `market_settlement_detail`을 기준으로 한다.
+환불은 `market_prediction.point_amount`, `market_refund_detail`을 기준으로 한다.
+
+### 14-1. 정상 PriceHistory 조회
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 사용자가 가격 이력 조회 |
+| 조건 | Market 존재, optionId가 있으면 해당 Market 소속 |
+| 처리 | PriceHistory row를 `createdAt ASC, historyId ASC` 순서로 조회 |
+| 상태 변화 | 없음 |
+| Member-Point 호출 | 없음 |
+| 재시도 | 필요 없음 |
+| 관련 ErrorCode | 없음 |
+
+응답은 flat list를 유지한다.
+`optionId`가 없으면 모든 option history row를 시간순으로 반환하고, 프론트엔드는 optionId 기준으로 grouping하여 option별 가격 그래프를 그린다.
+
+---
+
+### 14-2. PriceHistory 조회 대상 Market 없음
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 가격 이력 조회 |
+| 실패 원인 | marketId에 해당하는 Market 없음 |
+| 상태 변화 | 없음 |
+| 재시도 | X |
+| 관련 ErrorCode | MARKET_NOT_FOUND |
+| HTTP Status | 404 |
+
+---
+
+### 14-3. PriceHistory 조회 option 오류
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 가격 이력 조회 |
+| 실패 원인 | optionId가 존재하지 않거나 해당 Market 소속이 아님 |
+| 상태 변화 | 없음 |
+| 재시도 | 올바른 optionId로 가능 |
+| 관련 ErrorCode | MARKET_OPTION_NOT_FOUND |
+| HTTP Status | 404 |
+
+---
+
+### 14-4. Prediction CONFIRMED 중 PriceHistory insert 실패
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 예측 참여 가격 확정 트랜잭션 |
+| 실패 원인 | 모든 option PriceHistory insert 중 DB 오류 발생 |
+| 상태 변화 | 가격 확정 트랜잭션 전체 rollback |
+| Prediction 상태 | CONFIRMED로 전환되지 않아야 함 |
+| 복구 방식 | 필요 시 POINT_PENDING 또는 POINT_UNKNOWN 대사 대상 |
+| 관련 ErrorCode | MARKET_PRICE_UPDATE_CONFLICT 또는 INTERNAL_ERROR |
+
+PriceHistory insert는 Prediction CONFIRMED 가격 확정 트랜잭션 안에서 수행한다.
+history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
+중요한 기준은 `Prediction CONFIRMED인데 PriceHistory만 누락`되는 상태를 만들지 않는 것이다.
+
+저장 흐름:
+
+```text
+1. Market row FOR UPDATE
+2. 해당 Market의 모든 option row를 id 오름차순 FOR UPDATE
+3. 모든 option의 이벤트 전 snapshot을 메모리에 보관
+   - priceBefore
+   - realPoolBefore
+   - contractQuantityBefore
+4. 선택한 option의 realPoolAmount 증가
+5. 선택한 option의 totalContractQuantity 증가
+6. totalEffectivePoolAmount 재계산
+7. 모든 option의 currentPrice 재계산
+8. 모든 option의 이벤트 후 snapshot을 만든다.
+   - priceAfter
+   - realPoolAfter
+   - contractQuantityAfter
+9. 모든 option에 대해 market_price_history row를 insert한다.
+10. Prediction.status = CONFIRMED
+```
+
+---
+
+### 14-5. PriceHistory 조회 결과 없음
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 가격 이력 조회 |
+| 조건 | 아직 CONFIRMED Prediction이 없는 Market |
+| 처리 | 실패가 아니라 빈 page 반환 |
+| 상태 변화 | 없음 |
+| 관련 ErrorCode | 없음 |
+
+초기 가격은 PriceHistory row로 저장하지 않는다.
+초기 가격은 Market 상세 조회의 `initialPrice`를 사용한다.
+프론트엔드가 그래프 시작점을 초기 가격부터 보여주고 싶다면 `initialPrice`를 시작점으로 사용하고, 이후 PriceHistory의 `priceAfter`를 시간순으로 연결한다.
+
+---
+
+
+## 15. 관리자 확인 대상
 
 | 상황 | 상태 |
 |---|---|
@@ -1410,9 +1701,9 @@ Market Service는 조회 API이므로 별도 보상 트랜잭션을 수행하지
 
 ---
 
-## 15. Retry 정책 요약
+## 16. Retry 정책 요약
 
-### 15-1. 재시도 대상
+### 16-1. 재시도 대상
 
 | 상황 | Retry | 이유 |
 |---|---:|---|
@@ -1429,7 +1720,7 @@ Market Service는 조회 API이므로 별도 보상 트랜잭션을 수행하지
 
 ---
 
-### 15-2. 재시도 금지 대상
+### 16-2. 재시도 금지 대상
 
 | 상황 | Retry | 이유 |
 |---|---:|---|
@@ -1447,8 +1738,12 @@ Market Service는 조회 API이므로 별도 보상 트랜잭션을 수행하지
 
 ---
 
-## 16. 최종 완료 기준
+## 17. 최종 완료 기준
 
+- [ ] Quote API는 예상 계약 수량, 참여 후 예상 가격, 가격 영향도를 제공한다.
+- [ ] Quote API는 Prediction 생성, 포인트 차감, 잔액 조회, price_history 저장을 수행하지 않는다.
+- [ ] Quote 결과는 확정 체결 결과가 아니며 실제 예측 참여는 최신 Pool 상태 기준으로 확정한다.
+- [ ] MVP에서는 slippage tolerance를 필수로 두지 않고 가격 변동 안내 문구를 제공한다.
 - [ ] 예측 참여 시 Prediction을 먼저 `POINT_PENDING`으로 저장하고 커밋한다.
 - [ ] DB 락을 잡은 상태로 Member-Point HTTP API를 호출하지 않는다.
 - [ ] 포인트 차감 성공 후 가격 확정 트랜잭션까지 완료되면 `CONFIRMED`로 변경한다.
@@ -1462,6 +1757,9 @@ Market Service는 조회 API이므로 별도 보상 트랜잭션을 수행하지
 - [ ] 가격 확정 트랜잭션은 Market row와 해당 Market의 모든 MarketOption row를 고정 순서로 비관적 락 조회한다.
 - [ ] Decimal 필드는 JSON String으로 응답한다.
 - [ ] 가격 이력 조회는 페이징한다.
+- [ ] Prediction CONFIRMED 시 모든 option에 대해 PriceHistory row를 생성한다.
+- [ ] PriceHistory insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
+- [ ] 초기 가격은 PriceHistory row가 아니라 Market 상세 조회의 initialPrice로 제공한다.
 - [ ] Client는 502/503/504 수신 시 polling으로 최종 상태를 확인한다.
 - [ ] 공공 데이터는 예상 수집일로부터 최대 3일간 `DATA_PENDING`으로 유지한다.
 - [ ] 정산 시작은 Atomic Update로 `SETTLEMENT_IN_PROGRESS` 권한을 획득한다.

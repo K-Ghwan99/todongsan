@@ -19,3 +19,5 @@ market:
       enabled: false
     settlement-retry:
       enabled: false
+    refund-retry:
+      enabled: false

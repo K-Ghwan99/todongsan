@@ -158,6 +158,12 @@ public class MarketRefundTransactionService {
         return new MarketRefundRetryPreparation(marketId, marketVoid.getId(), retryDetails, false);
     }
 
+    @Transactional(readOnly = true)
+    public List<Long> selectMarketIdsForRefundRetry(int limit) {
+        LocalDateTime pendingThreshold = LocalDateTime.now().minusMinutes(RETRY_PENDING_THRESHOLD_MINUTES);
+        return marketMapper.selectMarketIdsForRefundRetry(pendingThreshold, limit);
+    }
+
     @Transactional
     public RefundMarketResponse applyRefundRetryResult(
             MarketRefundRetryPreparation preparation,

@@ -1,4 +1,4 @@
-# MARKET_ERROR_CODE.md
+# MARKET_ERROR_CODE_v4.md
 
 > Market 서비스에서 발생할 수 있는 도메인 비즈니스 에러와 실패 처리 정책을 정의한다.  
 > 공통 요청 오류, 인증/인가 오류, 서버 내부 오류, 서비스 간 통신 오류는 루트 `ERROR_POLICY.md`의 공통 ErrorCode를 따른다.  
@@ -23,6 +23,11 @@ Market 서비스의 에러 처리는 다음 원칙을 따른다.
 11. 가격 확정 트랜잭션은 Market row와 해당 Market의 모든 MarketOption row를 고정 순서로 비관적 락 조회한다.
 12. 정산/환불은 batch API를 유지하되 item별 idempotencyKey로 멱등성을 보장한다.
 13. Decimal 필드는 API 응답에서 String으로 내려준다.
+14. Quote API는 미리보기 계산만 수행하며 Prediction 생성, 포인트 차감, 잔액 조회, 가격 이력 저장을 하지 않는다.
+15. MVP에서는 slippage tolerance를 필수로 두지 않고, 실제 참여 시점 가격이 Quote와 달라질 수 있음을 안내한다.
+16. Market MVP는 Polymarket식 CLOB이 아니라 Pool Share 기반 즉시 참여형 예측시장이다.
+17. `market.total_pool`과 정산/Insight의 `totalPoolAmount`는 실제 참여 포인트 총합이며, `virtualPoolAmount`를 포함하지 않는다.
+18. 가격 계산용 전체 pool은 `totalEffectivePoolAmount`로 표현한다.
 
 ---
 
@@ -162,7 +167,34 @@ refundAmount
 
 ---
 
-## 5-1. Member-Point referenceType 정책
+## 5-1. Pool Share 용어 정책
+
+Market MVP는 Polymarket식 주문장 기반 CLOB 모델이 아니다.
+사용자는 order, bid, ask, limit order를 등록하지 않고 현재 Pool Share 가격 기준으로 즉시 예측에 참여한다.
+
+```text
+optionEffectivePoolAmount = realPoolAmount + virtualPoolAmount
+totalEffectivePoolAmount = sum(all optionEffectivePoolAmount)
+currentPrice = optionEffectivePoolAmount / totalEffectivePoolAmount
+```
+
+용어 기준:
+
+| 용어 | 의미 |
+|---|---|
+| `realPoolAmount` | 실제 사용자가 예측 참여에 사용한 포인트 누적합 |
+| `virtualPoolAmount` | Market 생성 시 선택지별로 부여하는 가상 유동성 |
+| `effectivePoolAmount` | `realPoolAmount + virtualPoolAmount` |
+| `totalRealPoolAmount` | 모든 option의 `realPoolAmount` 합 |
+| `totalVirtualPoolAmount` | 모든 option의 `virtualPoolAmount` 합 |
+| `totalEffectivePoolAmount` | 가격 계산용 전체 유효 풀 |
+| `market.total_pool` | 실제 참여 포인트 총합. `virtualPoolAmount`를 포함하지 않음 |
+| 정산 `totalPool` | CONFIRMED Prediction `pointAmount` 합. 실제 참여 포인트 총합 |
+| Insight `totalPoolAmount` | 실제 참여 포인트 총합 |
+
+---
+
+## 5-2. Member-Point referenceType 정책
 
 Market이 Member-Point API를 호출할 때는 다음 값을 전달한다.
 
@@ -210,6 +242,88 @@ Market DB에는 이미 prediction_id가 있으므로 reference_type/reference_id
 
 ---
 
+
+## 6-1. 예측 참여 Quote 관련 ErrorCode
+
+```http
+POST /api/v1/markets/{marketId}/predictions/quote
+```
+
+Quote API는 현재 가격 기준의 예상 결과만 계산한다.
+Prediction을 생성하지 않고 Member-Point Service를 호출하지 않으므로 포인트 차감 관련 ErrorCode는 발생하지 않는다.
+Quote 실패는 Market, MarketOption, Prediction 상태를 변경하지 않는다.
+
+성공 조건:
+
+```text
+1. Market 존재
+2. Market.status = ACTIVE
+3. Market.closeAt > now
+4. marketOptionId 존재
+5. marketOptionId가 해당 marketId에 속함
+6. pointAmount 유효
+7. currentPrice > 0
+8. totalEffectivePoolAmount > 0
+```
+
+ErrorCode 매핑:
+
+| 상황 | ErrorCode | HTTP Status | 상태 변화 |
+|---|---|---:|---|
+| Market 없음 | `MARKET_NOT_FOUND` | 404 | 없음 |
+| Market.status != ACTIVE | `MARKET_NOT_ACTIVE` | 409 | 없음 |
+| ACTIVE지만 closeAt <= now | `MARKET_CLOSED` | 409 | 없음 |
+| option 없음 | `MARKET_OPTION_NOT_FOUND` | 404 | 없음 |
+| option이 해당 Market에 속하지 않음 | `MARKET_OPTION_NOT_FOUND` | 404 | 없음 |
+| pointAmount 오류 | `MARKET_INVALID_BET_AMOUNT` | 400 | 없음 |
+| currentPrice <= 0 | `MARKET_INVALID_OPTION` | 400 | 없음 |
+| totalEffectivePoolAmount <= 0 | `MARKET_INVALID_OPTION` | 400 | 없음 |
+
+pointAmount 검증은 실제 예측 참여 API와 동일하게 최소/최대 금액, 양수 여부, 허용 소수점 자리수를 확인한다.
+Quote에서 허용된 금액이 실제 예측 참여에서 거부되거나, 실제 예측 참여에서 허용되는 금액이 Quote에서 거부되지 않도록 두 API의 검증 정책을 동기화한다.
+현재 정책은 최소 10P, 최대 500P, 소수점 둘째 자리까지 허용이다.
+구현 시 기존 예측 참여 API의 금액 검증 상수 또는 검증 로직이 있다면 Quote API도 이를 재사용한다.
+
+구현 주의:
+
+```text
+Quote API는 currentPrice <= 0 또는 totalEffectivePoolAmount <= 0인 데이터 정합성 오류 상황에서 MARKET_INVALID_OPTION을 사용한다.
+만약 코드 enum에 MARKET_INVALID_OPTION이 없다면, 이는 새 정책 추가가 아니라 문서에 이미 정의된 ErrorCode의 구현 누락 보정으로 보고 동기화한다.
+새로운 ErrorCode를 임의로 만들지 않는다.
+```
+
+Quote API에서 새 ErrorCode는 추가하지 않는다.
+MVP에서는 slippage tolerance를 필수로 입력받지 않으므로 `MARKET_PRICE_CHANGED` 같은 별도 ErrorCode를 두지 않는다.
+실제 참여 시점의 가격이 Quote 결과와 다를 수 있다는 안내 문구로 처리한다.
+
+---
+
+## 6-2. 가격 이력 조회 관련 ErrorCode
+
+```http
+GET /api/v1/markets/{marketId}/price-history?page=0&size=50&optionId=1
+```
+
+가격 이력 조회는 상태를 변경하지 않는 조회 API다.
+PriceHistory는 정산/환불 금액 계산의 원천 데이터가 아니며, 프론트엔드 가격 그래프를 위한 원천 데이터다.
+
+사용 ErrorCode:
+
+| 상황 | ErrorCode | HTTP Status | 상태 변화 |
+|---|---|---:|---|
+| Market 없음 | `MARKET_NOT_FOUND` | 404 | 없음 |
+| optionId가 존재하지 않거나 해당 Market 소속이 아님 | `MARKET_OPTION_NOT_FOUND` | 404 | 없음 |
+
+정책:
+
+```text
+새 ErrorCode를 추가하지 않는다.
+조회 결과가 없으면 실패가 아니라 빈 page를 반환한다.
+priceBefore <= 0 같은 데이터 정합성 오류가 조회 중 발견되면 서버 내부 오류 또는 기존 MARKET_INVALID_OPTION을 사용할 수 있지만, 정상 생성된 데이터에서는 발생하지 않아야 한다.
+문서상 기본 실패 케이스는 Market 없음, option 없음/소속 불일치로 제한한다.
+```
+
+---
 ## 7. 선택지 검증 관련 ErrorCode
 
 | ErrorCode | HTTP Status | 설명 | Retry | 상태 변화 |
@@ -761,6 +875,10 @@ Insight-Reputation Service:
 - [ ] Decimal 필드는 JSON String으로 응답한다.
 - [ ] Member-Point API 요청 시 referenceType=MARKET_PREDICTION, referenceId=predictionId를 전달한다.
 - [ ] 가격 이력 조회 API는 페이징한다.
+- [ ] Quote API는 기존 ErrorCode를 재사용하고 새 ErrorCode를 추가하지 않는다.
+- [ ] Quote API는 Prediction 생성, 포인트 차감, 잔액 조회, 가격 이력 저장을 수행하지 않는다.
+- [ ] MVP에서는 slippage tolerance 관련 ErrorCode를 추가하지 않는다.
+- [ ] 실제 예측 참여는 Quote가 아니라 최신 Pool 상태 기준으로 확정한다.
 - [ ] 정산 시작은 Atomic Update로 처리한다.
 - [ ] 정산 일부 실패 시 `SETTLEMENT_IN_PROGRESS` 상태를 유지하고 item별 idempotencyKey 기준으로 실패 건만 재시도한다.
 - [ ] `SETTLEMENT_IN_PROGRESS`, `SETTLED` 상태는 VOIDED 처리할 수 없다.
