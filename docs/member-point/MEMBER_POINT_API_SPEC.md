@@ -581,7 +581,7 @@ Market이 포인트 차감 요청 후 Timeout 발생 시 처리 여부를 확인
 |---|---|---|
 | `PROCESSED` | 차감 성공 (point_history.status = SUCCEEDED) | 가격 확정 트랜잭션 재시도 후 Prediction CONFIRMED |
 | `FAILED` | 차감 시도했으나 실패 (point_history.status = FAILED, 예: POINT_INSUFFICIENT) | Prediction FAILED |
-| `NOT_FOUND` | 처리 이력 없음 (point_history 미존재) | 정책에 따라 재차감 또는 UNKNOWN 유지 |
+| `NOT_FOUND` | 처리 이력 없음 (point_history 미존재) | 자동 재차감하지 않고 Prediction FAILED |
 
 > **Market Scheduler 처리 원칙**: 조회 자체가 timeout/5xx인 경우 Prediction POINT_UNKNOWN 유지.
 
@@ -672,9 +672,12 @@ X-Member-Id: {memberId}
 
 | 에러 코드 | 상황 |
 |---|---|
-| NOT_FOUND | 회원 없음 |
-| DUPLICATE_REQUEST | 동일 idempotency_key 중복 요청 |
-| INTERNAL_ERROR | 포인트 처리 오류 |
+| `IDEMPOTENCY_KEY_REQUIRED` | Idempotency-Key 헤더 누락 |
+| `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 요청 내용 다름 |
+| `POINT_TRANSACTION_ALREADY_PROCESSED` | 동일 키 + 동일 요청 재시도 |
+| `MEMBER_NOT_FOUND` | memberId에 해당하는 회원 없음 |
+| `POINT_INVALID_AMOUNT` | amount <= 0 |
+| `POINT_INVALID_REFERENCE_TYPE` | 유효하지 않은 referenceType |
 
 ---
 
@@ -753,9 +756,13 @@ X-Member-Id: {memberId}
 
 | 에러 코드 | 상황 |
 |---|---|
-| POINT_INSUFFICIENT | member.point_balance 부족 |
-| NOT_FOUND | 회원 없음 |
-| DUPLICATE_REQUEST | 중복 요청 |
+| `IDEMPOTENCY_KEY_REQUIRED` | Idempotency-Key 헤더 누락 |
+| `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 요청 내용 다름 |
+| `POINT_TRANSACTION_ALREADY_PROCESSED` | 동일 키 + 동일 요청 재시도 |
+| `MEMBER_NOT_FOUND` | memberId에 해당하는 회원 없음 |
+| `POINT_INSUFFICIENT` | point_balance 부족 |
+| `POINT_INVALID_AMOUNT` | amount <= 0 |
+| `POINT_INVALID_REFERENCE_TYPE` | 유효하지 않은 referenceType |
 
 ---
 

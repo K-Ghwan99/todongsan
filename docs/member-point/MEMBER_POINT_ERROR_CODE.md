@@ -44,7 +44,7 @@
 |---|---|---|---|---|---|---|
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | Idempotency-Key 헤더가 필요합니다. | 포인트 변경 API 호출 시 Idempotency-Key 헤더 누락 | X | 변경 없음 | 호출 측 코드 수정 필요 |
 | `POINT_TRANSACTION_ALREADY_PROCESSED` | 200 | 이미 처리된 요청입니다. | 동일 Idempotency-Key + 동일 요청 내용 재시도 | X | 변경 없음, 기존 처리 결과 반환 | 기존 응답 그대로 처리 |
-| `IDEMPOTENCY_KEY_CONFLICT` | 409 | 동일한 키로 다른 내용의 요청이 들어왔습니다. | 동일 Idempotency-Key인데 request_hash 불일치 (memberId/type/amount/referenceId 중 하나라도 다름) | X | 변경 없음 | 호출 측에서 키 재생성 후 재시도 |
+| `IDEMPOTENCY_KEY_CONFLICT` | 409 | 동일한 키로 다른 내용의 요청이 들어왔습니다. | 동일 Idempotency-Key인데 request_hash 불일치 (memberId/type/amount/referenceType/referenceId 중 하나라도 다름) | X | 변경 없음 | 호출 측에서 키 재생성 후 재시도 |
 
 ---
 
@@ -309,7 +309,7 @@ MEMBER_NOT_FOUND 또는 INTERNAL_ERROR 발생
 
 ```sql
 -- point_history.idempotency_key UNIQUE 제약 (중복 처리 방지)
-idempotency_key VARCHAR(100) UNIQUE
+idempotency_key VARCHAR(150) UNIQUE
 
 -- request_hash: 요청 내용의 SHA-256 해시 (충돌 감지용)
 -- SHA-256(memberId + "|" + type + "|" + amount + "|" + referenceType + "|" + referenceId)
