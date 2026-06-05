@@ -27,15 +27,15 @@
         ├── /api/v1/markets/**   ──→ market-service:8082
         └── /api/v1/insights/**  ──→ insight-reputation-service:8083
 
-[서비스 간 직접 호출 — Gateway 통과 안 함]
+[서비스 간 직접 호출 — Gateway 통과 안 함 / /internal/** 경로 사용]
 
-battle-service            ──→ member-point-service:8080         (포인트 적립)
-battle-service            ──→ insight-reputation-service:8083   (활동 점수)
-market-service            ──→ member-point-service:8080         (포인트 차감/정산/환불)
-market-service            ──→ insight-reputation-service:8083   (예측 정확도)
-insight-reputation-service ──→ member-point-service:8080        (회원 배치 조회/포인트)
-insight-reputation-service ──→ battle-service:8081              (투표 원본 데이터)
-insight-reputation-service ──→ market-service:8082              (예측/정산 데이터)
+battle-service            ──→ member-point-service:8080         POST /internal/api/v1/points/earn
+battle-service            ──→ insight-reputation-service:8083   POST /internal/api/v1/reputations/activity
+market-service            ──→ member-point-service:8080         POST /internal/api/v1/points/spend|settlements|refunds
+market-service            ──→ insight-reputation-service:8083   POST /internal/api/v1/reputations/prediction
+insight-reputation-service ──→ member-point-service:8080        POST /internal/api/v1/members/batch
+insight-reputation-service ──→ battle-service:8081              GET  /internal/api/v1/battles/{id}/votes/raw
+insight-reputation-service ──→ market-service:8082              GET  /internal/api/v1/markets/{id}/summary
 
 [DB — 모든 서비스가 외부 RDS에 직접 연결]
 
@@ -140,18 +140,23 @@ public class JwtAuthenticationFilter implements GlobalFilter {
 서비스 간 직접 호출. JWT 없이 내부 포트로 직접 호출한다.
 **각 서비스는 이 경로들을 `permitAll`로 설정해야 한다.**
 
+> **[내부 API 경로 전략]** 내부 연계 API는 `/internal/` 접두사를 붙인다.
+> Gateway 라우팅 규칙에 `/internal/**` 경로가 없으므로, 외부에서 Gateway를 통해 이 경로에
+> 접근하면 자동으로 404가 반환된다.
+> 별도 인증 차단 없이도 외부 접근이 구조적으로 막힌다.
+
 | 경로 | 메서드 | 호출 방향 | 설명 |
 |---|---|---|---|
-| `/api/v1/members/batch` | POST | Insight → Member-Point | 회원 배치 조회 |
-| `/api/v1/points/earn` | POST | Battle → Member-Point | 포인트 적립 |
-| `/api/v1/points/spend` | POST | Market/Insight → Member-Point | 포인트 차감 |
-| `/api/v1/points/settlements` | POST | Market → Member-Point | 포인트 정산 |
-| `/api/v1/points/refunds` | POST | Market/Insight → Member-Point | 포인트 환불 |
-| `/api/v1/points/transactions` | GET | Market → Member-Point | 거래 상태 조회 |
-| `/api/v1/reputations/activity` | POST | Battle → Insight | 활동 점수 업데이트 |
-| `/api/v1/reputations/prediction` | POST | Market → Insight | 예측 정확도 업데이트 |
-| `/api/v1/battles/{battleId}/votes/raw` | GET | Insight → Battle | 투표 원본 데이터 조회 |
-| `/api/v1/markets/{marketId}/summary` | GET | Insight → Market | 예측/정산 데이터 조회 |
+| `/internal/api/v1/members/batch` | POST | Insight → Member-Point | 회원 배치 조회 |
+| `/internal/api/v1/points/earn` | POST | Battle → Member-Point | 포인트 적립 |
+| `/internal/api/v1/points/spend` | POST | Market/Insight → Member-Point | 포인트 차감 |
+| `/internal/api/v1/points/settlements` | POST | Market → Member-Point | 포인트 정산 |
+| `/internal/api/v1/points/refunds` | POST | Market/Insight → Member-Point | 포인트 환불 |
+| `/internal/api/v1/points/transactions` | GET | Market → Member-Point | 거래 상태 조회 |
+| `/internal/api/v1/reputations/activity` | POST | Battle → Insight | 활동 점수 업데이트 |
+| `/internal/api/v1/reputations/prediction` | POST | Market → Insight | 예측 정확도 업데이트 |
+| `/internal/api/v1/battles/{battleId}/votes/raw` | GET | Insight → Battle | 투표 원본 데이터 조회 |
+| `/internal/api/v1/markets/{marketId}/summary` | GET | Insight → Market | 예측/정산 데이터 조회 |
 
 ---
 
@@ -393,10 +398,10 @@ REB_API_BASE_URL=https://...
 
 ```
 [ ] server.port: 8080 (현재 일치)
-[ ] 내부 API permitAll 확인 (SecurityConfig)
-      /api/v1/members/batch
-      /api/v1/points/earn, /spend, /settlements, /refunds
-      GET /api/v1/points/transactions
+[ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
+      @RequestMapping: /internal/api/v1/members/batch
+      @RequestMapping: /internal/api/v1/points/earn, /spend, /settlements, /refunds, /transactions
+[ ] SecurityConfig에서 /internal/** permitAll 설정
 [ ] DB_URL → RDS 엔드포인트로 변경
 ```
 
@@ -405,8 +410,9 @@ REB_API_BASE_URL=https://...
 ```
 [ ] server.port: 8081 권장
       (현재 application.yml: 8082 → 통합 시 8081로 변경 권장)
-[ ] 내부 API permitAll 확인
-      GET /api/v1/battles/{battleId}/votes/raw
+[ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
+      @RequestMapping: /internal/api/v1/battles/{battleId}/votes/raw
+[ ] SecurityConfig에서 /internal/** permitAll 설정
 [ ] 서비스 간 호출 URL 환경변수 분리
       MEMBER_POINT_SERVICE_URL, INSIGHT_SERVICE_URL
 [ ] DB_URL → RDS 엔드포인트로 변경
@@ -417,8 +423,9 @@ REB_API_BASE_URL=https://...
 ```
 [ ] server.port: 8082 권장
       (현재 application.yml: 8081 → 통합 시 8082로 변경 권장)
-[ ] 내부 API permitAll 확인
-      GET /api/v1/markets/{marketId}/summary
+[ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
+      @RequestMapping: /internal/api/v1/markets/{marketId}/summary
+[ ] SecurityConfig에서 /internal/** permitAll 설정
 [ ] 서비스 간 호출 URL 환경변수 분리
       MEMBER_POINT_SERVICE_URL, INSIGHT_SERVICE_URL
 [ ] DB_URL → RDS 엔드포인트로 변경
@@ -429,9 +436,10 @@ REB_API_BASE_URL=https://...
 ```
 [ ] server.port: 8083 권장
       (현재 application.yml: 8084 → 통합 시 8083으로 변경 권장)
-[ ] 내부 API permitAll 확인
-      POST /api/v1/reputations/activity
-      POST /api/v1/reputations/prediction
+[ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
+      @RequestMapping: /internal/api/v1/reputations/activity
+      @RequestMapping: /internal/api/v1/reputations/prediction
+[ ] SecurityConfig에서 /internal/** permitAll 설정
 [ ] 서비스 간 호출 URL 환경변수 분리
       BATTLE_SERVICE_BASE_URL, MEMBER_POINT_SERVICE_BASE_URL (현재 적용 중)
 [ ] DB_URL → RDS 엔드포인트로 변경 (현재 환경변수 사용 중)
@@ -444,25 +452,25 @@ REB_API_BASE_URL=https://...
 ### Battle 투표 완료
 ```
 Client → Gateway(:9000) → battle-service(:8081)
-battle-service → member-point-service(:8080)         POST /api/v1/points/earn
-battle-service → insight-reputation-service(:8083)   POST /api/v1/reputations/activity
+battle-service → member-point-service(:8080)         POST /internal/api/v1/points/earn
+battle-service → insight-reputation-service(:8083)   POST /internal/api/v1/reputations/activity
 ```
 
 ### Market 예측 참여
 ```
 Client → Gateway(:9000) → market-service(:8082)
-market-service → member-point-service(:8080)          POST /api/v1/points/spend
+market-service → member-point-service(:8080)          POST /internal/api/v1/points/spend
 ```
 
 ### Market 정산
 ```
-market-service → member-point-service(:8080)          POST /api/v1/points/settlements
-market-service → insight-reputation-service(:8083)    POST /api/v1/reputations/prediction
+market-service → member-point-service(:8080)          POST /internal/api/v1/points/settlements
+market-service → insight-reputation-service(:8083)    POST /internal/api/v1/reputations/prediction
 ```
 
 ### Insight AI 분석
 ```
-insight-reputation-service → battle-service(:8081)          GET /api/v1/battles/{id}/votes/raw
-insight-reputation-service → market-service(:8082)           GET /api/v1/markets/{id}/summary
-insight-reputation-service → member-point-service(:8080)     POST /api/v1/members/batch
+insight-reputation-service → battle-service(:8081)          GET  /internal/api/v1/battles/{id}/votes/raw
+insight-reputation-service → market-service(:8082)           GET  /internal/api/v1/markets/{id}/summary
+insight-reputation-service → member-point-service(:8080)     POST /internal/api/v1/members/batch
 ```
