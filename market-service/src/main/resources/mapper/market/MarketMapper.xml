@@ -107,11 +107,18 @@
     <select id="selectPriceHistory" resultType="com.todongsan.marketservice.market.repository.MarketPriceHistoryRow">
         SELECT
             history.id AS history_id,
+            history.market_id,
             history.option_id,
-            history.price_after AS price,
-            history.real_pool_after AS real_pool_amount,
+            market_option.option_text AS option_content,
+            history.prediction_id,
+            history.event_type,
+            history.price_before,
+            history.price_after,
+            history.real_pool_before,
+            history.real_pool_after,
             market_option.virtual_pool_amount,
-            history.contract_quantity_after AS contract_quantity,
+            history.contract_quantity_before,
+            history.contract_quantity_after,
             history.created_at
         FROM market_price_history history
         JOIN market_option
@@ -122,7 +129,7 @@
         <if test="optionId != null">
             AND history.option_id = #{optionId}
         </if>
-        ORDER BY history.created_at DESC, history.id DESC
+        ORDER BY history.created_at ASC, history.id ASC
         LIMIT #{limit} OFFSET #{offset}
     </select>
 

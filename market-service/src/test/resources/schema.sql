@@ -118,6 +118,12 @@ CREATE TABLE market_price_history (
         REFERENCES market_prediction(id)
 );
 
+CREATE INDEX idx_price_history_market_option_created
+    ON market_price_history (market_id, option_id, created_at, id);
+
+CREATE INDEX idx_price_history_prediction
+    ON market_price_history (prediction_id);
+
 CREATE TABLE market_settlement (
     id BIGINT NOT NULL AUTO_INCREMENT,
     market_id BIGINT NOT NULL,
