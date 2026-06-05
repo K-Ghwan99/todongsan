@@ -36,7 +36,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
 
         // when - 1차 투표
         ResponseEntity<Map> response1 = restTemplate.exchange(
-                "/api/v1/reputations/activity",
+                "/internal/api/v1/reputations/activity",
                 HttpMethod.POST,
                 new HttpEntity<>(voteRequest, createHeaders()),
                 Map.class
@@ -53,7 +53,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
 
         // when - 2차 투표
         ResponseEntity<Map> response2 = restTemplate.exchange(
-                "/api/v1/reputations/activity",
+                "/internal/api/v1/reputations/activity",
                 HttpMethod.POST,
                 new HttpEntity<>(voteRequest, createHeaders()),
                 Map.class
@@ -68,7 +68,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
 
         // when - 3차 투표 (confirmed 전환)
         ResponseEntity<Map> response3 = restTemplate.exchange(
-                "/api/v1/reputations/activity",
+                "/internal/api/v1/reputations/activity",
                 HttpMethod.POST,
                 new HttpEntity<>(voteRequest, createHeaders()),
                 Map.class
@@ -88,7 +88,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
 
         // when - 4차 투표 (더 이상 count 증가하지 않음)
         ResponseEntity<Map> response4 = restTemplate.exchange(
-                "/api/v1/reputations/activity",
+                "/internal/api/v1/reputations/activity",
                 HttpMethod.POST,
                 new HttpEntity<>(voteRequest, createHeaders()),
                 Map.class
@@ -128,7 +128,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
 
         // when
         ResponseEntity<Map> response = restTemplate.exchange(
-                "/api/v1/reputations/activity",
+                "/internal/api/v1/reputations/activity",
                 HttpMethod.POST,
                 new HttpEntity<>(mismatchRequest, createHeaders()),
                 Map.class
@@ -173,7 +173,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
             );
             
             restTemplate.exchange(
-                    "/api/v1/reputations/prediction",
+                    "/internal/api/v1/reputations/prediction",
                     HttpMethod.POST,
                     new HttpEntity<>(predictionRequest, createHeaders()),
                     Map.class
@@ -189,7 +189,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
 
         // when
         ResponseEntity<Map> response = restTemplate.exchange(
-                "/api/v1/reputations/prediction",
+                "/internal/api/v1/reputations/prediction",
                 HttpMethod.POST,
                 new HttpEntity<>(finalPredictionRequest, createHeaders()),
                 Map.class
@@ -235,7 +235,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
         );
         
         ResponseEntity<Map> voteResponse = restTemplate.exchange(
-                "/api/v1/reputations/activity",
+                "/internal/api/v1/reputations/activity",
                 HttpMethod.POST,
                 new HttpEntity<>(voteRequest, createHeaders()),
                 Map.class
@@ -252,7 +252,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
         );
         
         ResponseEntity<Map> commentResponse = restTemplate.exchange(
-                "/api/v1/reputations/activity",
+                "/internal/api/v1/reputations/activity",
                 HttpMethod.POST,
                 new HttpEntity<>(commentRequest, createHeaders()),
                 Map.class
@@ -269,7 +269,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
         );
         
         ResponseEntity<Map> approvedResponse = restTemplate.exchange(
-                "/api/v1/reputations/activity",
+                "/internal/api/v1/reputations/activity",
                 HttpMethod.POST,
                 new HttpEntity<>(approvedRequest, createHeaders()),
                 Map.class
@@ -293,7 +293,7 @@ class InternalApiIntegrationTest extends IntegrationTestBase {
 
         // when
         ResponseEntity<Map> response = restTemplate.exchange(
-                "/api/v1/reputations/activity",
+                "/internal/api/v1/reputations/activity",
                 HttpMethod.POST,
                 new HttpEntity<>(request, createHeaders()),
                 Map.class
