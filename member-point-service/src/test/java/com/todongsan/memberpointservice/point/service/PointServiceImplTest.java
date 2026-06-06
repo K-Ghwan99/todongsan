@@ -89,7 +89,7 @@ class PointServiceImplTest {
         PointHistory h2 = createHistory(PointHistoryType.SPEND_MARKET, "100.00");
 
         when(memberRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(createMember()));
-        when(pointHistoryRepository.findByMemberIdAndStatus(eq(1L), eq(PointTransactionStatus.SUCCEEDED), any(Pageable.class)))
+        when(pointHistoryRepository.findByMemberIdAndStatusOrderByCreatedAtDesc(eq(1L), eq(PointTransactionStatus.SUCCEEDED), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(h1, h2)));
 
         PointHistoryPageResponse result = pointServiceImpl.getHistory(1L, null, 0, 20);
@@ -161,7 +161,7 @@ class PointServiceImplTest {
     @Test
     void getHistory_빈_결과() {
         when(memberRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(createMember()));
-        when(pointHistoryRepository.findByMemberIdAndStatus(eq(1L), eq(PointTransactionStatus.SUCCEEDED), any(Pageable.class)))
+        when(pointHistoryRepository.findByMemberIdAndStatusOrderByCreatedAtDesc(eq(1L), eq(PointTransactionStatus.SUCCEEDED), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
 
         PointHistoryPageResponse result = pointServiceImpl.getHistory(1L, null, 0, 20);

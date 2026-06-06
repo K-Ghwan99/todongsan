@@ -30,7 +30,7 @@ public interface PointHistoryRepository extends JpaRepository<PointHistory, Long
             Pageable pageable);
 
     // 회원 전체 이력 (성공 건만) 페이징 조회
-    Page<PointHistory> findByMemberIdAndStatus(
+    Page<PointHistory> findByMemberIdAndStatusOrderByCreatedAtDesc(
             Long memberId, PointTransactionStatus status, Pageable pageable);
 
     // 회원 이력 type prefix 필터 + 성공 건만 페이징 조회

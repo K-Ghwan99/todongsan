@@ -11,7 +11,6 @@ import com.todongsan.memberpointservice.point.entity.PointTransactionStatus;
 import com.todongsan.memberpointservice.point.repository.PointHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,11 +34,11 @@ public class PointServiceImpl implements PointService {
         memberRepository.findByIdAndDeletedAtIsNull(memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
 
-        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        PageRequest pageable = PageRequest.of(page, size);
         String typePrefix = resolveTypePrefix(type);
 
         var historyPage = (typePrefix == null)
-                ? pointHistoryRepository.findByMemberIdAndStatus(memberId, PointTransactionStatus.SUCCEEDED, pageable)
+                ? pointHistoryRepository.findByMemberIdAndStatusOrderByCreatedAtDesc(memberId, PointTransactionStatus.SUCCEEDED, pageable)
                 : pointHistoryRepository.findByMemberIdAndTypeStartingWithAndStatusSucceeded(memberId, typePrefix, pageable);
 
         return new PointHistoryPageResponse(historyPage.map(PointHistoryResponse::new));
