@@ -10,6 +10,9 @@ spring:
           member-point-internal:
             connectTimeout: ${MEMBER_POINT_CONNECT_TIMEOUT_MILLIS:3000}
             readTimeout: ${MEMBER_POINT_READ_TIMEOUT_MILLIS:5000}
+          insight-reputation-internal:
+            connectTimeout: ${INSIGHT_CONNECT_TIMEOUT_MILLIS:3000}
+            readTimeout: ${INSIGHT_READ_TIMEOUT_MILLIS:5000}
 
 server:
   port: ${SERVER_PORT:8082}
@@ -20,6 +23,9 @@ client:
     base-url: ${MEMBER_POINT_SERVICE_URL:http://localhost:8080}
     connect-timeout-millis: ${MEMBER_POINT_CONNECT_TIMEOUT_MILLIS:3000}
     read-timeout-millis: ${MEMBER_POINT_READ_TIMEOUT_MILLIS:5000}
+  insight:
+    mode: ${INSIGHT_CLIENT_MODE:fake}
+    base-url: ${INSIGHT_SERVICE_URL:http://localhost:8083}
 
 mybatis:
   mapper-locations: classpath:/mapper/**/*.xml
