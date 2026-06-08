@@ -8,7 +8,8 @@
 > - Market DB에는 `reference_type`, `reference_id`를 중복 저장하지 않는다.
 > - Member-Point 호출 시 애플리케이션 코드에서 `referenceType=MARKET_PREDICTION`, `referenceId=predictionId`를 만들어 보낸다.
 > - 정산/환불 멱등성은 batch가 아니라 detail item 단위로 보장한다.
-> - Insight-Reputation 연계용 데이터는 별도 테이블을 추가하지 않고 기존 Market 원본 테이블을 조회하여 제공한다.
+> - Insight-Reputation 조회용 데이터는 별도 테이블을 추가하지 않고 기존 Market 원본 테이블을 조회하여 제공한다.
+> - 정산 완료 후 prediction accuracy update 전송 상태는 `market_reputation_update` outbox 테이블에서 관리한다.
 > - 본 버전은 기존 테이블 구조를 유지하면서 Pool Share 기반 즉시 참여형 예측시장 정책을 명확히 한다.
 > - Quote API는 별도 테이블을 추가하지 않고 기존 `market`, `market_option` 데이터로 계산한다.
 > - `initialPrice`, `priceChangeRate`, 예상 계약 수량, 예상 참여 후 가격은 저장 컬럼이 아니라 조회/계산 필드다.
@@ -236,6 +237,7 @@ FOR UPDATE;
 | `market_settlement_detail` | 사용자별 정산 지급 상세 |
 | `market_void` | Market 무효 처리 기록 |
 | `market_refund_detail` | 무효 처리 시 사용자별 환불 상세 |
+| `market_reputation_update` | 정산 완료 후 Insight-Reputation Service로 prediction accuracy update를 전송하기 위한 outbox task |
 
 ---
 
@@ -756,6 +758,60 @@ CREATE TABLE market_refund_detail (
 
 ---
 
+## 6-9. market_reputation_update
+
+Market 정산 완료 후 Insight-Reputation Service로 전송할 prediction accuracy update task를 관리하는 outbox 테이블이다.
+
+이 테이블은 Insight 분석 결과를 Market DB에 저장하기 위한 테이블이 아니다. Market은 정산 완료 사실과 Prediction 적중 여부를 Insight-Reputation Service에 전달하기 위한 전송 상태만 관리한다.
+
+```sql
+CREATE TABLE market_reputation_update (
+    id                              BIGINT          NOT NULL AUTO_INCREMENT,
+    market_id                       BIGINT          NOT NULL,
+    prediction_id                   BIGINT          NOT NULL,
+    member_id                       BIGINT          NOT NULL,
+    is_correct                      BOOLEAN         NOT NULL,
+
+    status                          VARCHAR(20)     NOT NULL DEFAULT 'PENDING',
+    -- PENDING, SUCCESS, FAILED, UNKNOWN
+
+    attempt_no                      INT             NOT NULL DEFAULT 0,
+    last_error_code                 VARCHAR(100),
+    last_error_message              VARCHAR(500),
+
+    created_at                      DATETIME        NOT NULL,
+    updated_at                      DATETIME        NOT NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_reputation_update_prediction (prediction_id),
+    INDEX idx_reputation_update_status_updated (status, updated_at, id),
+    INDEX idx_reputation_update_market (market_id),
+    INDEX idx_reputation_update_member_market (member_id, market_id)
+);
+```
+
+관계:
+
+```text
+market_reputation_update.market_id -> market.id 논리 참조
+market_reputation_update.prediction_id -> market_prediction.id 논리 참조
+```
+
+MSA/REST 참조 원칙에 따라 위 관계는 실제 DB FK로 강제하지 않는다. 중복 task 생성은 `UNIQUE(prediction_id)`와 `INSERT IGNORE`로 방지한다.
+
+상태 의미:
+
+| status | 의미 | 재시도 여부 |
+|---|---|---:|
+| `PENDING` | 아직 Insight-Reputation Service로 전송하지 않음 | O |
+| `SUCCESS` | Insight update 성공 또는 Insight 멱등 처리 성공 | X |
+| `FAILED` | `RESOURCE_NOT_FOUND`, `VALIDATION_FAILED`처럼 명확한 실패 | X |
+| `UNKNOWN` | timeout, 5xx, body null, parsing 실패 등 처리 여부 불명확 | O |
+
+전송 대상은 `market.status = SETTLED`이고 `market_prediction.status = SETTLED`인 Prediction이다. `FAILED`, `POINT_UNKNOWN`, `REFUNDED`, `REFUND_UNKNOWN` 등 SETTLED가 아닌 Prediction은 전송 대상이 아니다.
+
+---
+
 # 7. Mermaid ERD
 
 ```mermaid
@@ -773,6 +829,7 @@ erDiagram
     market_prediction ||--o{ market_price_history : "causes"
     market_prediction ||--o| market_settlement_detail : "settled_by"
     market_prediction ||--o| market_refund_detail : "refunded_by"
+    market_prediction ||--o| market_reputation_update : "accuracy_update"
 
     market_settlement ||--o{ market_settlement_detail : "has"
     market_void ||--o{ market_refund_detail : "has"
@@ -921,6 +978,20 @@ erDiagram
         datetime created_at
         datetime updated_at
     }
+
+    market_reputation_update {
+        bigint id PK
+        bigint market_id "REST 논리 참조"
+        bigint prediction_id UK
+        bigint member_id "REST 논리 참조"
+        boolean is_correct
+        varchar status "PENDING, SUCCESS, FAILED, UNKNOWN"
+        int attempt_no
+        varchar last_error_code
+        varchar last_error_message
+        datetime created_at
+        datetime updated_at
+    }
 ```
 
 ---
@@ -969,6 +1040,15 @@ ON market_refund_detail(status);
 
 CREATE INDEX idx_refund_detail_idempotency_key
 ON market_refund_detail(idempotency_key);
+
+CREATE INDEX idx_reputation_update_status_updated
+ON market_reputation_update(status, updated_at, id);
+
+CREATE INDEX idx_reputation_update_market
+ON market_reputation_update(market_id);
+
+CREATE INDEX idx_reputation_update_member_market
+ON market_reputation_update(member_id, market_id);
 ```
 
 ---
@@ -991,7 +1071,8 @@ ON market_refund_detail(idempotency_key);
 - [ ] 환불 멱등성은 `market_refund_detail.idempotency_key`로 보장한다.
 - [ ] `market_settlement`에는 batch 단위 `idempotency_key`를 두지 않는다.
 - [ ] `market_void`에는 batch 단위 `idempotency_key`를 두지 않는다.
-- [ ] Insight-Reputation 연계용 별도 테이블을 추가하지 않는다.
+- [ ] Insight 조회/분석 결과 저장용 별도 테이블을 Market DB에 추가하지 않는다.
+- [ ] Insight prediction accuracy update 전송 상태는 `market_reputation_update` outbox 테이블로만 관리한다.
 - [ ] Insight 조회 API는 기존 `market`, `market_option`, `market_prediction` 데이터를 조합하여 제공한다.
 - [ ] Insight Prediction 페이지 조회를 위해 `(market_id, created_at)` 인덱스를 둔다.
 - [ ] Insight 선택지별 집계를 위해 `(market_id, option_id)` 인덱스를 둔다.
@@ -1005,7 +1086,9 @@ Insight-Reputation Service는 Market AI 리포트 생성을 위해 Market Servic
 
 ## 10-1. 테이블 추가 여부
 
-Insight 연계만을 위해 Market DB에 별도 테이블을 추가하지 않는다.
+Insight 조회와 분석 결과 저장만을 위해 Market DB에 별도 테이블을 추가하지 않는다.
+
+단, 정산 완료 후 Insight-Reputation Service로 prediction accuracy update를 전송하기 위한 outbox는 `market_reputation_update` 테이블에서 관리한다. 이 테이블은 Insight 분석 결과나 리포트 snapshot을 저장하지 않고, 전송 대상과 전송 상태만 저장한다.
 
 이유:
 
