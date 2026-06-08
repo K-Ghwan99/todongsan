@@ -1,5 +1,6 @@
 package com.todongsan.marketservice.market.controller;
 
+import com.todongsan.marketservice.global.auth.AdminOnly;
 import com.todongsan.marketservice.global.response.ApiResponse;
 import com.todongsan.marketservice.market.dto.request.ConfirmMarketResultRequest;
 import com.todongsan.marketservice.market.dto.request.CreateMarketRequest;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequiredArgsConstructor
+@AdminOnly
 @RequestMapping("/api/v1/admin/markets")
 public class AdminMarketController {
 

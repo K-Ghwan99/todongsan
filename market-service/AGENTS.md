@@ -596,6 +596,12 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 ## 11. 이 서비스의 성공 기준
 
 ```text
+[관리자 API 권한]
+- `/api/v1/admin/markets/**` 관리자 API는 `X-Member-Role=ADMIN` 요청만 허용한다.
+- `X-Member-Role`이 없거나 ADMIN이 아니면 공통 `FORBIDDEN` 응답을 반환한다.
+- Market Service는 JWT를 직접 파싱하지 않고 JWT_SECRET을 사용하지 않는다.
+- Gateway가 주입한 `X-Member-Id`, `X-Member-Role` 헤더를 신뢰하는 전제다.
+
 [관리자 Market 생성]
 - POST /api/v1/admin/markets
 - 생성 직후 MarketStatus는 PENDING이다.

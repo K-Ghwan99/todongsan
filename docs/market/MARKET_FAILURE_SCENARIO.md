@@ -37,6 +37,21 @@ Market 생성
 
 ---
 
+## 1-1. 관리자 API 권한 없음
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | `/api/v1/admin/markets/**` 관리자 API 호출 |
+| 실패 원인 | `X-Member-Role` 헤더 없음 또는 `ADMIN`이 아님 |
+| 상태 변화 | 없음 |
+| 재시도 여부 | 관리자 권한으로 재요청 |
+| 관련 ErrorCode | `FORBIDDEN` |
+| HTTP Status | 403 |
+
+Market Service는 JWT를 직접 파싱하지 않고 Gateway가 주입한 `X-Member-Role` 헤더만 확인한다.
+
+---
+
 ## 2. 상태 정의
 
 ### 2-1. MarketStatus

@@ -771,7 +771,7 @@ public enum MarketErrorCode implements ErrorCode {
 | ErrorCode | 사용 상황 |
 |---|---|
 | `VALIDATION_FAILED` | 요청 값 검증 실패 |
-| `FORBIDDEN` | 관리자 권한이 필요한 작업 |
+| `FORBIDDEN` | 관리자 권한이 필요한 작업. `X-Member-Role` 없음 또는 `ADMIN` 아님 |
 | `IDEMPOTENCY_KEY_REQUIRED` | 포인트 차감/정산/환불 API 호출 시 멱등성 키 누락 |
 | `IDEMPOTENCY_KEY_CONFLICT` | 동일 멱등성 키로 다른 요청 발생 |
 | `EXTERNAL_SERVICE_TIMEOUT` | Member-Point 또는 외부 데이터 API 타임아웃 |
