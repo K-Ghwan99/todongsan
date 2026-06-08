@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS market_price_history;
+DROP TABLE IF EXISTS market_reputation_update;
 DROP TABLE IF EXISTS market_refund_detail;
 DROP TABLE IF EXISTS market_void;
 DROP TABLE IF EXISTS market_settlement_detail;
@@ -123,6 +124,31 @@ CREATE INDEX idx_price_history_market_option_created
 
 CREATE INDEX idx_price_history_prediction
     ON market_price_history (prediction_id);
+
+CREATE TABLE market_reputation_update (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    market_id BIGINT NOT NULL,
+    prediction_id BIGINT NOT NULL,
+    member_id BIGINT NOT NULL,
+    is_correct BOOLEAN NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    attempt_no INT NOT NULL DEFAULT 0,
+    last_error_code VARCHAR(100),
+    last_error_message VARCHAR(500),
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_reputation_update_prediction (prediction_id)
+);
+
+CREATE INDEX idx_reputation_update_status_updated
+    ON market_reputation_update (status, updated_at, id);
+
+CREATE INDEX idx_reputation_update_market
+    ON market_reputation_update (market_id);
+
+CREATE INDEX idx_reputation_update_member_market
+    ON market_reputation_update (member_id, market_id);
 
 CREATE TABLE market_settlement (
     id BIGINT NOT NULL AUTO_INCREMENT,
