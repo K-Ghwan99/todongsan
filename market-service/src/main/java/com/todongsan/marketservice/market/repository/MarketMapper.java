@@ -49,6 +49,18 @@ public interface MarketMapper {
             @Param("optionId") Long optionId
     );
 
+    MarketInsightSummaryRow selectInsightMarketSummary(@Param("marketId") long marketId);
+
+    List<MarketInsightOptionStatisticsRow> selectInsightOptionStatistics(@Param("marketId") long marketId);
+
+    long countInsightPredictions(@Param("marketId") long marketId);
+
+    List<MarketInsightPredictionRow> selectInsightPredictions(
+            @Param("marketId") long marketId,
+            @Param("offset") int offset,
+            @Param("limit") int limit
+    );
+
     void insertMarket(MarketInsertRow market);
 
     void insertMarketOptions(@Param("options") List<MarketOptionInsertRow> options);
