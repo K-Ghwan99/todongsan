@@ -90,3 +90,22 @@ CREATE TABLE public_data_snapshot (
     INDEX idx_region_fullpath (region_fullpath(100)),
     INDEX idx_itm_id (itm_id)
 );
+
+-- ==========================================
+-- market_prediction_result
+-- ==========================================
+CREATE TABLE market_prediction_result (
+    id                  BIGINT          NOT NULL AUTO_INCREMENT,
+    member_id           BIGINT          NOT NULL,
+    market_id           BIGINT          NOT NULL,
+    prediction_id       BIGINT,
+    is_correct          BOOLEAN         NOT NULL,
+    processed_at        DATETIME        NOT NULL,
+    created_at          DATETIME        NOT NULL,
+    updated_at          DATETIME        NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_member_market (member_id, market_id),
+    INDEX idx_member_id (member_id),
+    INDEX idx_market_id (market_id),
+    INDEX idx_prediction_id (prediction_id)
+);

@@ -14,6 +14,8 @@ public class PredictionUpdateRequest {
     @NotNull(message = "마켓 ID는 필수입니다")
     private Long marketId;
 
+    private Long predictionId;
+
     @NotNull(message = "정답 여부는 필수입니다")
     private Boolean isCorrect;
 }

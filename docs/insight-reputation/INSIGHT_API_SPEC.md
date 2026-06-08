@@ -109,12 +109,13 @@ Insight-Reputation Service가 다른 서비스를 호출하는 API 목록이다.
 
 | 호출 대상 | 엔드포인트 | 목적 |
 |---|---|---|
-| Battle Service | GET /api/v1/battles/{battleId} | Battle 기본 정보 조회 |
-| Battle Service | GET /api/v1/battles/{battleId}/votes/raw | 투표 목록 조회 (member_id, selected_option) |
-| Battle Service | GET /api/v1/battles/comments/{commentId} | 댓글 단건 조회 (방문 인증용) |
-| Market Service | GET /internal/api/v1/markets/{marketId}/insight-summary | Market 기본 정보 + 옵션별 통계 조회 (SETTLED 전용) |
-| Market Service | GET /internal/api/v1/markets/{marketId}/insight-predictions | 예측 참여 목록 조회 (member_id, selected_option, 페이지네이션) |
-| Member-Point Service | POST /api/v1/members/batch | 회원 정보 배치 조회 (ageGroup, gender, residenceSido/Sigu) |
+| Battle Service | GET /internal/api/v1/battles/{battleId}/info | Battle 기본 정보 조회 (**⚠️ Battle 담당자 구현 필요 — COORDINATION_ISSUES.md 참조**) |
+| Battle Service | GET /internal/api/v1/battles/{battleId}/votes/raw | 투표 목록 조회 (member_id, selected_option) (**⚠️ Battle 담당자 경로 변경 필요 — COORDINATION_ISSUES.md 참조**) |
+| Battle Service | GET /internal/api/v1/battles/comments/{commentId} | 댓글 단건 조회 (방문 인증용) (**⚠️ Battle 담당자 경로 변경 필요 — COORDINATION_ISSUES.md 참조**) |
+| Market Service | GET /internal/api/v1/markets/{marketId}/insight-summary | Market 기본 정보 + 옵션별 통계 조회 (SETTLED 전용. Market spec 섹션 11-1) |
+| Market Service | GET /internal/api/v1/markets/{marketId}/insight-predictions | 예측 참여 목록 조회 (member_id, selected_option, 페이지네이션. Market spec 섹션 11-2) |
+| Member-Point Service | POST /internal/api/v1/members/batch | 회원 정보 배치 조회 (ageGroup, gender, residenceSido/Sigu) |
+| Member-Point Service | POST /internal/api/v1/points/refunds | AI 리포트 생성 실패 시 Point 환불 (`INSIGHT_REPORT_SOURCE_DATA_NOT_READY`, `INSIGHT_REPORT_GENERATION_FAILED`) |
 
 [루트 API_SPEC.md 섹션 3](../API_SPEC.md#3-insight-reputation-service-내부-연계-api) 참조
 
@@ -202,6 +203,7 @@ POST /internal/api/v1/reputations/prediction
 {
   "memberId": 1,
   "marketId": 7,
+  "predictionId": 123,
   "isCorrect": true
 }
 ```
@@ -210,6 +212,7 @@ POST /internal/api/v1/reputations/prediction
 |---|---|---|---|
 | memberId | Long | Y | 회원 ID |
 | marketId | Long | Y | Market ID |
+| predictionId | Long | N | Prediction ID (Market Service에서 제공, 추적 정확성 향상) |
 | isCorrect | Boolean | Y | 예측 정확성 (true: 정답, false: 오답) |
 
 **Response**
@@ -231,13 +234,16 @@ POST /internal/api/v1/reputations/prediction
 
 > `predictionCount` 증가 및 `predictionCorrect` 업데이트.
 > `predictionAccuracy = (predictionCorrect / predictionCount) * 100` 계산.
+> 
+> **멱등성 보장**: 동일 `memberId + marketId` 재시도 시 중복 처리 없이 기존 결과 반환.
+> `market_prediction_result` 테이블의 `UNIQUE KEY (member_id, market_id)` 제약으로 보장.
 
 **Error Codes**
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
 | RESOURCE_NOT_FOUND | 404 | 존재하지 않는 회원 |
-| VALIDATION_FAILED | 400 | 잘못된 Market ID 또는 `isCorrect` 값 |
+| VALIDATION_FAILED | 400 | 잘못된 Market ID, Prediction ID 또는 `isCorrect` 값 |
 
 ---
 
@@ -539,10 +545,14 @@ POST /api/v1/reputations/visit-certifications
 > 재인증 성공 시 기존 레코드를 UPDATE한다 (INSERT 아님).
 >
 > **COMMENT 인증 처리 흐름:**
-> 1. `commentId`로 Battle Service에 댓글 단건 조회 (`GET /api/v1/battles/comments/{commentId}` — 내부 API)
-> 2. 댓글의 `battleId`로 해당 Battle의 지역(`sido`, `sigu`) 확인
-> 3. 요청 `sido`/`sigu`와 불일치 시 `VISIT_CERT_COMMENT_REGION_MISMATCH` 반환
-> 4. ERD `visit_certification.comment_content`, `visit_certification.battle_id` 저장
+> 1. `commentId`로 Battle Service에 댓글 단건 조회
+>    (`GET /internal/api/v1/battles/comments/{commentId}` → `memberId`, `battleId` 추출)
+> 2. 댓글 작성자 `memberId`로 Member-Point Service에 회원 거주지 조회
+>    (`POST /internal/api/v1/members/batch` → `residenceSido`, `residenceSigu` 추출)
+> 3. 작성자 `residenceSido`/`residenceSigu`와 요청 `sido`/`sigu` 불일치 시
+>    `VISIT_CERT_COMMENT_REGION_MISMATCH` 반환
+> 4. ERD `visit_certification.battle_id` 저장
+>    (`comment_content` 미저장 — Battle API 응답에 `content` 필드 없음)
 
 **Response**
 
@@ -651,8 +661,8 @@ POST /internal/api/v1/insights/battles/{battleId}/report
 2. insight_report INSERT (status=PENDING)
 3. 즉시 200 응답 반환
 4. @Async로 분석 실행:
-   - BattleClient → /api/v1/battles/{battleId}/votes/raw (투표 원본)
-   - MemberPointClient → /api/v1/members/batch (회원 인구통계)
+   - BattleClient → /internal/api/v1/battles/{battleId}/votes/raw (투표 원본)
+   - MemberPointClient → /internal/api/v1/members/batch (회원 인구통계)
    - ClaudeApiClient → AI 분석
    - insight_report UPDATE (DONE/FAILED)
 
@@ -702,7 +712,7 @@ Idempotency-Key: {uuid}
 > 1. Market Service `/internal/api/v1/markets/{marketId}/insight-summary` 호출하여 Market 기본 정보 및 상태 확인
 > 2. Market 상태가 `SETTLED`가 아니면 `INSIGHT_REPORT_SOURCE_DATA_NOT_READY` 반환
 > 3. Market Service `/internal/api/v1/markets/{marketId}/insight-predictions?page=0&size=500` 호출하여 예측 데이터 수집
-> 4. Member-Point Service `/api/v1/members/batch` 호출하여 회원 정보 배치 조회
+> 4. Member-Point Service `/internal/api/v1/members/batch` 호출하여 회원 정보 배치 조회
 > 5. Claude API를 통한 AI 분석 수행
 
 **Response - 생성 요청 수락 (비동기 기준)**
