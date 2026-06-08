@@ -4,9 +4,15 @@ import com.todongsan.marketservice.market.client.exception.MemberPointTimeoutExc
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(
+        name = "client.member-point.mode",
+        havingValue = "fake",
+        matchIfMissing = true
+)
 public class FakeMemberPointClient implements MemberPointClient {
 
     private final Map<String, MemberPointTransactionStatusResponse> transactionStatuses = new HashMap<>();
