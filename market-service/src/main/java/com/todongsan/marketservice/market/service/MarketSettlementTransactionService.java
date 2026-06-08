@@ -153,7 +153,12 @@ public class MarketSettlementTransactionService {
                 successCount++;
                 continue;
             }
-            markDetail(detail, TransactionItemStatus.FAILED, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+            if (isFailed(result.status())) {
+                markDetail(detail, TransactionItemStatus.FAILED, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+                failedCount++;
+                continue;
+            }
+            markDetail(detail, TransactionItemStatus.UNKNOWN, failureReason(result.errorCode(), "MEMBER_POINT_STATUS_UNKNOWN"), now);
             failedCount++;
         }
 
@@ -264,7 +269,11 @@ public class MarketSettlementTransactionService {
                 successCount++;
                 continue;
             }
-            markRetryDetail(detail, TransactionItemStatus.FAILED, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+            if (isFailed(result.status())) {
+                markRetryDetail(detail, TransactionItemStatus.FAILED, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+                continue;
+            }
+            markRetryDetail(detail, TransactionItemStatus.UNKNOWN, failureReason(result.errorCode(), "MEMBER_POINT_STATUS_UNKNOWN"), now);
         }
 
         long remainingNonSuccessCount = marketMapper.countNonSuccessSettlementDetails(preparation.settlementId());
@@ -431,6 +440,10 @@ public class MarketSettlementTransactionService {
     private boolean isSuccess(MemberPointSettlementItemStatus status) {
         return status == MemberPointSettlementItemStatus.PROCESSED
                 || status == MemberPointSettlementItemStatus.ALREADY_PROCESSED;
+    }
+
+    private boolean isFailed(MemberPointSettlementItemStatus status) {
+        return status == MemberPointSettlementItemStatus.FAILED;
     }
 
     private BigDecimal floorAmount(BigDecimal amount) {

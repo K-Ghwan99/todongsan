@@ -101,8 +101,13 @@ public class MarketRefundTransactionService {
                 successCount++;
                 continue;
             }
-            markRefundFailed(detail, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
-            failedCount++;
+            if (isFailed(result.status())) {
+                markRefundFailed(detail, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+                failedCount++;
+                continue;
+            }
+            markRefundUnknown(detail, failureReason(result.errorCode(), "MEMBER_POINT_STATUS_UNKNOWN"), now);
+            unknownCount++;
         }
 
         RefundStatus refundStatus = failedCount == 0 && unknownCount == 0
@@ -200,8 +205,14 @@ public class MarketRefundTransactionService {
                 }
                 continue;
             }
-            if (markRetryRefundFailed(detail, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now)) {
-                failedCount++;
+            if (isFailed(result.status())) {
+                if (markRetryRefundFailed(detail, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now)) {
+                    failedCount++;
+                }
+                continue;
+            }
+            if (markRetryRefundUnknown(detail, failureReason(result.errorCode(), "MEMBER_POINT_STATUS_UNKNOWN"), now)) {
+                unknownCount++;
             }
         }
 
@@ -292,6 +303,10 @@ public class MarketRefundTransactionService {
     private boolean isSuccess(MemberPointRefundItemStatus status) {
         return status == MemberPointRefundItemStatus.PROCESSED
                 || status == MemberPointRefundItemStatus.ALREADY_PROCESSED;
+    }
+
+    private boolean isFailed(MemberPointRefundItemStatus status) {
+        return status == MemberPointRefundItemStatus.FAILED;
     }
 
     private RefundStatus resolveRefundStatus(Long voidId, LocalDateTime now) {

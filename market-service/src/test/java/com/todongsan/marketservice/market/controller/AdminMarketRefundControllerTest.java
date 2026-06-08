@@ -7,6 +7,7 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -31,6 +32,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -40,8 +43,10 @@ class AdminMarketRefundControllerTest {
     private static final long OPTION_ID = 101L;
     private static final long VOID_ID = 500L;
 
-    @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private WebApplicationContext webApplicationContext;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -51,6 +56,9 @@ class AdminMarketRefundControllerTest {
 
     @BeforeEach
     void setUp() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
+                .defaultRequest(get("/").header("X-Member-Role", "ADMIN"))
+                .build();
         reset(memberPointClient);
         jdbcTemplate.update("DELETE FROM market_price_history");
         jdbcTemplate.update("DELETE FROM market_refund_detail");
@@ -149,6 +157,38 @@ class AdminMarketRefundControllerTest {
         )).containsExactly("SUCCESS", "FAILED");
         assertPrediction(1001L, "REFUNDED", "100.00");
         assertPrediction(1002L, "REFUND_PENDING", null);
+    }
+
+    @Test
+    void refundMarketMarksNullItemStatusAsUnknown() throws Exception {
+        insertVoidedMarketWithVoid("PENDING");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "CONFIRMED");
+        when(memberPointClient.refundMarketPredictions(
+                anyString(),
+                any(MemberPointRefundBatchRequest.class)
+        )).thenReturn(new MemberPointRefundBatchResponse(
+                MARKET_ID,
+                List.of(new MemberPointRefundItemResult(
+                        1001L,
+                        1L,
+                        null,
+                        null,
+                        new BigDecimal("100.00"),
+                        null
+                ))
+        ));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(0))
+                .andExpect(jsonPath("$.data.unknownCount").value(1))
+                .andExpect(jsonPath("$.data.refundStatus").value("IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_refund_detail", String.class))
+                .isEqualTo("UNKNOWN");
+        assertPrediction(1001L, "REFUND_UNKNOWN", null);
     }
 
     @Test

@@ -13,6 +13,13 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
 
+client:
+  member-point:
+    mode: fake
+    base-url: http://localhost:8080
+    connect-timeout-millis: 3000
+    read-timeout-millis: 5000
+
 market:
   scheduler:
     prediction-reconciliation:

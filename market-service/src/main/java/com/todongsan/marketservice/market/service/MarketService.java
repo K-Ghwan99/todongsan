@@ -11,6 +11,8 @@ import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.repository.MarketMapper;
 import com.todongsan.marketservice.market.repository.MarketPriceHistoryRow;
 import com.todongsan.marketservice.market.type.MarketStatus;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +25,9 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class MarketService {
+
+    private static final int RATE_SCALE = 8;
+    private static final RoundingMode PRICE_HISTORY_ROUNDING = RoundingMode.HALF_UP;
 
     private final MarketMapper marketMapper;
 
@@ -81,6 +86,7 @@ public class MarketService {
 
     public MarketPriceHistoryResponse getPriceHistory(long marketId, int page, int size, Long optionId) {
         findMarket(marketId);
+        validateOptionBelongsToMarket(marketId, optionId);
         int offset = page * size;
         List<MarketPriceHistoryResponse.PriceHistory> content = marketMapper
                 .selectPriceHistory(marketId, optionId, offset, size)
@@ -130,13 +136,42 @@ public class MarketService {
     private MarketPriceHistoryResponse.PriceHistory toPriceHistoryResponse(MarketPriceHistoryRow history) {
         return new MarketPriceHistoryResponse.PriceHistory(
                 history.getHistoryId(),
+                history.getMarketId(),
                 history.getOptionId(),
-                history.getPrice(),
-                history.getRealPoolAmount(),
+                history.getOptionContent(),
+                history.getPredictionId(),
+                history.getEventType(),
+                history.getPriceBefore(),
+                history.getPriceAfter(),
+                priceChangeRate(history.getPriceBefore(), history.getPriceAfter()),
+                history.getRealPoolBefore(),
+                history.getRealPoolAfter(),
                 history.getVirtualPoolAmount(),
-                history.getContractQuantity(),
+                history.getContractQuantityBefore(),
+                history.getContractQuantityAfter(),
                 history.getCreatedAt()
         );
+    }
+
+    private void validateOptionBelongsToMarket(long marketId, Long optionId) {
+        if (optionId == null) {
+            return;
+        }
+        boolean exists = marketMapper.selectOptionsByMarketId(marketId).stream()
+                .anyMatch(option -> option.getId().equals(optionId));
+        if (!exists) {
+            throw new CustomException(MarketErrorCode.MARKET_OPTION_NOT_FOUND);
+        }
+    }
+
+    private BigDecimal priceChangeRate(BigDecimal priceBefore, BigDecimal priceAfter) {
+        if (priceBefore == null || priceAfter == null || priceBefore.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new CustomException(MarketErrorCode.MARKET_INVALID_OPTION);
+        }
+        return priceAfter.subtract(priceBefore)
+                .divide(priceBefore, RATE_SCALE, PRICE_HISTORY_ROUNDING)
+                .multiply(new BigDecimal("100"))
+                .setScale(RATE_SCALE, PRICE_HISTORY_ROUNDING);
     }
 
     private int totalPages(long totalElements, int size) {

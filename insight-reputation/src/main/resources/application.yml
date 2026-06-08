@@ -23,7 +23,7 @@ spring:
       mode: never
 
 server:
-  port: 8084
+  port: 8083
 
 springdoc:
   swagger-ui:
@@ -54,3 +54,5 @@ client:
     base-url: ${BATTLE_SERVICE_BASE_URL:http://battle-service}
   member-point:
     base-url: ${MEMBER_POINT_SERVICE_BASE_URL:http://member-point-service}
+  market:
+    base-url: ${MARKET_SERVICE_BASE_URL:http://localhost:8082}
