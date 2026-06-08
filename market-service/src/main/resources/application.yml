@@ -46,3 +46,7 @@ market:
       enabled: true
       fixed-delay-ms: 180000
       limit: 50
+    reputation-update:
+      enabled: ${MARKET_REPUTATION_UPDATE_SCHEDULER_ENABLED:true}
+      fixed-delay-ms: ${MARKET_REPUTATION_UPDATE_SCHEDULER_FIXED_DELAY_MS:180000}
+      limit: ${MARKET_REPUTATION_UPDATE_SCHEDULER_LIMIT:50}
