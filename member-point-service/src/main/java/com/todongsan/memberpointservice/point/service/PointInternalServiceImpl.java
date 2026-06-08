@@ -6,7 +6,9 @@ import com.todongsan.memberpointservice.global.util.RequestHashUtil;
 import com.todongsan.memberpointservice.member.entity.Member;
 import com.todongsan.memberpointservice.member.repository.MemberRepository;
 import com.todongsan.memberpointservice.point.dto.request.EarnRequest;
+import com.todongsan.memberpointservice.point.dto.request.SpendRequest;
 import com.todongsan.memberpointservice.point.dto.response.EarnResponse;
+import com.todongsan.memberpointservice.point.dto.response.SpendResponse;
 import com.todongsan.memberpointservice.point.entity.PointHistory;
 import com.todongsan.memberpointservice.point.entity.PointHistoryType;
 import com.todongsan.memberpointservice.point.entity.PointReferenceType;
@@ -82,6 +84,82 @@ public class PointInternalServiceImpl implements PointInternalService {
         pointHistoryRepository.save(history);
 
         return PointResult.of(new EarnResponse(history));
+    }
+
+    @Override
+    @Transactional
+    public PointResult<SpendResponse> spend(String idempotencyKey, SpendRequest request) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
+        }
+
+        Optional<PointHistory> existing = pointHistoryRepository.findByIdempotencyKey(idempotencyKey);
+        if (existing.isPresent()) {
+            PointHistory history = existing.get();
+            String newHash = RequestHashUtil.compute(
+                    request.getMemberId(), request.getType(),
+                    request.getAmount(), request.getReferenceType(), request.getReferenceId());
+            if (newHash.equals(history.getRequestHash())) {
+                if (history.getStatus() == PointTransactionStatus.FAILED) {
+                    throw new CustomException(ErrorCode.POINT_INSUFFICIENT);
+                }
+                return PointResult.alreadyProcessed(new SpendResponse(history));
+            }
+            throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+        }
+
+        if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new CustomException(ErrorCode.POINT_INVALID_AMOUNT);
+        }
+
+        PointReferenceType refType = parseReferenceType(request.getReferenceType());
+        PointHistoryType histType = parseHistoryType(request.getType());
+
+        Member member = memberRepository.findByIdAndDeletedAtIsNull(request.getMemberId())
+                .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
+
+        BigDecimal normalizedAmount = request.getAmount().setScale(2, RoundingMode.DOWN);
+        String requestHash = RequestHashUtil.compute(
+                request.getMemberId(), request.getType(),
+                request.getAmount(), request.getReferenceType(), request.getReferenceId());
+
+        int affected = memberRepository.spendPoint(request.getMemberId(), normalizedAmount);
+        if (affected == 0) {
+            PointHistory failedHistory = PointHistory.builder()
+                    .memberId(request.getMemberId())
+                    .type(histType)
+                    .amount(normalizedAmount)
+                    .balanceSnapshot(member.getPointBalance())
+                    .reason(request.getReason())
+                    .referenceType(refType)
+                    .referenceId(request.getReferenceId())
+                    .idempotencyKey(idempotencyKey)
+                    .requestHash(requestHash)
+                    .status(PointTransactionStatus.FAILED)
+                    .failReason(ErrorCode.POINT_INSUFFICIENT.getCode())
+                    .build();
+            pointHistoryRepository.save(failedHistory);
+            throw new CustomException(ErrorCode.POINT_INSUFFICIENT);
+        }
+
+        Member updated = memberRepository.findByIdAndDeletedAtIsNull(request.getMemberId())
+                .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
+
+        PointHistory history = PointHistory.builder()
+                .memberId(request.getMemberId())
+                .type(histType)
+                .amount(normalizedAmount)
+                .balanceSnapshot(updated.getPointBalance())
+                .reason(request.getReason())
+                .referenceType(refType)
+                .referenceId(request.getReferenceId())
+                .idempotencyKey(idempotencyKey)
+                .requestHash(requestHash)
+                .status(PointTransactionStatus.SUCCEEDED)
+                .build();
+
+        pointHistoryRepository.save(history);
+        return PointResult.of(new SpendResponse(history));
     }
 
     private PointReferenceType parseReferenceType(String referenceType) {
