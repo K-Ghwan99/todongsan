@@ -474,6 +474,7 @@ WHERE id = :marketId
 - 패자는 지급 detail을 만들지 않고 Prediction만 `SETTLED`, `settledAmount = 0.00`으로 처리한다.
 - 승자 없음은 정산 실패가 아니다.
 - 일부 지급 실패 시 Market 상태를 `SETTLEMENT_IN_PROGRESS`로 유지한다.
+- Member-Point batch item의 status null, 알 수 없는 status, result 누락은 FAILED로 단정하지 않고 UNKNOWN detail로 처리한다.
 - 재시도 시 실패한 detail item만 다시 처리한다.
 - 관리자 정산 재시도 API는 `FAILED`, `UNKNOWN` detail만 대상으로 한다.
 - 정산 재시도에서는 새 `market_settlement`, `market_settlement_detail` row를 만들지 않고 금액을 재계산하지 않는다.
@@ -508,6 +509,7 @@ MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{mem
 - 환불 batch Header Idempotency-Key와 item idempotencyKey 역할을 구분한다.
 - 실제 중복 환불 방지는 `items[].idempotencyKey` 기준이다.
 - 환불 타임아웃은 `REFUND_UNKNOWN`으로 기록한다.
+- 환불 batch item의 status null, 알 수 없는 status, result 누락은 FAILED로 단정하지 않고 UNKNOWN detail로 처리한다.
 - `REFUND_UNKNOWN`은 Member-Point 거래 조회로 대사한다.
 - 환불 실행 중 DB 트랜잭션 안에서 Member-Point HTTP API를 호출하지 않는다.
 - 부분 실패는 전체 실패로 단정하지 않는다.
@@ -670,6 +672,7 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 - 패자는 detail 미생성, Prediction SETTLED 및 settledAmount = 0.00
 - 승자 없음은 정산 실패로 처리하지 않음
 - 일부 지급 실패 시 기존 FAILED/UNKNOWN detail만 재시도
+- Member-Point batch item status null, 알 수 없는 status, result 누락은 UNKNOWN detail로 처리
 
 [환불 재시도 Scheduler]
 - `MarketRefundRetryScheduler`
