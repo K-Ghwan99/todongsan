@@ -5,10 +5,8 @@ import com.todongsan.memberpointservice.global.exception.ErrorCode;
 import com.todongsan.memberpointservice.global.util.RequestHashUtil;
 import com.todongsan.memberpointservice.member.entity.Member;
 import com.todongsan.memberpointservice.member.repository.MemberRepository;
-import com.todongsan.memberpointservice.point.dto.request.EarnRequest;
-import com.todongsan.memberpointservice.point.dto.request.SpendRequest;
-import com.todongsan.memberpointservice.point.dto.response.EarnResponse;
-import com.todongsan.memberpointservice.point.dto.response.SpendResponse;
+import com.todongsan.memberpointservice.point.dto.request.*;
+import com.todongsan.memberpointservice.point.dto.response.*;
 import com.todongsan.memberpointservice.point.entity.PointHistory;
 import com.todongsan.memberpointservice.point.entity.PointHistoryType;
 import com.todongsan.memberpointservice.point.entity.PointReferenceType;
@@ -20,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -177,5 +177,161 @@ public class PointInternalServiceImpl implements PointInternalService {
             throw new CustomException(ErrorCode.VALIDATION_FAILED);
         }
     }
+
+    @Override
+    @Transactional
+    public SettlementResponse settle(String idempotencyKey, SettlementRequest request) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
+        }
+        if (!idempotencyKey.equals(request.getSettlementId())) {
+            throw new CustomException(ErrorCode.INVALID_REQUEST);
+        }
+        for (SettlementItem item : request.getItems()) {
+            if (item.getIdempotencyKey() == null || item.getIdempotencyKey().isBlank()) {
+                throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
+            }
+        }
+
+        List<BatchItemResult> results = new ArrayList<>();
+        for (SettlementItem item : request.getItems()) {
+            results.add(processEarnItem(
+                    item.getPredictionId(), item.getMemberId(), item.getAmount(),
+                    item.getReferenceType(), item.getReferenceId(),
+                    item.getReason(), item.getIdempotencyKey(),
+                    PointHistoryType.SETTLE_MARKET));
+        }
+
+        return SettlementResponse.builder()
+                .marketId(request.getMarketId())
+                .results(results)
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public RefundResponse refund(String idempotencyKey, RefundRequest request) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
+        }
+        if (!idempotencyKey.equals(request.getRefundId())) {
+            throw new CustomException(ErrorCode.INVALID_REQUEST);
+        }
+        for (RefundItem item : request.getItems()) {
+            if (item.getIdempotencyKey() == null || item.getIdempotencyKey().isBlank()) {
+                throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
+            }
+        }
+
+        List<BatchItemResult> results = new ArrayList<>();
+        for (RefundItem item : request.getItems()) {
+            PointHistoryType histType = "INSIGHT_REPORT".equals(item.getReferenceType())
+                    ? PointHistoryType.REFUND_INSIGHT
+                    : PointHistoryType.REFUND_MARKET;
+            results.add(processEarnItem(
+                    item.getPredictionId(), item.getMemberId(), item.getAmount(),
+                    item.getReferenceType(), item.getReferenceId(),
+                    item.getReason(), item.getIdempotencyKey(),
+                    histType));
+        }
+
+        return RefundResponse.builder()
+                .marketId(request.getMarketId())
+                .results(results)
+                .build();
+    }
+
+    private BatchItemResult processEarnItem(Long predictionId, Long memberId, BigDecimal amount,
+                                            String referenceType, Long referenceId,
+                                            String reason, String idempotencyKey,
+                                            PointHistoryType histType) {
+        Optional<PointHistory> existing = pointHistoryRepository.findByIdempotencyKey(idempotencyKey);
+        if (existing.isPresent()) {
+            PointHistory history = existing.get();
+            String newHash = RequestHashUtil.compute(memberId, histType.name(), amount, referenceType, referenceId);
+            if (newHash.equals(history.getRequestHash())) {
+                return BatchItemResult.builder()
+                        .predictionId(predictionId)
+                        .memberId(memberId)
+                        .status("ALREADY_PROCESSED")
+                        .amount(history.getAmount().toPlainString())
+                        .balanceSnapshot(history.getBalanceSnapshot().toPlainString())
+                        .build();
+            }
+            return BatchItemResult.builder()
+                    .predictionId(predictionId)
+                    .memberId(memberId)
+                    .status("FAILED")
+                    .errorCode(ErrorCode.IDEMPOTENCY_KEY_CONFLICT.getCode())
+                    .amount(amount != null ? amount.toPlainString() : null)
+                    .build();
+        }
+
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            return BatchItemResult.builder()
+                    .predictionId(predictionId)
+                    .memberId(memberId)
+                    .status("FAILED")
+                    .errorCode(ErrorCode.POINT_INVALID_AMOUNT.getCode())
+                    .amount(amount != null ? amount.toPlainString() : null)
+                    .build();
+        }
+
+        PointReferenceType refType;
+        try {
+            refType = PointReferenceType.valueOf(referenceType);
+        } catch (IllegalArgumentException e) {
+            return BatchItemResult.builder()
+                    .predictionId(predictionId)
+                    .memberId(memberId)
+                    .status("FAILED")
+                    .errorCode(ErrorCode.POINT_INVALID_REFERENCE_TYPE.getCode())
+                    .amount(amount.toPlainString())
+                    .build();
+        }
+
+        Optional<Member> memberOpt = memberRepository.findById(memberId);
+        if (memberOpt.isEmpty()) {
+            return BatchItemResult.builder()
+                    .predictionId(predictionId)
+                    .memberId(memberId)
+                    .status("FAILED")
+                    .errorCode(ErrorCode.MEMBER_NOT_FOUND.getCode())
+                    .amount(amount.toPlainString())
+                    .build();
+        }
+
+        BigDecimal normalizedAmount = amount.setScale(2, RoundingMode.DOWN);
+        String requestHash = RequestHashUtil.compute(memberId, histType.name(), amount, referenceType, referenceId);
+
+        memberRepository.earnPoint(memberId, normalizedAmount);
+
+        Member updated = memberRepository.findById(memberId)
+                .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
+
+        PointHistory history = PointHistory.builder()
+                .memberId(memberId)
+                .type(histType)
+                .amount(normalizedAmount)
+                .balanceSnapshot(updated.getPointBalance())
+                .reason(reason)
+                .referenceType(refType)
+                .referenceId(referenceId)
+                .idempotencyKey(idempotencyKey)
+                .requestHash(requestHash)
+                .status(PointTransactionStatus.SUCCEEDED)
+                .build();
+
+        pointHistoryRepository.save(history);
+
+        return BatchItemResult.builder()
+                .predictionId(predictionId)
+                .memberId(memberId)
+                .status("PROCESSED")
+                .amount(normalizedAmount.toPlainString())
+                .balanceSnapshot(updated.getPointBalance().toPlainString())
+                .build();
+    }
+
 
 }
