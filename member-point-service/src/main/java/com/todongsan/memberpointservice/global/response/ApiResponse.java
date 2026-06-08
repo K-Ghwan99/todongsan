@@ -56,6 +56,14 @@ public class ApiResponse<T> {
                 .build();
     }
 
-
-
+    // 이미 처리된 요청 재시도 응답 (HTTP 200, errorCode=POINT_TRANSACTION_ALREADY_PROCESSED)
+    public static <T> ApiResponse<T> alreadyProcessed(T data) {
+        return ApiResponse.<T>builder()
+                .success(true)
+                .errorCode(ErrorCode.POINT_TRANSACTION_ALREADY_PROCESSED.getCode())
+                .message(ErrorCode.POINT_TRANSACTION_ALREADY_PROCESSED.getMessage())
+                .data(data)
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
 }

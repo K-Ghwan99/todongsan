@@ -36,7 +36,8 @@ market-service            ──→ member-point-service:8080         POST /inte
 market-service            ──→ insight-reputation-service:8083   POST /internal/api/v1/reputations/prediction
 insight-reputation-service ──→ member-point-service:8080        POST /internal/api/v1/members/batch
 insight-reputation-service ──→ battle-service:8081              GET  /internal/api/v1/battles/{id}/votes/raw
-insight-reputation-service ──→ market-service:8082              GET  /internal/api/v1/markets/{id}/summary
+insight-reputation-service ──→ market-service:8082              GET  /internal/api/v1/markets/{id}/insight-summary
+insight-reputation-service ──→ market-service:8082              GET  /internal/api/v1/markets/{id}/insight-predictions
 
 [DB — 모든 서비스가 외부 RDS에 직접 연결]
 
@@ -158,7 +159,8 @@ public class JwtAuthenticationFilter implements GlobalFilter {
 | `/internal/api/v1/insights/battles/{battleId}/report` | POST | Battle → Insight | Battle 종료 AI 분석 트리거 |
 | `/internal/api/v1/reputations/prediction` | POST | Market → Insight | 예측 정확도 업데이트 |
 | `/internal/api/v1/battles/{battleId}/votes/raw` | GET | Insight → Battle | 투표 원본 데이터 조회 |
-| `/internal/api/v1/markets/{marketId}/summary` | GET | Insight → Market | 예측/정산 데이터 조회 |
+| `/internal/api/v1/markets/{marketId}/insight-summary` | GET | Insight → Market | 예측/정산 요약 조회 |
+| `/internal/api/v1/markets/{marketId}/insight-predictions` | GET | Insight → Market | 예측 상세 조회 |
 
 ---
 
@@ -429,7 +431,8 @@ REB_API_BASE_URL=https://...
 [ ] server.port: 8082 권장
       (현재 application.yml: 8081 → 통합 시 8082로 변경 권장)
 [ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
-      @RequestMapping: /internal/api/v1/markets/{marketId}/summary
+      @RequestMapping: /internal/api/v1/markets/{marketId}/insight-summary
+      @RequestMapping: /internal/api/v1/markets/{marketId}/insight-predictions
 [ ] SecurityConfig에서 /internal/** permitAll 설정
 [ ] 서비스 간 호출 URL 환경변수 분리
       MEMBER_POINT_SERVICE_URL, INSIGHT_SERVICE_URL
@@ -481,6 +484,7 @@ market-service → insight-reputation-service(:8083)    POST /internal/api/v1/re
 ### Insight AI 분석
 ```
 insight-reputation-service → battle-service(:8081)          GET  /internal/api/v1/battles/{id}/votes/raw
-insight-reputation-service → market-service(:8082)           GET  /internal/api/v1/markets/{id}/summary
+insight-reputation-service → market-service(:8082)           GET  /internal/api/v1/markets/{id}/insight-summary
+insight-reputation-service → market-service(:8082)           GET  /internal/api/v1/markets/{id}/insight-predictions
 insight-reputation-service → member-point-service(:8080)     POST /internal/api/v1/members/batch
 ```
