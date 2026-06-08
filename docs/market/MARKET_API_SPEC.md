@@ -1267,6 +1267,21 @@ GET /api/v1/markets/{marketId}/predictions/me
 
 ---
 
+## 6-3. 관리자 API 권한 정책
+
+관리자 API는 Gateway가 JWT를 검증한 뒤 주입한 `X-Member-Role` 헤더를 사용한다.
+Market Service는 JWT를 직접 파싱하지 않고, JWT_SECRET을 사용하지 않는다.
+
+### Headers
+
+| 이름 | 필수 | 설명 |
+|---|---:|---|
+| `X-Member-Role` | O | Gateway가 주입한 회원 역할. 관리자 API는 `ADMIN`만 허용 |
+
+`X-Member-Role`이 없거나 `ADMIN`이 아니면 `403 FORBIDDEN`을 반환한다.
+
+---
+
 ## 7. 관리자 Market 생성
 
 ```http
