@@ -155,6 +155,7 @@ public class JwtAuthenticationFilter implements GlobalFilter {
 | `/internal/api/v1/points/refunds` | POST | Market/Insight → Member-Point | 포인트 환불 |
 | `/internal/api/v1/points/transactions` | GET | Market → Member-Point | 거래 상태 조회 |
 | `/internal/api/v1/reputations/activity` | POST | Battle → Insight | 활동 점수 업데이트 |
+| `/internal/api/v1/insights/battles/{battleId}/report` | POST | Battle → Insight | Battle 종료 AI 분석 트리거 |
 | `/internal/api/v1/reputations/prediction` | POST | Market → Insight | 예측 정확도 업데이트 |
 | `/internal/api/v1/battles/{battleId}/votes/raw` | GET | Insight → Battle | 투표 원본 데이터 조회 |
 | `/internal/api/v1/markets/{marketId}/summary` | GET | Insight → Market | 예측/정산 데이터 조회 |
@@ -417,6 +418,8 @@ REB_API_BASE_URL=https://...
 [ ] SecurityConfig에서 /internal/** permitAll 설정
 [ ] 서비스 간 호출 URL 환경변수 분리
       MEMBER_POINT_SERVICE_URL, INSIGHT_SERVICE_URL
+[ ] Battle 종료(CLOSED) 시 Insight AI 분석 트리거 호출 구현
+      POST /internal/api/v1/insights/battles/{battleId}/report (BattleCloseScheduler)
 [ ] DB_URL → RDS 엔드포인트로 변경
 ```
 

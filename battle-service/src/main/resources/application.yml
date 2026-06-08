@@ -23,7 +23,9 @@ server:
 
 external:
   member-point:
-    url: http://localhost:8081
+    url: ${MEMBER_POINT_SERVICE_URL:http://localhost:8081}
+  insight:
+    url: ${INSIGHT_SERVICE_URL:http://localhost:8083}
   internal-auth-token: internal-secret-token
 
 logging:
