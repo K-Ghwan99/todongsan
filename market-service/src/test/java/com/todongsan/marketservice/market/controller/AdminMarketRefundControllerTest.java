@@ -152,6 +152,38 @@ class AdminMarketRefundControllerTest {
     }
 
     @Test
+    void refundMarketMarksNullItemStatusAsUnknown() throws Exception {
+        insertVoidedMarketWithVoid("PENDING");
+        insertOption();
+        insertPrediction(1001L, 1L, "100.00", "CONFIRMED");
+        when(memberPointClient.refundMarketPredictions(
+                anyString(),
+                any(MemberPointRefundBatchRequest.class)
+        )).thenReturn(new MemberPointRefundBatchResponse(
+                MARKET_ID,
+                List.of(new MemberPointRefundItemResult(
+                        1001L,
+                        1L,
+                        null,
+                        null,
+                        new BigDecimal("100.00"),
+                        null
+                ))
+        ));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/refunds", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(0))
+                .andExpect(jsonPath("$.data.unknownCount").value(1))
+                .andExpect(jsonPath("$.data.refundStatus").value("IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_refund_detail", String.class))
+                .isEqualTo("UNKNOWN");
+        assertPrediction(1001L, "REFUND_UNKNOWN", null);
+    }
+
+    @Test
     void refundMarketMarksUnknownOnBatchTimeout() throws Exception {
         insertVoidedMarketWithVoid("PENDING");
         insertOption();

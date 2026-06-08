@@ -1078,7 +1078,7 @@ Member-Point 응답의 item별 `results[]` 처리 기준:
 | 항목 | 내용 |
 |---|---|
 | 발생 시점 | Member-Point 정산 batch API 호출 |
-| 실패 원인 | timeout, 연결 실패, 응답 불명확 |
+| 실패 원인 | timeout, 연결 실패, 응답 불명확, status null, 알 수 없는 status, result 누락 |
 | 상태 변화 | MarketStatus = SETTLEMENT_IN_PROGRESS 유지, market_settlement.status = IN_PROGRESS 유지 |
 | 요청 대상 detail | UNKNOWN으로 기록 |
 | 재시도 | O |
@@ -1150,7 +1150,7 @@ Header Idempotency-Key는 새로운 batch 요청 추적용 키를 사용할 수 
 5. items[].idempotencyKey는 기존 detail.idempotency_key를 그대로 사용한다.
 6. PROCESSED 또는 ALREADY_PROCESSED는 SUCCESS로 반영하고 Prediction을 SETTLED로 전환한다.
 7. FAILED는 detail FAILED, Prediction CONFIRMED 유지로 반영한다.
-8. timeout 또는 응답 불명확은 요청 대상 detail UNKNOWN, Prediction CONFIRMED 유지로 반영한다.
+8. status null, 알 수 없는 status, result 누락, timeout 또는 응답 불명확은 요청 대상 detail UNKNOWN, Prediction CONFIRMED 유지로 반영한다.
 9. settlement 전체 detail 중 SUCCESS가 아닌 건이 없으면 정산 완료 처리한다.
 ```
 
