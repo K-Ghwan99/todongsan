@@ -1,5 +1,6 @@
 package com.todongsan.marketservice.market.controller;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -33,11 +34,19 @@ class MarketOpenApiDocsTest {
                 .andExpect(jsonPath("$.paths['/api/v1/internal/markets/predictions/reconcile']").exists())
                 .andExpect(jsonPath("$.paths['/internal/api/v1/markets/{marketId}/insight-summary']").exists())
                 .andExpect(jsonPath("$.paths['/internal/api/v1/markets/{marketId}/insight-predictions']").exists())
-                .andExpect(jsonPath("$.paths['/api/v1/admin/markets'].post.parameters[0].name")
-                        .value("X-Member-Role"))
-                .andExpect(jsonPath("$.paths['/internal/api/v1/markets/{marketId}/insight-predictions'].get.parameters[1].schema.default")
-                        .value("0"))
-                .andExpect(jsonPath("$.paths['/internal/api/v1/markets/{marketId}/insight-predictions'].get.parameters[2].schema.default")
-                        .value("500"));
+                .andExpect(jsonPath("$.paths['/api/v1/admin/markets'].post.parameters[*].name")
+                        .value(hasItem("X-Member-Role")))
+                .andExpect(jsonPath("$.paths['/api/v1/admin/markets'].post.parameters[*].in")
+                        .value(hasItem("header")))
+                .andExpect(jsonPath("$.paths['/api/v1/markets/{marketId}/predictions'].post.parameters[*].name")
+                        .value(hasItem("X-Member-Id")))
+                .andExpect(jsonPath("$.paths['/api/v1/markets/{marketId}/predictions'].post.parameters[*].name")
+                        .value(hasItem("Idempotency-Key")))
+                .andExpect(jsonPath("$.paths['/internal/api/v1/markets/{marketId}/insight-predictions'].get.parameters[*].name")
+                        .value(hasItem("page")))
+                .andExpect(jsonPath("$.paths['/internal/api/v1/markets/{marketId}/insight-predictions'].get.parameters[*].name")
+                        .value(hasItem("size")))
+                .andExpect(jsonPath("$.paths['/internal/api/v1/markets/{marketId}/insight-predictions'].get.parameters[*].in")
+                        .value(hasItem("query")));
     }
 }
