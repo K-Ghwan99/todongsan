@@ -257,6 +257,77 @@
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
+    <insert id="insertReputationUpdateTask" useGeneratedKeys="true" keyProperty="id">
+        INSERT IGNORE INTO market_reputation_update (
+            market_id,
+            prediction_id,
+            member_id,
+            is_correct,
+            status,
+            attempt_no,
+            last_error_code,
+            last_error_message,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            #{marketId},
+            #{predictionId},
+            #{memberId},
+            #{isCorrect},
+            #{status},
+            #{attemptNo},
+            #{lastErrorCode},
+            #{lastErrorMessage},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <select id="selectReputationUpdateByPredictionId" resultType="com.todongsan.marketservice.market.repository.MarketReputationUpdateRow">
+        SELECT *
+        FROM market_reputation_update
+        WHERE prediction_id = #{predictionId}
+    </select>
+
+    <select id="selectPendingOrUnknownReputationUpdates" resultType="com.todongsan.marketservice.market.repository.MarketReputationUpdateRow">
+        SELECT *
+        FROM market_reputation_update
+        WHERE status IN ('PENDING', 'UNKNOWN')
+        ORDER BY updated_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <update id="markReputationUpdateSuccess">
+        UPDATE market_reputation_update
+        SET status = 'SUCCESS',
+            attempt_no = attempt_no + 1,
+            last_error_code = NULL,
+            last_error_message = NULL,
+            updated_at = #{now}
+        WHERE id = #{id}
+    </update>
+
+    <update id="markReputationUpdateFailed">
+        UPDATE market_reputation_update
+        SET status = 'FAILED',
+            attempt_no = attempt_no + 1,
+            last_error_code = #{errorCode},
+            last_error_message = #{errorMessage},
+            updated_at = #{now}
+        WHERE id = #{id}
+    </update>
+
+    <update id="markReputationUpdateUnknown">
+        UPDATE market_reputation_update
+        SET status = 'UNKNOWN',
+            attempt_no = attempt_no + 1,
+            last_error_code = #{errorCode},
+            last_error_message = #{errorMessage},
+            updated_at = #{now}
+        WHERE id = #{id}
+    </update>
+
     <insert id="insertMarket" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO market (
             title,

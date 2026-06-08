@@ -61,6 +61,31 @@ public interface MarketMapper {
             @Param("limit") int limit
     );
 
+    int insertReputationUpdateTask(MarketReputationUpdateRow row);
+
+    MarketReputationUpdateRow selectReputationUpdateByPredictionId(@Param("predictionId") long predictionId);
+
+    List<MarketReputationUpdateRow> selectPendingOrUnknownReputationUpdates(@Param("limit") int limit);
+
+    int markReputationUpdateSuccess(
+            @Param("id") long id,
+            @Param("now") LocalDateTime now
+    );
+
+    int markReputationUpdateFailed(
+            @Param("id") long id,
+            @Param("errorCode") String errorCode,
+            @Param("errorMessage") String errorMessage,
+            @Param("now") LocalDateTime now
+    );
+
+    int markReputationUpdateUnknown(
+            @Param("id") long id,
+            @Param("errorCode") String errorCode,
+            @Param("errorMessage") String errorMessage,
+            @Param("now") LocalDateTime now
+    );
+
     void insertMarket(MarketInsertRow market);
 
     void insertMarketOptions(@Param("options") List<MarketOptionInsertRow> options);
