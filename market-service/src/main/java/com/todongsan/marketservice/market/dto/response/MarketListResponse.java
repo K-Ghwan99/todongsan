@@ -3,6 +3,7 @@ package com.todongsan.marketservice.market.dto.response;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -32,6 +33,7 @@ public class MarketListResponse {
         private String title;
         private MarketStatus status;
         private LocalDateTime closeAt;
+        @Schema(description = "실제 참여 포인트 총합. Decimal String으로 응답", type = "string", example = "1000.00")
         @JsonSerialize(using = ToStringSerializer.class)
         private BigDecimal totalPoolAmount;
         private List<MarketOptionResponse> options;

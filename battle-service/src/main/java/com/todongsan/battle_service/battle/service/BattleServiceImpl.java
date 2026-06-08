@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -135,6 +136,26 @@ public class BattleServiceImpl implements BattleService {
     public BattleDetailResponse getBattleInternal(Long battleId) {
         Battle battle = findByIdOrThrow(battleId);
         return BattleDetailResponse.from(battle);
+    }
+
+    @Override
+    @Transactional
+    public List<Long> closeExpiredBattles() {
+        List<Battle> expired = battleRepository.findExpiredActiveBattles(LocalDateTime.now());
+        List<Long> closedIds = new ArrayList<>();
+        for (Battle battle : expired) {
+            String winningOption = determineWinner(battle);
+            battle.close(winningOption);
+            closedIds.add(battle.getId());
+            log.info("Battle [{}] closed. winner={}", battle.getId(), winningOption);
+        }
+        return closedIds;
+    }
+
+    private String determineWinner(Battle battle) {
+        if (battle.getOptionACount() > battle.getOptionBCount()) return "A";
+        if (battle.getOptionBCount() > battle.getOptionACount()) return "B";
+        return "DRAW";
     }
 
     private Battle findByIdOrThrow(Long battleId) {

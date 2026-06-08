@@ -107,11 +107,18 @@
     <select id="selectPriceHistory" resultType="com.todongsan.marketservice.market.repository.MarketPriceHistoryRow">
         SELECT
             history.id AS history_id,
+            history.market_id,
             history.option_id,
-            history.price_after AS price,
-            history.real_pool_after AS real_pool_amount,
+            market_option.option_text AS option_content,
+            history.prediction_id,
+            history.event_type,
+            history.price_before,
+            history.price_after,
+            history.real_pool_before,
+            history.real_pool_after,
             market_option.virtual_pool_amount,
-            history.contract_quantity_after AS contract_quantity,
+            history.contract_quantity_before,
+            history.contract_quantity_after,
             history.created_at
         FROM market_price_history history
         JOIN market_option
@@ -122,7 +129,7 @@
         <if test="optionId != null">
             AND history.option_id = #{optionId}
         </if>
-        ORDER BY history.created_at DESC, history.id DESC
+        ORDER BY history.created_at ASC, history.id ASC
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
@@ -137,6 +144,220 @@
             AND history.option_id = #{optionId}
         </if>
     </select>
+
+    <select id="selectInsightMarketSummary" resultType="com.todongsan.marketservice.market.repository.MarketInsightSummaryRow">
+        SELECT
+            m.id AS market_id,
+            m.title,
+            m.category,
+            m.answer_type,
+            m.status,
+            m.close_at,
+            m.judge_date,
+            m.judge_data_source,
+            m.judge_criteria,
+            m.result_option_id,
+            m.result_value,
+            m.result_text,
+            COALESCE(SUM(p.point_amount), 0.00) AS total_pool_amount,
+            COALESCE(ms.settlement_pool, m.settlement_pool, 0.00) AS settlement_pool_amount,
+            COALESCE(ms.settled_at, m.settled_at) AS settled_at
+        FROM market m
+        LEFT JOIN market_settlement ms
+          ON ms.market_id = m.id
+        LEFT JOIN market_prediction p
+          ON p.market_id = m.id
+         AND p.status = 'SETTLED'
+        WHERE m.id = #{marketId}
+          AND m.deleted_at IS NULL
+        GROUP BY
+            m.id,
+            m.title,
+            m.category,
+            m.answer_type,
+            m.status,
+            m.close_at,
+            m.judge_date,
+            m.judge_data_source,
+            m.judge_criteria,
+            m.result_option_id,
+            m.result_value,
+            m.result_text,
+            ms.settlement_pool,
+            m.settlement_pool,
+            ms.settled_at,
+            m.settled_at
+    </select>
+
+    <select id="selectInsightOptionStatistics" resultType="com.todongsan.marketservice.market.repository.MarketInsightOptionStatisticsRow">
+        SELECT
+            o.id AS option_id,
+            o.option_code,
+            o.option_text AS option_label,
+            o.range_min,
+            o.range_max,
+            o.min_inclusive,
+            o.max_inclusive,
+            COUNT(p.id) AS prediction_count,
+            COUNT(DISTINCT p.member_id) AS participant_count,
+            COALESCE(SUM(p.point_amount), 0.00) AS pool_amount,
+            o.current_price AS final_price,
+            o.total_contract_quantity,
+            o.is_result
+        FROM market_option o
+        LEFT JOIN market_prediction p
+          ON p.market_id = o.market_id
+         AND p.option_id = o.id
+         AND p.status = 'SETTLED'
+        WHERE o.market_id = #{marketId}
+        GROUP BY
+            o.id,
+            o.option_code,
+            o.option_text,
+            o.range_min,
+            o.range_max,
+            o.min_inclusive,
+            o.max_inclusive,
+            o.current_price,
+            o.total_contract_quantity,
+            o.is_result,
+            o.display_order
+        ORDER BY o.display_order ASC, o.id ASC
+    </select>
+
+    <select id="countInsightPredictions" resultType="long">
+        SELECT COUNT(*)
+        FROM market_prediction
+        WHERE market_id = #{marketId}
+          AND status = 'SETTLED'
+    </select>
+
+    <select id="selectInsightPredictions" resultType="com.todongsan.marketservice.market.repository.MarketInsightPredictionRow">
+        SELECT
+            p.id AS prediction_id,
+            p.member_id,
+            p.option_id,
+            o.option_code,
+            o.option_text AS option_label,
+            p.point_amount,
+            p.price_snapshot,
+            p.contract_quantity,
+            p.status,
+            CASE WHEN p.option_id = m.result_option_id THEN TRUE ELSE FALSE END AS is_correct,
+            p.created_at AS participated_at
+        FROM market_prediction p
+        JOIN market_option o
+          ON o.id = p.option_id
+         AND o.market_id = p.market_id
+        JOIN market m
+          ON m.id = p.market_id
+        WHERE p.market_id = #{marketId}
+          AND p.status = 'SETTLED'
+        ORDER BY p.created_at ASC, p.id ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <insert id="insertReputationUpdateTask" useGeneratedKeys="true" keyProperty="id">
+        INSERT IGNORE INTO market_reputation_update (
+            market_id,
+            prediction_id,
+            member_id,
+            is_correct,
+            status,
+            attempt_no,
+            last_error_code,
+            last_error_message,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            #{marketId},
+            #{predictionId},
+            #{memberId},
+            #{isCorrect},
+            #{status},
+            #{attemptNo},
+            #{lastErrorCode},
+            #{lastErrorMessage},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <insert id="insertReputationUpdateTasksForSettledPredictions">
+        INSERT IGNORE INTO market_reputation_update (
+            market_id,
+            prediction_id,
+            member_id,
+            is_correct,
+            status,
+            attempt_no,
+            last_error_code,
+            last_error_message,
+            created_at,
+            updated_at
+        )
+        SELECT
+            p.market_id,
+            p.id,
+            p.member_id,
+            CASE WHEN p.option_id = m.result_option_id THEN TRUE ELSE FALSE END,
+            'PENDING',
+            0,
+            NULL,
+            NULL,
+            #{now},
+            #{now}
+        FROM market_prediction p
+        JOIN market m
+          ON m.id = p.market_id
+        WHERE p.market_id = #{marketId}
+          AND p.status = 'SETTLED'
+    </insert>
+
+    <select id="selectReputationUpdateByPredictionId" resultType="com.todongsan.marketservice.market.repository.MarketReputationUpdateRow">
+        SELECT *
+        FROM market_reputation_update
+        WHERE prediction_id = #{predictionId}
+    </select>
+
+    <select id="selectPendingOrUnknownReputationUpdates" resultType="com.todongsan.marketservice.market.repository.MarketReputationUpdateRow">
+        SELECT *
+        FROM market_reputation_update
+        WHERE status IN ('PENDING', 'UNKNOWN')
+        ORDER BY updated_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <update id="markReputationUpdateSuccess">
+        UPDATE market_reputation_update
+        SET status = 'SUCCESS',
+            attempt_no = attempt_no + 1,
+            last_error_code = NULL,
+            last_error_message = NULL,
+            updated_at = #{now}
+        WHERE id = #{id}
+    </update>
+
+    <update id="markReputationUpdateFailed">
+        UPDATE market_reputation_update
+        SET status = 'FAILED',
+            attempt_no = attempt_no + 1,
+            last_error_code = #{errorCode},
+            last_error_message = #{errorMessage},
+            updated_at = #{now}
+        WHERE id = #{id}
+    </update>
+
+    <update id="markReputationUpdateUnknown">
+        UPDATE market_reputation_update
+        SET status = 'UNKNOWN',
+            attempt_no = attempt_no + 1,
+            last_error_code = #{errorCode},
+            last_error_message = #{errorMessage},
+            updated_at = #{now}
+        WHERE id = #{id}
+    </update>
 
     <insert id="insertMarket" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO market (

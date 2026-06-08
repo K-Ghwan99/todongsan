@@ -49,6 +49,48 @@ public interface MarketMapper {
             @Param("optionId") Long optionId
     );
 
+    MarketInsightSummaryRow selectInsightMarketSummary(@Param("marketId") long marketId);
+
+    List<MarketInsightOptionStatisticsRow> selectInsightOptionStatistics(@Param("marketId") long marketId);
+
+    long countInsightPredictions(@Param("marketId") long marketId);
+
+    List<MarketInsightPredictionRow> selectInsightPredictions(
+            @Param("marketId") long marketId,
+            @Param("offset") int offset,
+            @Param("limit") int limit
+    );
+
+    int insertReputationUpdateTask(MarketReputationUpdateRow row);
+
+    int insertReputationUpdateTasksForSettledPredictions(
+            @Param("marketId") long marketId,
+            @Param("now") LocalDateTime now
+    );
+
+    MarketReputationUpdateRow selectReputationUpdateByPredictionId(@Param("predictionId") long predictionId);
+
+    List<MarketReputationUpdateRow> selectPendingOrUnknownReputationUpdates(@Param("limit") int limit);
+
+    int markReputationUpdateSuccess(
+            @Param("id") long id,
+            @Param("now") LocalDateTime now
+    );
+
+    int markReputationUpdateFailed(
+            @Param("id") long id,
+            @Param("errorCode") String errorCode,
+            @Param("errorMessage") String errorMessage,
+            @Param("now") LocalDateTime now
+    );
+
+    int markReputationUpdateUnknown(
+            @Param("id") long id,
+            @Param("errorCode") String errorCode,
+            @Param("errorMessage") String errorMessage,
+            @Param("now") LocalDateTime now
+    );
+
     void insertMarket(MarketInsertRow market);
 
     void insertMarketOptions(@Param("options") List<MarketOptionInsertRow> options);

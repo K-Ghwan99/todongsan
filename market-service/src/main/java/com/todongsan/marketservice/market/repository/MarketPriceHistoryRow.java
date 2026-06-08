@@ -1,5 +1,6 @@
 package com.todongsan.marketservice.market.repository;
 
+import com.todongsan.marketservice.market.type.PriceHistoryEventType;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import lombok.Getter;
@@ -9,10 +10,17 @@ import lombok.Setter;
 @Setter
 public class MarketPriceHistoryRow {
     private Long historyId;
+    private Long marketId;
     private Long optionId;
-    private BigDecimal price;
-    private BigDecimal realPoolAmount;
+    private String optionContent;
+    private Long predictionId;
+    private PriceHistoryEventType eventType;
+    private BigDecimal priceBefore;
+    private BigDecimal priceAfter;
+    private BigDecimal realPoolBefore;
+    private BigDecimal realPoolAfter;
     private BigDecimal virtualPoolAmount;
-    private BigDecimal contractQuantity;
+    private BigDecimal contractQuantityBefore;
+    private BigDecimal contractQuantityAfter;
     private LocalDateTime createdAt;
 }

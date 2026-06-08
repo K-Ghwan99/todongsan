@@ -7,6 +7,7 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -20,6 +21,7 @@ import com.todongsan.marketservice.market.client.exception.MemberPointTimeoutExc
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -39,8 +43,10 @@ class AdminMarketSettlementControllerTest {
     private static final long WIN_OPTION_ID = 101L;
     private static final long LOSE_OPTION_ID = 102L;
 
-    @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private WebApplicationContext webApplicationContext;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -50,8 +56,12 @@ class AdminMarketSettlementControllerTest {
 
     @BeforeEach
     void setUp() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)
+                .defaultRequest(get("/").header("X-Member-Role", "ADMIN"))
+                .build();
         reset(memberPointClient);
         jdbcTemplate.update("DELETE FROM market_price_history");
+        jdbcTemplate.update("DELETE FROM market_reputation_update");
         jdbcTemplate.update("DELETE FROM market_refund_detail");
         jdbcTemplate.update("DELETE FROM market_settlement_detail");
         jdbcTemplate.update("DELETE FROM market_settlement");
@@ -104,6 +114,13 @@ class AdminMarketSettlementControllerTest {
         )).isEqualTo("MARKET_SETTLEMENT_REWARD:market:100:prediction:1001:member:1");
         assertPrediction(1001L, "SETTLED", "190.00");
         assertPrediction(1002L, "SETTLED", "0.00");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM market_reputation_update WHERE market_id = ?",
+                Integer.class,
+                MARKET_ID
+        )).isEqualTo(2);
+        assertReputationTask(1001L, true, "PENDING", 0, null, null);
+        assertReputationTask(1002L, false, "PENDING", 0, null, null);
 
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<MemberPointSettlementBatchRequest> requestCaptor =
@@ -145,6 +162,13 @@ class AdminMarketSettlementControllerTest {
                 .isZero();
         assertPrediction(1001L, "SETTLED", "0.00");
         assertPrediction(1002L, "SETTLED", "0.00");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM market_reputation_update WHERE market_id = ?",
+                Integer.class,
+                MARKET_ID
+        )).isEqualTo(2);
+        assertReputationTask(1001L, false, "PENDING", 0, null, null);
+        assertReputationTask(1002L, false, "PENDING", 0, null, null);
     }
 
     @Test
@@ -262,6 +286,50 @@ class AdminMarketSettlementControllerTest {
     }
 
     @Test
+    void settleMarketMarksNullItemStatusAsUnknown() throws Exception {
+        insertSettlementMarket("CLOSED", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "CONFIRMED");
+        stubSettlementRawResults(List.of(new MemberPointSettlementItemResult(
+                1001L,
+                1L,
+                null,
+                null,
+                new BigDecimal("100.00"),
+                null
+        )));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(1))
+                .andExpect(jsonPath("$.data.marketStatus").value("SETTLEMENT_IN_PROGRESS"))
+                .andExpect(jsonPath("$.data.settlementStatus").value("IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_settlement_detail", String.class))
+                .isEqualTo("UNKNOWN");
+        assertPrediction(1001L, "CONFIRMED", null);
+    }
+
+    @Test
+    void settleMarketMarksMissingItemResultAsUnknown() throws Exception {
+        insertSettlementMarket("CLOSED", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "CONFIRMED");
+        stubSettlementRawResults(List.of());
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(1))
+                .andExpect(jsonPath("$.data.marketStatus").value("SETTLEMENT_IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_settlement_detail", String.class))
+                .isEqualTo("UNKNOWN");
+        assertPrediction(1001L, "CONFIRMED", null);
+    }
+
+    @Test
     void settleMarketMarksUnknownOnBatchTimeout() throws Exception {
         insertSettlementMarket("CLOSED", WIN_OPTION_ID, "0.00");
         insertSettlementOptions();
@@ -307,6 +375,7 @@ class AdminMarketSettlementControllerTest {
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_settlement_detail", String.class))
                 .isEqualTo("SUCCESS");
         assertPrediction(1001L, "SETTLED", "100.00");
+        assertReputationTask(1001L, true, "PENDING", 0, null, null);
 
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<MemberPointSettlementBatchRequest> requestCaptor =
@@ -371,6 +440,34 @@ class AdminMarketSettlementControllerTest {
     }
 
     @Test
+    void retryMarketSettlementMarksNullItemStatusAsUnknown() throws Exception {
+        long settlementId = 500L;
+        insertSettlementMarket("SETTLEMENT_IN_PROGRESS", WIN_OPTION_ID, "0.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "CONFIRMED");
+        insertExistingSettlement(settlementId, "IN_PROGRESS");
+        insertSettlementDetail(9001L, settlementId, 1001L, 1L, "FAILED", "100.00");
+        stubSettlementRawResults(List.of(new MemberPointSettlementItemResult(
+                1001L,
+                1L,
+                null,
+                null,
+                new BigDecimal("100.00"),
+                null
+        )));
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements/retry", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.successCount").value(0))
+                .andExpect(jsonPath("$.data.failedCount").value(1))
+                .andExpect(jsonPath("$.data.marketStatus").value("SETTLEMENT_IN_PROGRESS"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_settlement_detail", String.class))
+                .isEqualTo("UNKNOWN");
+        assertPrediction(1001L, "CONFIRMED", null);
+    }
+
+    @Test
     void retryMarketSettlementMarksUnknownOnBatchTimeout() throws Exception {
         long settlementId = 500L;
         insertSettlementMarket("SETTLEMENT_IN_PROGRESS", WIN_OPTION_ID, "0.00");
@@ -402,6 +499,7 @@ class AdminMarketSettlementControllerTest {
         insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "1.00000000", "SETTLED");
         insertExistingSettlement(settlementId, "IN_PROGRESS");
         insertSettlementDetail(9001L, settlementId, 1001L, 1L, "SUCCESS", "100.00");
+        insertExistingReputationTask(1001L, 1L, true, "UNKNOWN", 2, "TIMEOUT", "timeout");
 
         mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements/retry", MARKET_ID))
                 .andExpect(status().isOk())
@@ -415,6 +513,9 @@ class AdminMarketSettlementControllerTest {
                 .isEqualTo("SETTLED");
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM market_settlement", String.class))
                 .isEqualTo("COMPLETED");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_reputation_update", Integer.class))
+                .isEqualTo(1);
+        assertReputationTask(1001L, true, "UNKNOWN", 2, "TIMEOUT", "timeout");
     }
 
     @Test
@@ -474,6 +575,13 @@ class AdminMarketSettlementControllerTest {
                             .toList()
             );
         });
+    }
+
+    private void stubSettlementRawResults(List<MemberPointSettlementItemResult> results) {
+        when(memberPointClient.settleMarketRewards(
+                anyString(),
+                any(MemberPointSettlementBatchRequest.class)
+        )).thenReturn(new MemberPointSettlementBatchResponse(MARKET_ID, results));
     }
 
     private void expectSettlementError(long marketId, int statusCode, String errorCode) throws Exception {
@@ -621,5 +729,69 @@ class AdminMarketSettlementControllerTest {
                 String.class,
                 predictionId
         )).isEqualTo(settledAmount);
+    }
+
+    private void insertExistingReputationTask(
+            long predictionId,
+            long memberId,
+            boolean isCorrect,
+            String status,
+            int attemptNo,
+            String errorCode,
+            String errorMessage
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.update("""
+                INSERT INTO market_reputation_update (
+                    market_id, prediction_id, member_id, is_correct, status, attempt_no,
+                    last_error_code, last_error_message, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                MARKET_ID,
+                predictionId,
+                memberId,
+                isCorrect,
+                status,
+                attemptNo,
+                errorCode,
+                errorMessage,
+                now,
+                now
+        );
+    }
+
+    private void assertReputationTask(
+            long predictionId,
+            boolean isCorrect,
+            String status,
+            int attemptNo,
+            String errorCode,
+            String errorMessage
+    ) {
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT is_correct FROM market_reputation_update WHERE prediction_id = ?",
+                Boolean.class,
+                predictionId
+        )).isEqualTo(isCorrect);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM market_reputation_update WHERE prediction_id = ?",
+                String.class,
+                predictionId
+        )).isEqualTo(status);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT attempt_no FROM market_reputation_update WHERE prediction_id = ?",
+                Integer.class,
+                predictionId
+        )).isEqualTo(attemptNo);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT last_error_code FROM market_reputation_update WHERE prediction_id = ?",
+                String.class,
+                predictionId
+        )).isEqualTo(errorCode);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT last_error_message FROM market_reputation_update WHERE prediction_id = ?",
+                String.class,
+                predictionId
+        )).isEqualTo(errorMessage);
     }
 }
