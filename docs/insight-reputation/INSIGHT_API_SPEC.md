@@ -5,6 +5,17 @@
 
 ---
 
+## 변경 내역 (v6 → v7)
+
+| 섹션 | 변경 내용 |
+|---|---|
+| 섹션 7-1~7-3 | Battle 사용자 facing API 제거 (내부 전용 전환) |
+| 섹션 7-0 신규 | Battle 자동 트리거 내부 API 추가 |
+| 섹션 3-3 신규 | Battle 리포트 관리자 조회 API 추가 |
+| 섹션 7 번호 | Market 섹션 7-4~7-6 → 7-1~7-3으로 재번호 |
+
+---
+
 ## 변경 내역 (v5 → v6)
 
 | 섹션 | 변경 내용 |
@@ -98,12 +109,13 @@ Insight-Reputation Service가 다른 서비스를 호출하는 API 목록이다.
 
 | 호출 대상 | 엔드포인트 | 목적 |
 |---|---|---|
-| Battle Service | GET /api/v1/battles/{battleId} | Battle 기본 정보 조회 |
-| Battle Service | GET /api/v1/battles/{battleId}/votes/raw | 투표 목록 조회 (member_id, selected_option) |
-| Battle Service | GET /api/v1/battles/comments/{commentId} | 댓글 단건 조회 (방문 인증용) |
-| Market Service | GET /internal/api/v1/markets/{marketId}/insight-summary | Market 기본 정보 + 옵션별 통계 조회 (SETTLED 전용) |
-| Market Service | GET /internal/api/v1/markets/{marketId}/insight-predictions | 예측 참여 목록 조회 (member_id, selected_option, 페이지네이션) |
-| Member-Point Service | POST /api/v1/members/batch | 회원 정보 배치 조회 (ageGroup, gender, residenceSido/Sigu) |
+| Battle Service | GET /internal/api/v1/battles/{battleId}/info | Battle 기본 정보 조회 (**⚠️ Battle 담당자 구현 필요 — COORDINATION_ISSUES.md 참조**) |
+| Battle Service | GET /internal/api/v1/battles/{battleId}/votes/raw | 투표 목록 조회 (member_id, selected_option) (**⚠️ Battle 담당자 경로 변경 필요 — COORDINATION_ISSUES.md 참조**) |
+| Battle Service | GET /internal/api/v1/battles/comments/{commentId} | 댓글 단건 조회 (방문 인증용) (**⚠️ Battle 담당자 경로 변경 필요 — COORDINATION_ISSUES.md 참조**) |
+| Market Service | GET /internal/api/v1/markets/{marketId}/insight-summary | Market 기본 정보 + 옵션별 통계 조회 (SETTLED 전용. Market spec 섹션 11-1) |
+| Market Service | GET /internal/api/v1/markets/{marketId}/insight-predictions | 예측 참여 목록 조회 (member_id, selected_option, 페이지네이션. Market spec 섹션 11-2) |
+| Member-Point Service | POST /internal/api/v1/members/batch | 회원 정보 배치 조회 (ageGroup, gender, residenceSido/Sigu) |
+| Member-Point Service | POST /internal/api/v1/points/refunds | AI 리포트 생성 실패 시 Point 환불 (`INSIGHT_REPORT_SOURCE_DATA_NOT_READY`, `INSIGHT_REPORT_GENERATION_FAILED`) |
 
 [루트 API_SPEC.md 섹션 3](../API_SPEC.md#3-insight-reputation-service-내부-연계-api) 참조
 
@@ -116,7 +128,7 @@ Insight-Reputation Service가 다른 서비스를 호출하는 API 목록이다.
 ### 3-1. Activity Score 업데이트
 
 ```
-POST /api/v1/reputations/activity
+POST /internal/api/v1/reputations/activity
 ```
 
 **인증 필요:** X (내부 서비스 간 호출)
@@ -177,7 +189,7 @@ POST /api/v1/reputations/activity
 ### 3-2. Prediction Accuracy 업데이트
 
 ```
-POST /api/v1/reputations/prediction
+POST /internal/api/v1/reputations/prediction
 ```
 
 **인증 필요:** X (내부 서비스 간 호출)
@@ -191,6 +203,7 @@ POST /api/v1/reputations/prediction
 {
   "memberId": 1,
   "marketId": 7,
+  "predictionId": 123,
   "isCorrect": true
 }
 ```
@@ -199,6 +212,7 @@ POST /api/v1/reputations/prediction
 |---|---|---|---|
 | memberId | Long | Y | 회원 ID |
 | marketId | Long | Y | Market ID |
+| predictionId | Long | N | Prediction ID (Market Service에서 제공, 추적 정확성 향상) |
 | isCorrect | Boolean | Y | 예측 정확성 (true: 정답, false: 오답) |
 
 **Response**
@@ -220,13 +234,56 @@ POST /api/v1/reputations/prediction
 
 > `predictionCount` 증가 및 `predictionCorrect` 업데이트.
 > `predictionAccuracy = (predictionCorrect / predictionCount) * 100` 계산.
+> 
+> **멱등성 보장**: 동일 `memberId + marketId` 재시도 시 중복 처리 없이 기존 결과 반환.
+> `market_prediction_result` 테이블의 `UNIQUE KEY (member_id, market_id)` 제약으로 보장.
 
 **Error Codes**
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
 | RESOURCE_NOT_FOUND | 404 | 존재하지 않는 회원 |
-| VALIDATION_FAILED | 400 | 잘못된 Market ID 또는 `isCorrect` 값 |
+| VALIDATION_FAILED | 400 | 잘못된 Market ID, Prediction ID 또는 `isCorrect` 값 |
+
+---
+
+### 3-3. Battle AI 분석 리포트 관리자 조회
+
+```
+GET /api/v1/admin/insights/battles/{battleId}/report
+```
+
+**인증 필요:** X-Member-Role: ADMIN 필수
+**Point 소비:** X
+
+**Response**
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "battleId": 42,
+    "reportId": 1,
+    "status": "DONE",
+    "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
+    "summary": "전체 투표에서는 성수가 61%로 우세했습니다...",
+    "analysisData": {},
+    "generatedAt": "2026-05-25T15:30:00",
+    "retryCount": 0,
+    "failedReason": null
+  },
+  "timestamp": "2026-05-28T10:00:00"
+}
+```
+
+**Error Codes**
+
+| 에러 코드 | HTTP | 상황 |
+|---|---:|---|
+| RESOURCE_NOT_FOUND | 404 | Battle 없거나 리포트 없음 |
+| FORBIDDEN | 403 | ADMIN 권한 없음 |
 
 ---
 
@@ -488,10 +545,14 @@ POST /api/v1/reputations/visit-certifications
 > 재인증 성공 시 기존 레코드를 UPDATE한다 (INSERT 아님).
 >
 > **COMMENT 인증 처리 흐름:**
-> 1. `commentId`로 Battle Service에 댓글 단건 조회 (`GET /api/v1/battles/comments/{commentId}` — 내부 API)
-> 2. 댓글의 `battleId`로 해당 Battle의 지역(`sido`, `sigu`) 확인
-> 3. 요청 `sido`/`sigu`와 불일치 시 `VISIT_CERT_COMMENT_REGION_MISMATCH` 반환
-> 4. ERD `visit_certification.comment_content`, `visit_certification.battle_id` 저장
+> 1. `commentId`로 Battle Service에 댓글 단건 조회
+>    (`GET /internal/api/v1/battles/comments/{commentId}` → `memberId`, `battleId` 추출)
+> 2. 댓글 작성자 `memberId`로 Member-Point Service에 회원 거주지 조회
+>    (`POST /internal/api/v1/members/batch` → `residenceSido`, `residenceSigu` 추출)
+> 3. 작성자 `residenceSido`/`residenceSigu`와 요청 `sido`/`sigu` 불일치 시
+>    `VISIT_CERT_COMMENT_REGION_MISMATCH` 반환
+> 4. ERD `visit_certification.battle_id` 저장
+>    (`comment_content` 미저장 — Battle API 응답에 `content` 필드 없음)
 
 **Response**
 
@@ -584,96 +645,28 @@ GET /api/v1/reputations/visit-certifications/mine
 
 ## 7. AI 분석 리포트
 
-### 7-1. Battle AI 분석 리포트 생성
+### 7-0. Battle AI 분석 자동 트리거 (내부)
 
 ```
-POST /api/v1/insights/battles/{battleId}/report
+POST /internal/api/v1/insights/battles/{battleId}/report
 ```
 
-**인증 필요:** O
-**Point 소비:** 80P (즉시 차감)
+**인증 필요:** 없음 (내부 서비스 간 호출)
+**Point 소비:** 없음
+**호출 주체:** Battle Service (Battle 종료 시)
 
-**Headers**
+**처리 흐름:**
+1. (type=BATTLE, reference_id=battleId) 기존 리포트 조회
+   - 이미 PENDING/PROCESSING/DONE 존재 → 중복 트리거 무시 (200 반환)
+2. insight_report INSERT (status=PENDING)
+3. 즉시 200 응답 반환
+4. @Async로 분석 실행:
+   - BattleClient → /internal/api/v1/battles/{battleId}/votes/raw (투표 원본)
+   - MemberPointClient → /internal/api/v1/members/batch (회원 인구통계)
+   - ClaudeApiClient → AI 분석
+   - insight_report UPDATE (DONE/FAILED)
 
-```
-Idempotency-Key: {uuid}
-```
-
-> 동일 `Idempotency-Key`로 재요청 시 첫 번째 응답을 그대로 반환한다.
-> 이미 `DONE` 상태의 리포트가 존재하면 Point를 차감하지 않고 기존 리포트를 반환한다.
-> **비동기 처리로 확정**: POST는 즉시 `PENDING` 상태를 반환하고, 클라이언트가 섹션 7-3 상태 조회 API로 폴링한다.
->
-> **Battle AI 분석 처리 흐름:**
-> 1. Battle Service `/api/v1/battles/{battleId}` 호출하여 Battle 기본 정보 및 상태 확인
-> 2. Battle 상태가 `CLOSED`가 아니면 `INSIGHT_REPORT_SOURCE_NOT_CLOSED` 반환
-> 3. Battle Service `/api/v1/battles/{battleId}/votes/raw` 호출하여 투표 데이터 수집
-> 4. Member-Point Service `/api/v1/members/batch` 호출하여 회원 정보 배치 조회
-> 5. Claude API를 통한 AI 분석 수행
-
-**Response - 생성 요청 수락 (비동기 기준)**
-
-```json
-{
-  "success": true,
-  "errorCode": null,
-  "message": null,
-  "data": {
-    "battleId": 42,
-    "reportId": 1,
-    "status": "PENDING",
-    "statusUrl": "/api/v1/insights/battles/42/report/status",
-    "pointCharged": 80
-  },
-  "timestamp": "2026-05-28T10:00:00"
-}
-```
-
-> 상태 확인은 `statusUrl`의 폴링 API(섹션 7-3)를 사용한다.
-> `DONE` 상태 확인 후 GET 리포트 조회(섹션 7-2)로 전체 결과를 가져온다.
-
-**Response - 기존 리포트 존재 (DONE, pointCharged=0)**
-
-```json
-{
-  "success": true,
-  "errorCode": null,
-  "message": null,
-  "data": {
-    "battleId": 42,
-    "reportId": 1,
-    "status": "DONE",
-    "summary": "전체 투표에서는 성수가 61%로 우세했습니다...",
-    "analysisData": {},
-    "generatedAt": "2026-05-25T15:30:00",
-    "pointCharged": 0
-  },
-  "timestamp": "2026-05-28T10:00:00"
-}
-```
-
-> 기존 리포트가 이미 `DONE` 상태인 경우에만 즉시 전체 결과를 반환한다. Point는 차감하지 않는다.
-
-**Error Codes**
-
-| 에러 코드 | HTTP | 상황 |
-|---|---:|---|
-| RESOURCE_NOT_FOUND | 404 | 존재하지 않는 Battle |
-| INSIGHT_REPORT_ALREADY_PROCESSING | 409 | 이미 PENDING/PROCESSING 상태의 리포트가 존재함. Point 차감 없음 |
-| INSIGHT_REPORT_SOURCE_NOT_CLOSED | 400 | Battle이 아직 종료되지 않음 (status != CLOSED). Point 차감 없음 |
-| POINT_INSUFFICIENT | 400 | 보유 Point 80P 미만 |
-| INSIGHT_REPORT_SOURCE_DATA_NOT_READY | 409 | Market이 아직 SETTLED 상태가 아니거나 분석 데이터 부족. Point 차감 후 환불 처리됨 |
-| INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패. Point 차감 후 환불 처리됨 |
-
----
-
-### 7-2. Battle AI 분석 리포트 조회
-
-```
-GET /api/v1/insights/battles/{battleId}/report
-```
-
-**인증 필요:** O
-**Point 소비:** X
+**Request Body:** 없음
 
 **Response**
 
@@ -682,15 +675,7 @@ GET /api/v1/insights/battles/{battleId}/report
   "success": true,
   "errorCode": null,
   "message": null,
-  "data": {
-    "battleId": 42,
-    "reportId": 1,
-    "status": "DONE",
-    "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
-    "summary": "전체 투표에서는 성수가 61%로 우세했습니다...",
-    "analysisData": {},
-    "generatedAt": "2026-05-25T15:30:00"
-  },
+  "data": null,
   "timestamp": "2026-05-28T10:00:00"
 }
 ```
@@ -699,61 +684,12 @@ GET /api/v1/insights/battles/{battleId}/report
 
 | 에러 코드 | HTTP | 상황 |
 |---|---:|---|
-| RESOURCE_NOT_FOUND | 404 | Battle이 존재하지 않거나 리포트가 아직 없음 |
+| RESOURCE_NOT_FOUND | 404 | 존재하지 않는 battleId |
+| INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패 (비동기, 로그만 기록) |
 
 ---
 
-### 7-3. Battle AI 분석 리포트 상태 조회
-
-```
-GET /api/v1/insights/battles/{battleId}/report/status
-```
-
-**인증 필요:** O
-**Point 소비:** X
-
-> `PENDING` 또는 `PROCESSING` 상태일 때 클라이언트 폴링용으로 사용한다.
->
-> **폴링 가이드 (확정)**
-> - 폴링 간격: 2초
-> - 클라이언트 최대 대기: 30초
-> - 30초 초과 시 클라이언트에서 FAILED로 간주하고 안내 메시지 표시
-> - 서버 측 타임아웃: `processing_started_at + 10분` 초과 시 스케줄러가 PENDING으로 리셋 (ERD 비즈니스 제약 7-6)
-
-**Response**
-
-```json
-{
-  "success": true,
-  "errorCode": null,
-  "message": null,
-  "data": {
-    "battleId": 42,
-    "reportId": 1,
-    "status": "PROCESSING",
-    "retryCount": 0,
-    "processingStartedAt": "2026-05-28T09:59:00"
-  },
-  "timestamp": "2026-05-28T10:00:00"
-}
-```
-
-| status | 설명 |
-|---|---|
-| PENDING | 트리거 발생, 처리 대기 중 |
-| PROCESSING | Claude API 호출 중 |
-| DONE | 분석 완료. GET 리포트 조회로 이동 |
-| FAILED | 실패. `retryCount` 확인 |
-
-**Error Codes**
-
-| 에러 코드 | HTTP | 상황 |
-|---|---:|---|
-| RESOURCE_NOT_FOUND | 404 | 리포트 자체가 없음 |
-
----
-
-### 7-4. Market AI 정보 요약 생성
+### 7-1. Market AI 정보 요약 생성
 
 ```
 POST /api/v1/insights/markets/{marketId}/report
@@ -770,13 +706,13 @@ Idempotency-Key: {uuid}
 
 > 동일 `Idempotency-Key`로 재요청 시 첫 번째 응답을 그대로 반환한다.
 > 이미 `DONE` 상태의 리포트가 존재하면 Point를 차감하지 않고 기존 리포트를 반환한다.
-> **비동기 처리로 확정**: POST는 즉시 `PENDING` 상태를 반환하고, 클라이언트가 섹션 7-6 상태 조회 API로 폴링한다.
+> **비동기 처리로 확정**: POST는 즉시 `PENDING` 상태를 반환하고, 클라이언트가 섹션 7-3 상태 조회 API로 폴링한다.
 >
 > **Market AI 분석 처리 흐름:**
 > 1. Market Service `/internal/api/v1/markets/{marketId}/insight-summary` 호출하여 Market 기본 정보 및 상태 확인
 > 2. Market 상태가 `SETTLED`가 아니면 `INSIGHT_REPORT_SOURCE_DATA_NOT_READY` 반환
 > 3. Market Service `/internal/api/v1/markets/{marketId}/insight-predictions?page=0&size=500` 호출하여 예측 데이터 수집
-> 4. Member-Point Service `/api/v1/members/batch` 호출하여 회원 정보 배치 조회
+> 4. Member-Point Service `/internal/api/v1/members/batch` 호출하여 회원 정보 배치 조회
 > 5. Claude API를 통한 AI 분석 수행
 
 **Response - 생성 요청 수락 (비동기 기준)**
@@ -829,7 +765,7 @@ Idempotency-Key: {uuid}
 
 ---
 
-### 7-5. Market AI 정보 요약 조회
+### 7-2. Market AI 정보 요약 조회
 
 ```
 GET /api/v1/insights/markets/{marketId}/report
@@ -866,7 +802,7 @@ GET /api/v1/insights/markets/{marketId}/report
 
 ---
 
-### 7-6. Market AI 정보 요약 상태 조회
+### 7-3. Market AI 정보 요약 상태 조회
 
 ```
 GET /api/v1/insights/markets/{marketId}/report/status
@@ -876,7 +812,7 @@ GET /api/v1/insights/markets/{marketId}/report/status
 **Point 소비:** X
 
 > `PENDING` 또는 `PROCESSING` 상태일 때 클라이언트 폴링용으로 사용한다.
-> 폴링 가이드는 섹션 7-3과 동일하다. 폴링 간격 2초, 클라이언트 최대 대기 30초.
+> 폴링 가이드는 섹션 7-0과 동일하다. 폴링 간격 2초, 클라이언트 최대 대기 30초.
 
 **Response**
 

@@ -89,7 +89,7 @@ class ReputationIntegrationTest extends IntegrationTestBase {
         // 3번 호출하여 activityCount를 3으로 만들기
         for (int i = 0; i < 3; i++) {
             restTemplate.exchange(
-                    "/api/v1/reputations/activity",
+                    "/internal/api/v1/reputations/activity",
                     HttpMethod.POST,
                     new HttpEntity<>(activityRequest, createHeaders()),
                     Map.class

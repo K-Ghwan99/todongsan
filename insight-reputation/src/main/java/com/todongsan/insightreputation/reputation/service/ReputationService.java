@@ -10,7 +10,9 @@ import com.todongsan.insightreputation.reputation.dto.response.MyReputationRespo
 import com.todongsan.insightreputation.reputation.dto.response.PredictionUpdateResponse;
 import com.todongsan.insightreputation.reputation.dto.response.ReputationResponse;
 import com.todongsan.insightreputation.reputation.entity.Reputation;
+import com.todongsan.insightreputation.reputation.entity.MarketPredictionResult;
 import com.todongsan.insightreputation.reputation.repository.ReputationRepository;
+import com.todongsan.insightreputation.reputation.repository.MarketPredictionResultRepository;
 import com.todongsan.insightreputation.visitcertification.dto.response.VisitCertificationSummary;
 import com.todongsan.insightreputation.visitcertification.service.VisitCertificationService;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,7 @@ public class ReputationService {
     private static final int RESIDENCE_CHANGE_COOLDOWN_DAYS = 30;
 
     private final ReputationRepository reputationRepository;
+    private final MarketPredictionResultRepository marketPredictionResultRepository;
     private final VisitCertificationService visitCertificationService;
 
     public Reputation getReputationByMemberId(Long memberId) {
@@ -135,6 +138,7 @@ public class ReputationService {
     /**
      * 예측 정확도 업데이트 (내부 API)
      * 타 서비스(Market)에서 호출되는 내부 연계 API
+     * 멱등성 보장: 동일 memberId + marketId 재시도 시 중복 처리 없이 기존 결과 반환
      * 
      * @param request 예측 업데이트 요청
      * @return 예측 업데이트 응답
@@ -143,6 +147,26 @@ public class ReputationService {
     public PredictionUpdateResponse updatePrediction(PredictionUpdateRequest request) {
         Reputation reputation = reputationRepository.findByMemberId(request.getMemberId())
                 .orElseThrow(() -> new CustomException(ErrorCode.RESOURCE_NOT_FOUND));
+
+        // 멱등성 체크: 기존 처리 결과가 있으면 중복 처리 없이 현재 상태 반환
+        if (marketPredictionResultRepository.existsByMemberIdAndMarketId(request.getMemberId(), request.getMarketId())) {
+            return PredictionUpdateResponse.builder()
+                    .memberId(reputation.getMemberId())
+                    .predictionCount(reputation.getPredictionCount())
+                    .predictionCorrect(reputation.getPredictionCorrect())
+                    .predictionAccuracy(reputation.getPredictionAccuracy())
+                    .build();
+        }
+
+        // 처리 결과 기록 (멱등성 보장을 위한 중복 방지)
+        MarketPredictionResult predictionResult = MarketPredictionResult.builder()
+                .memberId(request.getMemberId())
+                .marketId(request.getMarketId())
+                .predictionId(request.getPredictionId())
+                .isCorrect(request.getIsCorrect())
+                .build();
+        
+        marketPredictionResultRepository.save(predictionResult);
 
         // 예측 카운트 증가
         int newPredictionCount = reputation.getPredictionCount() + 1;
