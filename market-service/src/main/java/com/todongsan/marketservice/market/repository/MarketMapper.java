@@ -63,6 +63,11 @@ public interface MarketMapper {
 
     int insertReputationUpdateTask(MarketReputationUpdateRow row);
 
+    int insertReputationUpdateTasksForSettledPredictions(
+            @Param("marketId") long marketId,
+            @Param("now") LocalDateTime now
+    );
+
     MarketReputationUpdateRow selectReputationUpdateByPredictionId(@Param("predictionId") long predictionId);
 
     List<MarketReputationUpdateRow> selectPendingOrUnknownReputationUpdates(@Param("limit") int limit);

@@ -284,6 +284,37 @@
         )
     </insert>
 
+    <insert id="insertReputationUpdateTasksForSettledPredictions">
+        INSERT IGNORE INTO market_reputation_update (
+            market_id,
+            prediction_id,
+            member_id,
+            is_correct,
+            status,
+            attempt_no,
+            last_error_code,
+            last_error_message,
+            created_at,
+            updated_at
+        )
+        SELECT
+            p.market_id,
+            p.id,
+            p.member_id,
+            CASE WHEN p.option_id = m.result_option_id THEN TRUE ELSE FALSE END,
+            'PENDING',
+            0,
+            NULL,
+            NULL,
+            #{now},
+            #{now}
+        FROM market_prediction p
+        JOIN market m
+          ON m.id = p.market_id
+        WHERE p.market_id = #{marketId}
+          AND p.status = 'SETTLED'
+    </insert>
+
     <select id="selectReputationUpdateByPredictionId" resultType="com.todongsan.marketservice.market.repository.MarketReputationUpdateRow">
         SELECT *
         FROM market_reputation_update

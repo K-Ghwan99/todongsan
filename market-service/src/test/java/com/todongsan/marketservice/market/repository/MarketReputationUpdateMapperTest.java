@@ -3,6 +3,7 @@ package com.todongsan.marketservice.market.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.todongsan.marketservice.market.type.ReputationUpdateStatus;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,7 +23,15 @@ class MarketReputationUpdateMapperTest {
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.update("DELETE FROM market_price_history");
         jdbcTemplate.update("DELETE FROM market_reputation_update");
+        jdbcTemplate.update("DELETE FROM market_refund_detail");
+        jdbcTemplate.update("DELETE FROM market_settlement_detail");
+        jdbcTemplate.update("DELETE FROM market_settlement");
+        jdbcTemplate.update("DELETE FROM market_void");
+        jdbcTemplate.update("DELETE FROM market_prediction");
+        jdbcTemplate.update("DELETE FROM market_option");
+        jdbcTemplate.update("DELETE FROM market");
     }
 
     @Test
@@ -161,6 +170,55 @@ class MarketReputationUpdateMapperTest {
         assertThat(saved.getLastErrorMessage()).isEqualTo("request timeout");
     }
 
+    @Test
+    void insertReputationUpdateTasksForSettledPredictionsCreatesTasksOnlyForSettledPredictions() {
+        LocalDateTime now = LocalDateTime.now();
+        insertMarket(1L, 11L, now);
+        insertOption(11L, 1L, now);
+        insertOption(12L, 1L, now);
+        insertPrediction(101L, 1L, 11L, 10L, "SETTLED", now);
+        insertPrediction(102L, 1L, 12L, 20L, "SETTLED", now);
+        insertPrediction(103L, 1L, 11L, 30L, "CONFIRMED", now);
+        insertPrediction(104L, 1L, 12L, 40L, "FAILED", now);
+
+        int insertedRows = marketMapper.insertReputationUpdateTasksForSettledPredictions(1L, now.plusSeconds(1));
+
+        assertThat(insertedRows).isEqualTo(2);
+        assertTask(101L, true, ReputationUpdateStatus.PENDING, 0, null, null);
+        assertTask(102L, false, ReputationUpdateStatus.PENDING, 0, null, null);
+        assertThat(marketMapper.selectReputationUpdateByPredictionId(103L)).isNull();
+        assertThat(marketMapper.selectReputationUpdateByPredictionId(104L)).isNull();
+    }
+
+    @Test
+    void insertReputationUpdateTasksForSettledPredictionsIgnoresExistingTasksWithoutChangingThem() {
+        LocalDateTime now = LocalDateTime.now();
+        insertMarket(1L, 11L, now);
+        insertOption(11L, 1L, now);
+        insertOption(12L, 1L, now);
+        insertPrediction(101L, 1L, 11L, 10L, "SETTLED", now);
+        insertPrediction(102L, 1L, 12L, 20L, "SETTLED", now);
+        marketMapper.insertReputationUpdateTask(row(1L, 101L, 10L, true, ReputationUpdateStatus.PENDING, now));
+        jdbcTemplate.update("""
+                UPDATE market_reputation_update
+                SET status = 'UNKNOWN',
+                    attempt_no = 2,
+                    last_error_code = 'TIMEOUT',
+                    last_error_message = 'timeout'
+                WHERE prediction_id = 101
+                """);
+
+        int firstInsertedRows = marketMapper.insertReputationUpdateTasksForSettledPredictions(1L, now.plusSeconds(1));
+        int secondInsertedRows = marketMapper.insertReputationUpdateTasksForSettledPredictions(1L, now.plusSeconds(2));
+
+        assertThat(firstInsertedRows).isEqualTo(1);
+        assertThat(secondInsertedRows).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_reputation_update", Integer.class))
+                .isEqualTo(2);
+        assertTask(101L, true, ReputationUpdateStatus.UNKNOWN, 2, "TIMEOUT", "timeout");
+        assertTask(102L, false, ReputationUpdateStatus.PENDING, 0, null, null);
+    }
+
     private MarketReputationUpdateRow row(
             long marketId,
             long predictionId,
@@ -206,5 +264,84 @@ class MarketReputationUpdateMapperTest {
                 updatedAt.minusMinutes(1),
                 updatedAt
         );
+    }
+
+    private void insertMarket(long marketId, long resultOptionId, LocalDateTime now) {
+        jdbcTemplate.update("""
+                INSERT INTO market (
+                    id, title, category, answer_type, judge_data_source, judge_criteria, judge_date,
+                    status, close_at, result_option_id, total_pool, initial_virtual_liquidity,
+                    created_by, created_at, updated_at
+                ) VALUES (?, 'Reputation Mapper Market', 'PRICE_INDEX', 'MULTIPLE_CHOICE',
+                          'TEST', 'TEST', ?, 'SETTLED', ?, ?, 100.00, 200.00, 1, ?, ?)
+                """,
+                marketId,
+                LocalDate.now(),
+                now.minusDays(1),
+                resultOptionId,
+                now,
+                now
+        );
+    }
+
+    private void insertOption(long optionId, long marketId, LocalDateTime now) {
+        jdbcTemplate.update("""
+                INSERT INTO market_option (
+                    id, market_id, option_code, option_text, display_order,
+                    virtual_pool_amount, real_pool_amount, total_contract_quantity,
+                    current_price, prediction_count, is_result, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 100.00, 0.00, 0.00000000, 0.50000000, 0, FALSE, ?, ?)
+                """,
+                optionId,
+                marketId,
+                "O" + optionId,
+                "Option " + optionId,
+                optionId,
+                now,
+                now
+        );
+    }
+
+    private void insertPrediction(
+            long predictionId,
+            long marketId,
+            long optionId,
+            long memberId,
+            String status,
+            LocalDateTime now
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO market_prediction (
+                    id, market_id, option_id, member_id, point_amount, price_snapshot,
+                    contract_quantity, status, point_spend_idempotency_key, attempt_no,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 100.00, 0.50000000, 200.00000000, ?, ?, 1, ?, ?)
+                """,
+                predictionId,
+                marketId,
+                optionId,
+                memberId,
+                status,
+                "REPUTATION_MAPPER_KEY_" + predictionId,
+                now,
+                now
+        );
+    }
+
+    private void assertTask(
+            long predictionId,
+            boolean isCorrect,
+            ReputationUpdateStatus status,
+            int attemptNo,
+            String errorCode,
+            String errorMessage
+    ) {
+        MarketReputationUpdateRow saved = marketMapper.selectReputationUpdateByPredictionId(predictionId);
+        assertThat(saved).isNotNull();
+        assertThat(saved.getIsCorrect()).isEqualTo(isCorrect);
+        assertThat(saved.getStatus()).isEqualTo(status);
+        assertThat(saved.getAttemptNo()).isEqualTo(attemptNo);
+        assertThat(saved.getLastErrorCode()).isEqualTo(errorCode);
+        assertThat(saved.getLastErrorMessage()).isEqualTo(errorMessage);
     }
 }
