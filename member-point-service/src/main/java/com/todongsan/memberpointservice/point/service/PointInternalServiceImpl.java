@@ -179,6 +179,40 @@ public class PointInternalServiceImpl implements PointInternalService {
     }
 
     @Override
+    public TransactionResponse getTransaction(String idempotencyKey) {
+
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
+        }
+
+        Optional<PointHistory> opt = pointHistoryRepository.findByIdempotencyKey(idempotencyKey);
+
+        if (opt.isEmpty()) {
+            return TransactionResponse.builder()
+                    .idempotencyKey(idempotencyKey)
+                    .status("NOT_FOUND")
+                    .build();
+
+        }
+
+        PointHistory history = opt.get();
+        String status = history.getStatus() == PointTransactionStatus.SUCCEEDED ? "PROCESSED" : "FAILED";
+
+        return TransactionResponse.builder()
+                .idempotencyKey(history.getIdempotencyKey())
+                .status(status)
+                .memberId(history.getMemberId())
+                .type(history.getType().name())
+                .amount(history.getAmount().toPlainString())
+                .referenceType(history.getReferenceType() != null ? history.getReferenceType().name() : null)
+                .referenceId(history.getReferenceId())
+                .balanceSnapshot(history.getBalanceSnapshot().toPlainString())
+                .createdAt(history.getCreatedAt())
+                .failReason(history.getFailReason())
+                .build();
+    }
+
+    @Override
     @Transactional
     public SettlementResponse settle(String idempotencyKey, SettlementRequest request) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
