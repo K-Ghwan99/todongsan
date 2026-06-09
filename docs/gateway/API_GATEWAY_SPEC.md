@@ -92,12 +92,20 @@ JWT 서명 검증 (Member-Point와 동일한 JWT_SECRET 사용)
     └── 유효 ──→ memberId, role 추출
                     │
                     ▼
-              X-Member-Id: {memberId}    헤더 추가
-              X-Member-Role: {role}      헤더 추가
+              클라이언트가 보낸 X-Member-Id, X-Member-Role 헤더 제거 (스푸핑 차단)
+                    │
+                    ▼
+              X-Member-Id: {memberId}    헤더 추가 (JWT claim 기준)
+              X-Member-Role: {role}      헤더 추가 (JWT claim 기준)
                     │
                     ▼
               하위 서비스로 라우팅
 ```
+
+> **[보안 정책]** 클라이언트가 임의로 보낸 `X-Member-Id`, `X-Member-Role` 헤더는 반드시 제거 후
+> JWT claim 기준으로 덮어써야 한다. 클라이언트가 `X-Member-Role: ADMIN`을 임의로 설정하는
+> 스푸핑 공격을 차단한다.
+> `Idempotency-Key`는 건드리지 않고 원본 그대로 downstream 전달한다.
 
 **Gateway GlobalFilter 구현 핵심:**
 ```java
@@ -134,8 +142,12 @@ public class JwtAuthenticationFilter implements GlobalFilter {
 | `/api/v1/points/balance` | GET | 포인트 잔액 조회 |
 | `/api/v1/points/history` | GET | 포인트 내역 조회 |
 | `/api/v1/battles/**` | 전체 | Battle 관련 외부 API |
+| `/api/v1/admin/markets/**` | 전체 | Market 관리자 API (Market 팀 요청) |
 | `/api/v1/markets/**` | 전체 | Market 관련 외부 API |
 | `/api/v1/insights/**` | 전체 | Insight 관련 외부 API |
+
+> ⚠️ `/api/v1/admin/markets/**`는 `/api/v1/markets/**`보다 **먼저** 등록해야 한다.
+> Spring Cloud Gateway는 등록 순서대로 매칭하므로 더 구체적인 경로를 위에 둔다.
 
 ### 4-3. 내부 연계 API (Gateway를 통하지 않음)
 
