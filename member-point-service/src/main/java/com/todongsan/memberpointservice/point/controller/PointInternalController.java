@@ -5,10 +5,7 @@ import com.todongsan.memberpointservice.point.dto.request.EarnRequest;
 import com.todongsan.memberpointservice.point.dto.request.RefundRequest;
 import com.todongsan.memberpointservice.point.dto.request.SettlementRequest;
 import com.todongsan.memberpointservice.point.dto.request.SpendRequest;
-import com.todongsan.memberpointservice.point.dto.response.EarnResponse;
-import com.todongsan.memberpointservice.point.dto.response.RefundResponse;
-import com.todongsan.memberpointservice.point.dto.response.SettlementResponse;
-import com.todongsan.memberpointservice.point.dto.response.SpendResponse;
+import com.todongsan.memberpointservice.point.dto.response.*;
 import com.todongsan.memberpointservice.point.service.PointInternalService;
 import com.todongsan.memberpointservice.point.service.PointResult;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +53,11 @@ public class PointInternalController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody RefundRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(pointInternalService.refund(idempotencyKey, request)));
+    }
+
+    @GetMapping("/transactions")
+    public ResponseEntity<ApiResponse<TransactionResponse>> getTransaction(@RequestParam(required = false) String idempotencyKey) {
+        return ResponseEntity.ok(ApiResponse.ok(pointInternalService.getTransaction(idempotencyKey)));
     }
 
 }
