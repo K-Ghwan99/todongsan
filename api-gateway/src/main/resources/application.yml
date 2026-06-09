@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: admin-market
+          uri: ${MARKET_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/admin/markets/**
+
+        - id: member-point
+          uri: ${MEMBER_POINT_SERVICE_URL:http://localhost:8080}
+          predicates:
+            - Path=/api/v1/members/**, /api/v1/points/**
+
+        - id: battle
+          uri: ${BATTLE_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/v1/battles/**
+
+        - id: market
+          uri: ${MARKET_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/markets/**
+
+        - id: insight
+          uri: ${INSIGHT_SERVICE_URL:http://localhost:8083}
+          predicates:
+            - Path=/api/v1/insights/**
+
+server:
+  port: 9000
+
+jwt:
+  secret: ${JWT_SECRET}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
