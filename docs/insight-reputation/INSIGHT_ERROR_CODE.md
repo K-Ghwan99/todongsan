@@ -33,7 +33,7 @@ Insight-Reputation Service는 아래 세 도메인의 비즈니스 실패를 다
 |---|---:|---|---|---|---|
 | `VISIT_CERT_COOLDOWN` | 400 | {sido} {sigu}는 {nextAvailableDate}부터 재인증 가능합니다. | `last_certified_at + 30일 > NOW()` 인 동일 지역에 재인증 요청 | X | `visit_certification` 변경 없음 |
 | `VISIT_CERT_OUT_OF_RANGE` | 400 | 현재 위치가 인증 가능 반경(3km)을 벗어났습니다. | GPS 좌표와 지역 중심 좌표 거리 > 3km | X | `visit_certification` 생성/변경 없음 |
-| `VISIT_CERT_COMMENT_REGION_MISMATCH` | 400 | 해당 댓글은 인증하려는 지역의 Battle이 아닙니다. | `commentId`로 조회한 Battle의 `sido`/`sigu`와 요청 `sido`/`sigu` 불일치 | X | `visit_certification` 생성/변경 없음 |
+| `VISIT_CERT_COMMENT_REGION_MISMATCH` | 400 | 해당 댓글의 작성자는 인증하려는 지역의 거주자가 아닙니다. | `commentId`로 조회한 댓글 작성자의 거주지(`residenceSido`/`residenceSigu`)와 요청 `sido`/`sigu` 불일치 | X | `visit_certification` 생성/변경 없음 |
 | `VISIT_CERT_COMMENT_NOT_FOUND` | 404 | 댓글을 찾을 수 없습니다. | Battle Service에서 `commentId`에 해당하는 댓글이 없음 | X | `visit_certification` 생성/변경 없음 |
 
 ### 2-3. Insight Report 도메인
@@ -159,7 +159,7 @@ Insight-Reputation Service는 아래 세 도메인의 비즈니스 실패를 다
 | `VISIT_CERT_COOLDOWN` | 변경 없음 | 30일 경과 후 재시도 가능 |
 | `VISIT_CERT_OUT_OF_RANGE` | 생성/변경 없음 | 반경 내 이동 후 재시도 가능 |
 | `VISIT_CERT_COMMENT_NOT_FOUND` | 생성/변경 없음 | 유효한 commentId로 재요청 |
-| `VISIT_CERT_COMMENT_REGION_MISMATCH` | 생성/변경 없음 | 해당 지역 Battle 댓글로 재요청 |
+| `VISIT_CERT_COMMENT_REGION_MISMATCH` | 생성/변경 없음 | 해당 지역 거주자의 댓글로 재요청 |
 
 ### 4-3. AI 리포트 생성 실패
 
@@ -182,7 +182,7 @@ Insight-Reputation Service는 아래 세 도메인의 비즈니스 실패를 다
 | `VISIT_CERT_COOLDOWN` | X | `nextAvailableDate` 경과 후 사용자가 직접 재요청 |
 | `VISIT_CERT_OUT_OF_RANGE` | X | 사용자가 반경 내 이동 후 재요청 |
 | `VISIT_CERT_COMMENT_NOT_FOUND` | X | 유효한 댓글로 재요청 |
-| `VISIT_CERT_COMMENT_REGION_MISMATCH` | X | 해당 지역 Battle 댓글로 재요청 |
+| `VISIT_CERT_COMMENT_REGION_MISMATCH` | X | 해당 지역 거주자의 댓글로 재요청 |
 | `INSIGHT_REPORT_SOURCE_NOT_CLOSED` | X | Battle 종료 후 재요청 |
 | `INSIGHT_REPORT_ALREADY_PROCESSING` | X | 상태 폴링 API로 진행 상황 확인 |
 | `INSIGHT_REPORT_SOURCE_DATA_NOT_READY` | X | 데이터 준비 전까지 재시도 불가 |
@@ -217,7 +217,7 @@ Insight-Reputation Service는 아래 세 도메인의 비즈니스 실패를 다
 | `VISIT_CERT_COOLDOWN` | Toast: "재인증 가능일({nextAvailableDate})을 안내" |
 | `VISIT_CERT_OUT_OF_RANGE` | Toast: "현재 위치가 인증 반경을 벗어났습니다" |
 | `VISIT_CERT_COMMENT_NOT_FOUND` | Toast: "댓글을 찾을 수 없습니다" |
-| `VISIT_CERT_COMMENT_REGION_MISMATCH` | Toast: "해당 지역 Battle의 댓글이 아닙니다" |
+| `VISIT_CERT_COMMENT_REGION_MISMATCH` | Toast: "해당 댓글의 작성자는 인증하려는 지역 거주자가 아닙니다" |
 | `INSIGHT_REPORT_NOT_FOUND` | 리포트 없음 안내 + 생성 버튼 표시 |
 | `INSIGHT_REPORT_ALREADY_PROCESSING` | Toast: "분석 중입니다" + 상태 폴링 유지 |
 | `INSIGHT_REPORT_SOURCE_NOT_CLOSED` | Toast: "Battle 종료 후 분석 가능합니다" |
