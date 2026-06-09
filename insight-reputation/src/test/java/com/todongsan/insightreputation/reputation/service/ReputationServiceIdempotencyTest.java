@@ -48,7 +48,7 @@ class ReputationServiceIdempotencyTest {
                 .memberId(memberId)
                 .build();
         reputation.updatePredictionStats(5, 3);  // 기존 5회 중 3회 정답
-        reputation.updatePredictionAccuracy(60.0);
+        reputation.updatePredictionAccuracy(java.math.BigDecimal.valueOf(60.0));
         
         PredictionUpdateRequest request = PredictionUpdateRequest.builder()
                 .memberId(memberId)
@@ -76,7 +76,7 @@ class ReputationServiceIdempotencyTest {
         assertThat(response.getMemberId()).isEqualTo(memberId);
         assertThat(response.getPredictionCount()).isEqualTo(6);  // 5 + 1
         assertThat(response.getPredictionCorrect()).isEqualTo(4);  // 3 + 1 (정답)
-        assertThat(response.getPredictionAccuracy()).isEqualTo(66.66);  // FLOOR(4/6 * 100 * 100) / 100
+        assertThat(response.getPredictionAccuracy().compareTo(java.math.BigDecimal.valueOf(66.66))).isEqualTo(0);  // FLOOR(4/6 * 100 * 100) / 100
 
         // 처리 결과 기록 및 reputation 업데이트 확인
         verify(marketPredictionResultRepository, times(1)).save(any(MarketPredictionResult.class));
@@ -96,7 +96,7 @@ class ReputationServiceIdempotencyTest {
                 .memberId(memberId)
                 .build();
         reputation.updatePredictionStats(6, 4);  // 이미 처리된 상태
-        reputation.updatePredictionAccuracy(66.66);
+        reputation.updatePredictionAccuracy(java.math.BigDecimal.valueOf(66.66));
         
         PredictionUpdateRequest request = PredictionUpdateRequest.builder()
                 .memberId(memberId)
@@ -117,7 +117,7 @@ class ReputationServiceIdempotencyTest {
         assertThat(response.getMemberId()).isEqualTo(memberId);
         assertThat(response.getPredictionCount()).isEqualTo(6);  // 기존 상태 그대로
         assertThat(response.getPredictionCorrect()).isEqualTo(4);  // 기존 상태 그대로
-        assertThat(response.getPredictionAccuracy()).isEqualTo(66.66);  // 기존 상태 그대로
+        assertThat(response.getPredictionAccuracy().compareTo(java.math.BigDecimal.valueOf(66.66))).isEqualTo(0);  // 기존 상태 그대로
 
         // 중복 처리 없음 확인
         verify(marketPredictionResultRepository, never()).save(any(MarketPredictionResult.class));
@@ -136,7 +136,7 @@ class ReputationServiceIdempotencyTest {
                 .memberId(memberId)
                 .build();
         reputation.updatePredictionStats(5, 3);  // 기존 5회 중 3회 정답
-        reputation.updatePredictionAccuracy(60.0);
+        reputation.updatePredictionAccuracy(java.math.BigDecimal.valueOf(60.0));
         
         PredictionUpdateRequest request = PredictionUpdateRequest.builder()
                 .memberId(memberId)
@@ -162,7 +162,7 @@ class ReputationServiceIdempotencyTest {
         assertThat(response.getMemberId()).isEqualTo(memberId);
         assertThat(response.getPredictionCount()).isEqualTo(6);  // 5 + 1
         assertThat(response.getPredictionCorrect()).isEqualTo(3);  // 3 (정답 카운트 증가 없음)
-        assertThat(response.getPredictionAccuracy()).isEqualTo(50.0);  // FLOOR(3/6 * 100 * 100) / 100
+        assertThat(response.getPredictionAccuracy().compareTo(java.math.BigDecimal.valueOf(50.0))).isEqualTo(0);  // FLOOR(3/6 * 100 * 100) / 100
 
         verify(marketPredictionResultRepository, times(1)).save(any(MarketPredictionResult.class));
     }
@@ -178,7 +178,7 @@ class ReputationServiceIdempotencyTest {
                 .memberId(memberId)
                 .build();
         reputation.updatePredictionStats(0, 0);  // 초기 상태
-        reputation.updatePredictionAccuracy(0.0);
+        reputation.updatePredictionAccuracy(java.math.BigDecimal.valueOf(0.0));
         
         PredictionUpdateRequest request = PredictionUpdateRequest.builder()
                 .memberId(memberId)
@@ -206,7 +206,7 @@ class ReputationServiceIdempotencyTest {
         assertThat(response.getMemberId()).isEqualTo(memberId);
         assertThat(response.getPredictionCount()).isEqualTo(1);
         assertThat(response.getPredictionCorrect()).isEqualTo(1);
-        assertThat(response.getPredictionAccuracy()).isEqualTo(100.0);
+        assertThat(response.getPredictionAccuracy().compareTo(java.math.BigDecimal.valueOf(100.0))).isEqualTo(0);
 
         verify(marketPredictionResultRepository, times(1)).save(any(MarketPredictionResult.class));
     }

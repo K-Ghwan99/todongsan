@@ -10,5 +10,5 @@ public class PredictionUpdateResponse {
     private Long memberId;
     private Integer predictionCount;
     private Integer predictionCorrect;
-    private Double predictionAccuracy;
+    private java.math.BigDecimal predictionAccuracy;
 }

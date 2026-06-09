@@ -10,7 +10,9 @@ import com.todongsan.insightreputation.reputation.dto.response.MyReputationRespo
 import com.todongsan.insightreputation.reputation.dto.response.PredictionUpdateResponse;
 import com.todongsan.insightreputation.reputation.dto.response.ReputationResponse;
 import com.todongsan.insightreputation.reputation.entity.Reputation;
+import com.todongsan.insightreputation.reputation.entity.MarketPredictionResult;
 import com.todongsan.insightreputation.reputation.repository.ReputationRepository;
+import com.todongsan.insightreputation.reputation.repository.MarketPredictionResultRepository;
 import com.todongsan.insightreputation.visitcertification.dto.response.VisitCertificationSummary;
 import com.todongsan.insightreputation.visitcertification.service.VisitCertificationService;
 import org.junit.jupiter.api.DisplayName;
@@ -37,6 +39,9 @@ class ReputationServiceTest {
 
     @Mock
     private ReputationRepository reputationRepository;
+
+    @Mock
+    private MarketPredictionResultRepository marketPredictionResultRepository;
 
     @Mock
     private VisitCertificationService visitCertificationService;
@@ -384,6 +389,8 @@ class ReputationServiceTest {
         PredictionUpdateRequest request = createPredictionUpdateRequest(memberId, marketId, true);
         
         when(reputationRepository.findByMemberId(memberId)).thenReturn(Optional.of(reputation));
+        when(marketPredictionResultRepository.existsByMemberIdAndMarketId(memberId, marketId)).thenReturn(false);
+        when(marketPredictionResultRepository.save(any(MarketPredictionResult.class))).thenReturn(MarketPredictionResult.builder().build());
         
         // when
         PredictionUpdateResponse response = reputationService.updatePrediction(request);
@@ -393,7 +400,7 @@ class ReputationServiceTest {
         assertThat(response.getPredictionCount()).isEqualTo(11);
         assertThat(response.getPredictionCorrect()).isEqualTo(8);
         // 8/11 * 100 = 72.727272... → Math.floor(72.727272 * 100) / 100 = 72.72
-        assertThat(response.getPredictionAccuracy()).isEqualTo(72.72);
+        assertThat(response.getPredictionAccuracy().compareTo(java.math.BigDecimal.valueOf(72.72))).isEqualTo(0);
     }
     
     @Test
@@ -406,6 +413,8 @@ class ReputationServiceTest {
         PredictionUpdateRequest request = createPredictionUpdateRequest(memberId, marketId, false);
         
         when(reputationRepository.findByMemberId(memberId)).thenReturn(Optional.of(reputation));
+        when(marketPredictionResultRepository.existsByMemberIdAndMarketId(memberId, marketId)).thenReturn(false);
+        when(marketPredictionResultRepository.save(any(MarketPredictionResult.class))).thenReturn(MarketPredictionResult.builder().build());
         
         // when
         PredictionUpdateResponse response = reputationService.updatePrediction(request);
@@ -414,7 +423,7 @@ class ReputationServiceTest {
         assertThat(response.getPredictionCount()).isEqualTo(6); // 증가
         assertThat(response.getPredictionCorrect()).isEqualTo(3); // 변경 없음
         // 3/6 * 100 = 50.00
-        assertThat(response.getPredictionAccuracy()).isEqualTo(50.0);
+        assertThat(response.getPredictionAccuracy().compareTo(java.math.BigDecimal.valueOf(50.0))).isEqualTo(0);
     }
     
     @Test
@@ -427,6 +436,8 @@ class ReputationServiceTest {
         PredictionUpdateRequest request = createPredictionUpdateRequest(memberId, marketId, true);
         
         when(reputationRepository.findByMemberId(memberId)).thenReturn(Optional.of(reputation));
+        when(marketPredictionResultRepository.existsByMemberIdAndMarketId(memberId, marketId)).thenReturn(false);
+        when(marketPredictionResultRepository.save(any(MarketPredictionResult.class))).thenReturn(MarketPredictionResult.builder().build());
         
         // when
         PredictionUpdateResponse response = reputationService.updatePrediction(request);
@@ -434,7 +445,7 @@ class ReputationServiceTest {
         // then
         assertThat(response.getPredictionCount()).isEqualTo(1);
         assertThat(response.getPredictionCorrect()).isEqualTo(1);
-        assertThat(response.getPredictionAccuracy()).isEqualTo(100.0); // 1/1 * 100 = 100
+        assertThat(response.getPredictionAccuracy().compareTo(java.math.BigDecimal.valueOf(100.0))).isEqualTo(0); // 1/1 * 100 = 100
     }
     
     @Test
@@ -448,17 +459,21 @@ class ReputationServiceTest {
         Reputation reputation1 = createTestReputationWithPrediction(memberId, 10, 7);
         PredictionUpdateRequest request1 = createPredictionUpdateRequest(memberId, marketId, true);
         when(reputationRepository.findByMemberId(memberId)).thenReturn(Optional.of(reputation1));
+        when(marketPredictionResultRepository.existsByMemberIdAndMarketId(memberId, marketId)).thenReturn(false);
+        when(marketPredictionResultRepository.save(any(MarketPredictionResult.class))).thenReturn(MarketPredictionResult.builder().build());
         
         PredictionUpdateResponse response1 = reputationService.updatePrediction(request1);
-        assertThat(response1.getPredictionAccuracy()).isEqualTo(72.72);
+        assertThat(response1.getPredictionAccuracy().compareTo(java.math.BigDecimal.valueOf(72.72))).isEqualTo(0);
         
         // Test case 2: 1/3 = 33.333333...
         Reputation reputation2 = createTestReputationWithPrediction(memberId, 2, 0);
         PredictionUpdateRequest request2 = createPredictionUpdateRequest(memberId, marketId, true);
         when(reputationRepository.findByMemberId(memberId)).thenReturn(Optional.of(reputation2));
+        when(marketPredictionResultRepository.existsByMemberIdAndMarketId(memberId, marketId)).thenReturn(false);
+        when(marketPredictionResultRepository.save(any(MarketPredictionResult.class))).thenReturn(MarketPredictionResult.builder().build());
         
         PredictionUpdateResponse response2 = reputationService.updatePrediction(request2);
-        assertThat(response2.getPredictionAccuracy()).isEqualTo(33.33); // 33.337... → 33.33 (버림)
+        assertThat(response2.getPredictionAccuracy().compareTo(java.math.BigDecimal.valueOf(33.33))).isEqualTo(0); // 33.337... → 33.33 (버림)
     }
     
     @Test

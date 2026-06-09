@@ -178,9 +178,12 @@ public class ReputationService {
         }
 
         // 정확도 계산 (소수점 버림)
-        double predictionAccuracy = 0.0;
+        java.math.BigDecimal predictionAccuracy = java.math.BigDecimal.ZERO;
         if (newPredictionCount > 0) {
-            predictionAccuracy = Math.floor((double) newPredictionCorrect * 100 * 100 / newPredictionCount) / 100;
+            predictionAccuracy = java.math.BigDecimal.valueOf(newPredictionCorrect)
+                    .multiply(java.math.BigDecimal.valueOf(10000))
+                    .divide(java.math.BigDecimal.valueOf(newPredictionCount), java.math.RoundingMode.DOWN)
+                    .divide(java.math.BigDecimal.valueOf(100));
         }
 
         // 동일 트랜잭션으로 모든 필드 업데이트
