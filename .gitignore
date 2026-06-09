@@ -72,6 +72,12 @@ target/
 surefire-reports/
 
 # =========================
+# Claude Code
+# =========================
+CLAUDE.md
+plan.md
+
+# =========================
 # Local Config
 # =========================
 application-local.yml
