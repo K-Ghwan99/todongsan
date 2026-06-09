@@ -860,6 +860,30 @@ Insight-Reputation Service:
 - Insight 도메인 에러 변환
 ```
 
+### 16-5. Insight reputation update outbox error 기록
+
+Market 정산 완료 후 Insight-Reputation Service로 전송하는 prediction accuracy update는 Scheduler 기반 후속 처리다. 이 실패는 사용자 API 응답 ErrorCode로 직접 노출하지 않는다.
+
+처리 결과는 `market_reputation_update.status`, `last_error_code`, `last_error_message`에 기록한다.
+
+| 기록 값 | outbox 상태 | 의미 |
+|---|---|---|
+| `RESOURCE_NOT_FOUND` | `FAILED` | Insight가 명확한 대상 없음 실패를 반환 |
+| `VALIDATION_FAILED` | `FAILED` | Insight가 명확한 요청 검증 실패를 반환 |
+| `INSIGHT_REPUTATION_TIMEOUT` | `UNKNOWN` | timeout으로 처리 여부 불명확 |
+| `INSIGHT_REPUTATION_UNAVAILABLE` | `UNKNOWN` | 5xx 또는 연결 실패 등 일시 장애 |
+| `INSIGHT_REPUTATION_EXTERNAL` | `UNKNOWN` | 응답 body null, parsing 실패, 비정상 응답 |
+| `INSIGHT_REPUTATION_UNKNOWN` | `UNKNOWN` | 예상하지 못한 RuntimeException |
+
+주의:
+
+```text
+INSIGHT_REPUTATION_* 값은 Market 사용자 API 응답 ErrorCode가 아니다.
+MarketErrorCode enum에 추가하지 않는다.
+Market 정산 성공 여부와 분리된 outbox 내부 기록 값이다.
+Insight update 실패는 Market.status = SETTLED 상태를 변경하지 않는다.
+```
+
 
 ## 17. 완료 기준
 
@@ -886,3 +910,4 @@ Insight-Reputation Service:
 - [ ] 내부 Scheduler API는 `limit` 기반 chunk 처리를 한다.
 - [ ] Insight-Reputation 내부 연계 API는 기존 ErrorCode(`MARKET_NOT_FOUND`, `MARKET_INVALID_STATUS`, `MARKET_NO_PREDICTIONS`)를 재사용한다.
 - [ ] Insight-Reputation 내부 연계 API는 SETTLED Market만 허용한다.
+- [ ] Insight reputation update 실패 기록용 `INSIGHT_REPUTATION_*` 값은 MarketErrorCode enum에 추가하지 않는다.

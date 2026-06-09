@@ -23,11 +23,13 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class MarketSettlementTransactionService {
 
     private static final BigDecimal HUNDRED = new BigDecimal("100");
@@ -330,7 +332,8 @@ public class MarketSettlementTransactionService {
     }
 
     private void createReputationUpdateTasksForSettledMarket(long marketId, LocalDateTime now) {
-        marketMapper.insertReputationUpdateTasksForSettledPredictions(marketId, now);
+        int insertedCount = marketMapper.insertReputationUpdateTasksForSettledPredictions(marketId, now);
+        log.info("Created market reputation update tasks. marketId={}, insertedCount={}", marketId, insertedCount);
     }
 
     private void validateSettlementData(Market market) {

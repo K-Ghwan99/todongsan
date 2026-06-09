@@ -18,5 +18,6 @@ class SchedulerDisabledInTestContextTest {
         assertThat(applicationContext.getBeansOfType(PredictionSpendReconciliationScheduler.class)).isEmpty();
         assertThat(applicationContext.getBeansOfType(MarketSettlementRetryScheduler.class)).isEmpty();
         assertThat(applicationContext.getBeansOfType(MarketRefundRetryScheduler.class)).isEmpty();
+        assertThat(applicationContext.getBeansOfType(MarketReputationUpdateScheduler.class)).isEmpty();
     }
 }

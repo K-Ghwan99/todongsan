@@ -1545,6 +1545,65 @@ CLOSED
 13. 일부 detail이 FAILED 또는 UNKNOWN이면 SETTLEMENT_IN_PROGRESS 유지
 ```
 
+### 정산 완료 후 Insight reputation update 후속 처리
+
+정산 성공 기준은 다음 세 가지가 완료된 상태다.
+
+```text
+1. Member-Point 정산 지급 완료
+2. Prediction SETTLED 처리 완료
+3. Market SETTLED 처리 완료
+```
+
+Insight-Reputation Service로의 prediction accuracy update는 Market 정산 성공 여부와 분리된 후속 처리다.
+
+정산이 완료되어 `Market.status = SETTLED`로 전환되면 Market Service는 `market_reputation_update` outbox task를 생성한다. Scheduler는 이 task를 읽어 Insight-Reputation Service의 내부 API를 호출한다.
+
+```text
+1. Admin이 Market 정산 요청
+2. Member-Point batch settlement 성공
+3. winner/loser Prediction SETTLED 처리
+4. Market SETTLED 처리
+5. market_reputation_update task 생성
+6. Scheduler가 Insight-Reputation Service로 prediction accuracy update 전송
+```
+
+Market이 호출하는 Insight-Reputation 내부 API:
+
+```http
+POST /internal/api/v1/reputations/prediction
+```
+
+Request Body:
+
+```json
+{
+  "memberId": 1,
+  "marketId": 7,
+  "predictionId": 123,
+  "isCorrect": true
+}
+```
+
+전송 값:
+
+```text
+memberId = prediction.memberId
+marketId = market.id
+predictionId = prediction.id
+isCorrect = prediction.optionId == market.resultOptionId
+```
+
+주의:
+
+```text
+이 endpoint는 Market API가 아니라 Market Service가 호출하는 Insight-Reputation Service의 내부 API다.
+Market API_SPEC에서는 서비스 간 연동 흐름 설명으로만 기록한다.
+Insight update 실패는 Market.status = SETTLED 상태를 변경하지 않는다.
+Insight update 실패로 Prediction.status를 변경하지 않는다.
+Insight update 실패로 Member-Point 정산 결과를 되돌리지 않는다.
+```
+
 ### Atomic Update
 
 ```sql
@@ -2474,6 +2533,7 @@ Insight-Reputation Service가 회원별 예측 참여 원본 데이터를 페이
 | 예측 차감 대사 | `PredictionSpendReconciliationService.reconcile(limit)` | 60초 | 100 |
 | 정산 재시도 | `MarketSettlementService.retryFailedSettlements(limit)` | 180초 | 50 |
 | 환불 재시도 | `MarketRefundService.retryFailedRefunds(limit)` | 180초 | 50 |
+| Insight prediction accuracy update | `MarketReputationUpdateService.processPendingOrUnknownUpdates(limit)` | 180초 | 50 |
 
 테스트 환경에서는 Scheduler를 비활성화한다.
 
@@ -2740,6 +2800,8 @@ limit 건만 조회
 - [ ] 정산/환불 item에는 `referenceType=MARKET_PREDICTION`, `referenceId=predictionId`를 전달한다.
 - [ ] 정산/환불 item별 `idempotencyKey`를 사용한다.
 - [ ] 정산 시작은 Atomic Update로 `SETTLEMENT_IN_PROGRESS`를 획득한다.
+- [ ] 정산 완료 후 Insight prediction accuracy update는 outbox task로 분리 처리한다.
+- [ ] Insight update 실패는 Market SETTLED 상태와 Prediction SETTLED 상태를 변경하지 않는다.
 - [ ] 내부 Scheduler API는 `limit` 파라미터로 chunk 처리한다.
 - [ ] Insight-Reputation 내부 API는 SETTLED Market만 조회 가능하게 한다.
 - [ ] Insight-Reputation 내부 API는 요약/선택지 집계와 Prediction 페이지 조회를 분리한다.
