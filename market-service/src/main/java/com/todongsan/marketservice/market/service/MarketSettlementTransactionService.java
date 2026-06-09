@@ -106,6 +106,7 @@ public class MarketSettlementTransactionService {
             marketMapper.settleAllConfirmedPredictionsZero(marketId, now);
             marketMapper.completeMarketSettlement(settlement.getId(), now);
             marketMapper.completeMarket(marketId, now);
+            createReputationUpdateTasksForSettledMarket(marketId, now);
         }
 
         return new SettlementPreparation(
@@ -166,6 +167,7 @@ public class MarketSettlementTransactionService {
         if (failedCount == 0) {
             marketMapper.completeMarketSettlement(preparation.settlementId(), now);
             marketMapper.completeMarket(preparation.marketId(), now);
+            createReputationUpdateTasksForSettledMarket(preparation.marketId(), now);
             return preparation.toResponse(
                     MarketStatus.SETTLED,
                     SettlementStatus.COMPLETED,
@@ -235,6 +237,7 @@ public class MarketSettlementTransactionService {
             if (nonSuccessCount == 0) {
                 marketMapper.completeMarketSettlement(settlement.getId(), now);
                 marketMapper.completeMarket(marketId, now);
+                createReputationUpdateTasksForSettledMarket(marketId, now);
                 return toRetryPreparation(marketId, settlement, List.of(), true);
             }
             throw new CustomException(MarketErrorCode.MARKET_INVALID_SETTLEMENT_DATA);
@@ -280,6 +283,7 @@ public class MarketSettlementTransactionService {
         if (remainingNonSuccessCount == 0) {
             marketMapper.completeMarketSettlement(preparation.settlementId(), now);
             marketMapper.completeMarket(preparation.marketId(), now);
+            createReputationUpdateTasksForSettledMarket(preparation.marketId(), now);
             return preparation.toResponse(
                     MarketStatus.SETTLED,
                     SettlementStatus.COMPLETED,
@@ -323,6 +327,10 @@ public class MarketSettlementTransactionService {
             throw new CustomException(MarketErrorCode.MARKET_ALREADY_SETTLED);
         }
         throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+    }
+
+    private void createReputationUpdateTasksForSettledMarket(long marketId, LocalDateTime now) {
+        marketMapper.insertReputationUpdateTasksForSettledPredictions(marketId, now);
     }
 
     private void validateSettlementData(Market market) {
