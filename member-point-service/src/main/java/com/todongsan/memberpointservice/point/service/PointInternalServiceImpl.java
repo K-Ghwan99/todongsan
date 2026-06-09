@@ -87,7 +87,7 @@ public class PointInternalServiceImpl implements PointInternalService {
     }
 
     @Override
-    @Transactional
+    @Transactional(noRollbackFor = CustomException.class)
     public PointResult<SpendResponse> spend(String idempotencyKey, SpendRequest request) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
