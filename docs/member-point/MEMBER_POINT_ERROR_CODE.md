@@ -280,10 +280,10 @@ MEMBER_NOT_FOUND 또는 INTERNAL_ERROR 발생
 
 | API | 멱등성 키 필수 |
 |---|---|
-| POST /api/v1/points/earn | O |
-| POST /api/v1/points/spend | O |
-| POST /api/v1/points/settlements | O |
-| POST /api/v1/points/refunds | O |
+| POST /internal/api/v1/points/earn | O |
+| POST /internal/api/v1/points/spend | O |
+| POST /internal/api/v1/points/settlements | O |
+| POST /internal/api/v1/points/refunds | O |
 | POST /api/v1/members/oauth/kakao | X |
 | GET 계열 전체 | X |
 
@@ -337,7 +337,7 @@ Market이 Timeout 후 포인트 차감 성공 여부를 확인할 수 있도록
 idempotencyKey 기반 거래 조회 API를 제공한다.
 
 ```
-GET /api/v1/points/transactions?idempotencyKey={key}
+GET /internal/api/v1/points/transactions?idempotencyKey={key}
 
 Response:
 {

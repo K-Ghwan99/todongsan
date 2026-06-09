@@ -28,3 +28,5 @@ market:
       enabled: false
     refund-retry:
       enabled: false
+    reputation-update:
+      enabled: false

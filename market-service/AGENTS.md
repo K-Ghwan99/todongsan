@@ -148,6 +148,7 @@ AGENTS.md는 공식 정책 문서가 아니다.
 | `market_settlement_detail` | 사용자별 정산 지급 상세 | `prediction_id` UNIQUE, `idempotency_key` UNIQUE |
 | `market_void` | Market 무효 처리 기록 | `market_id` UNIQUE |
 | `market_refund_detail` | 사용자별 환불 상세 | `prediction_id` UNIQUE, `idempotency_key` UNIQUE |
+| `market_reputation_update` | Insight prediction accuracy update outbox task | `prediction_id` UNIQUE, PENDING/UNKNOWN만 Scheduler 재시도 |
 
 ---
 
@@ -474,6 +475,7 @@ WHERE id = :marketId
 - 패자는 지급 detail을 만들지 않고 Prediction만 `SETTLED`, `settledAmount = 0.00`으로 처리한다.
 - 승자 없음은 정산 실패가 아니다.
 - 일부 지급 실패 시 Market 상태를 `SETTLEMENT_IN_PROGRESS`로 유지한다.
+- Member-Point batch item의 status null, 알 수 없는 status, result 누락은 FAILED로 단정하지 않고 UNKNOWN detail로 처리한다.
 - 재시도 시 실패한 detail item만 다시 처리한다.
 - 관리자 정산 재시도 API는 `FAILED`, `UNKNOWN` detail만 대상으로 한다.
 - 정산 재시도에서는 새 `market_settlement`, `market_settlement_detail` row를 만들지 않고 금액을 재계산하지 않는다.
@@ -508,6 +510,7 @@ MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{mem
 - 환불 batch Header Idempotency-Key와 item idempotencyKey 역할을 구분한다.
 - 실제 중복 환불 방지는 `items[].idempotencyKey` 기준이다.
 - 환불 타임아웃은 `REFUND_UNKNOWN`으로 기록한다.
+- 환불 batch item의 status null, 알 수 없는 status, result 누락은 FAILED로 단정하지 않고 UNKNOWN detail로 처리한다.
 - `REFUND_UNKNOWN`은 Member-Point 거래 조회로 대사한다.
 - 환불 실행 중 DB 트랜잭션 안에서 Member-Point HTTP API를 호출하지 않는다.
 - 부분 실패는 전체 실패로 단정하지 않는다.
@@ -532,6 +535,7 @@ MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}
 | Member-Point Service | `GET /api/v1/points/transactions?idempotencyKey={key}` | 차감·환불 처리 상태 대사 | `POINT_UNKNOWN`, `REFUND_UNKNOWN`, 고착 상태 복구 |
 | Member-Point Service | `POST /api/v1/points/settlements` | 정산 보상 지급 | detail item별 멱등성 키 |
 | Member-Point Service | `POST /api/v1/points/refunds` | 무효 처리 환불 | detail item별 멱등성 키 |
+| Insight-Reputation Service | `POST /internal/api/v1/reputations/prediction` | 정산 완료 후 prediction accuracy update | outbox 후속 처리, 정산 트랜잭션 내부 호출 금지 |
 
 ### 9.2 나를 호출하는 서비스
 
@@ -542,6 +546,19 @@ MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}
 
 Insight-Reputation 내부 조회는 반드시 `SETTLED` Market만 허용한다.
 회원 정보는 `memberId`까지만 제공한다.
+
+### 9.3 Market → Insight prediction accuracy update 규칙
+
+```text
+1. 정산 완료 후 market_reputation_update outbox task를 생성한다.
+2. Insight HTTP 호출은 정산 트랜잭션 안에서 수행하지 않는다.
+3. Scheduler는 PENDING / UNKNOWN task만 전송한다.
+4. Insight update 실패는 Market SETTLED 상태를 변경하지 않는다.
+5. UNKNOWN은 재시도 대상이다.
+6. FAILED는 자동 재시도 대상이 아니다.
+7. Insight는 memberId + marketId 기준 멱등성을 보장한다.
+8. Market은 predictionId를 항상 포함해 요청한다.
+```
 
 ---
 
@@ -594,6 +611,12 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 ## 11. 이 서비스의 성공 기준
 
 ```text
+[관리자 API 권한]
+- `/api/v1/admin/markets/**` 관리자 API는 `X-Member-Role=ADMIN` 요청만 허용한다.
+- `X-Member-Role`이 없거나 ADMIN이 아니면 공통 `FORBIDDEN` 응답을 반환한다.
+- Market Service는 JWT를 직접 파싱하지 않고 JWT_SECRET을 사용하지 않는다.
+- Gateway가 주입한 `X-Member-Id`, `X-Member-Role` 헤더를 신뢰하는 전제다.
+
 [관리자 Market 생성]
 - POST /api/v1/admin/markets
 - 생성 직후 MarketStatus는 PENDING이다.
@@ -670,6 +693,7 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 - 패자는 detail 미생성, Prediction SETTLED 및 settledAmount = 0.00
 - 승자 없음은 정산 실패로 처리하지 않음
 - 일부 지급 실패 시 기존 FAILED/UNKNOWN detail만 재시도
+- Member-Point batch item status null, 알 수 없는 status, result 누락은 UNKNOWN detail로 처리
 
 [환불 재시도 Scheduler]
 - `MarketRefundRetryScheduler`
@@ -700,6 +724,7 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 ✗ CONFIRMED가 아닌 예측은 정산 대상에 포함하지 않는다.
 ✗ DB 락을 잡은 트랜잭션 안에서 외부 HTTP API를 호출하지 않는다.
 ✗ Insight-Reputation용 분석 결과를 Market Service에 저장하지 않는다.
+✗ Insight update 실패를 Market 정산 실패로 되돌리지 않는다.
 ✗ virtualPoolAmount를 정산·환불 금액에 포함하지 않는다.
 ✗ Market 생성 이후 virtualPoolAmount를 수정하지 않는다.
 ✗ PriceHistory v4 schema 변경을 이 문서만 보고 확정하지 않는다.
@@ -771,6 +796,11 @@ scientific notation 방지를 위해 정산 응답 등 일부 DTO는 `BigDecimal
 [ ] 가격 이력 조회 정렬이 `created_at DESC, id DESC`인가?
 [ ] Insight-Reputation 내부 조회는 SETTLED Market만 허용하는가?
 [ ] Insight-Reputation에 memberId까지만 제공하는가?
+[ ] 정산 완료 후 `market_reputation_update` task를 생성하는가?
+[ ] 승자 없음 정산에서도 SETTLED Prediction 기준 task를 생성하는가?
+[ ] 중복 task 생성을 `UNIQUE(prediction_id)`와 no-op insert로 방지하는가?
+[ ] Insight update Scheduler가 SUCCESS/FAILED task를 재처리하지 않는가?
+[ ] Insight update 실패가 Market SETTLED 상태를 변경하지 않는가?
 
 [운영]
 [ ] Scheduler가 limit 기반 chunk 처리를 하는가?

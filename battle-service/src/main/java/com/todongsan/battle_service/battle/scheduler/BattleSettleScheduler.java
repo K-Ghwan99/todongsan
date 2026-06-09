@@ -23,7 +23,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BattleSettleScheduler {
 
-    private static final BigDecimal VOTE_WIN_REWARD = BigDecimal.valueOf(2);
+    private static final BigDecimal VOTE_WIN_REWARD = BigDecimal.valueOf(10);
 
     private final BattleRepository battleRepository;
     private final BattleVoteRepository battleVoteRepository;

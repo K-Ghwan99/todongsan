@@ -11,7 +11,6 @@ public record MemberPointTransactionStatusResponse(
         BigDecimal amount,
         String referenceType,
         Long referenceId,
-        Boolean requestHashMatched,
         BigDecimal balanceSnapshot,
         LocalDateTime createdAt,
         String errorCode

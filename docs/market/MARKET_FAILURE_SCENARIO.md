@@ -37,6 +37,21 @@ Market 생성
 
 ---
 
+## 1-1. 관리자 API 권한 없음
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | `/api/v1/admin/markets/**` 관리자 API 호출 |
+| 실패 원인 | `X-Member-Role` 헤더 없음 또는 `ADMIN`이 아님 |
+| 상태 변화 | 없음 |
+| 재시도 여부 | 관리자 권한으로 재요청 |
+| 관련 ErrorCode | `FORBIDDEN` |
+| HTTP Status | 403 |
+
+Market Service는 JWT를 직접 파싱하지 않고 Gateway가 주입한 `X-Member-Role` 헤더만 확인한다.
+
+---
+
 ## 2. 상태 정의
 
 ### 2-1. MarketStatus
@@ -1078,7 +1093,7 @@ Member-Point 응답의 item별 `results[]` 처리 기준:
 | 항목 | 내용 |
 |---|---|
 | 발생 시점 | Member-Point 정산 batch API 호출 |
-| 실패 원인 | timeout, 연결 실패, 응답 불명확 |
+| 실패 원인 | timeout, 연결 실패, 응답 불명확, status null, 알 수 없는 status, result 누락 |
 | 상태 변화 | MarketStatus = SETTLEMENT_IN_PROGRESS 유지, market_settlement.status = IN_PROGRESS 유지 |
 | 요청 대상 detail | UNKNOWN으로 기록 |
 | 재시도 | O |
@@ -1150,7 +1165,7 @@ Header Idempotency-Key는 새로운 batch 요청 추적용 키를 사용할 수 
 5. items[].idempotencyKey는 기존 detail.idempotency_key를 그대로 사용한다.
 6. PROCESSED 또는 ALREADY_PROCESSED는 SUCCESS로 반영하고 Prediction을 SETTLED로 전환한다.
 7. FAILED는 detail FAILED, Prediction CONFIRMED 유지로 반영한다.
-8. timeout 또는 응답 불명확은 요청 대상 detail UNKNOWN, Prediction CONFIRMED 유지로 반영한다.
+8. status null, 알 수 없는 status, result 누락, timeout 또는 응답 불명확은 요청 대상 detail UNKNOWN, Prediction CONFIRMED 유지로 반영한다.
 9. settlement 전체 detail 중 SUCCESS가 아닌 건이 없으면 정산 완료 처리한다.
 ```
 
@@ -1465,6 +1480,7 @@ Controller를 HTTP로 호출하지 않고 기존 Service를 직접 호출한다.
 | 예측 차감 대사 | `PredictionSpendReconciliationService.reconcile(limit)` | 60초 | 100 |
 | 정산 재시도 | `MarketSettlementService.retryFailedSettlements(limit)` | 180초 | 50 |
 | 환불 재시도 | `MarketRefundService.retryFailedRefunds(limit)` | 180초 | 50 |
+| Insight prediction accuracy update | `MarketReputationUpdateService.processPendingOrUnknownUpdates(limit)` | 180초 | 50 |
 
 예시:
 
@@ -1577,6 +1593,107 @@ Insight-Reputation Service는 이 응답을 INSIGHT_REPORT_SOURCE_DATA_NOT_READY
 ```text
 Insight-Reputation Service가 실패한 page부터 다시 조회한다.
 Market Service는 조회 API이므로 별도 보상 트랜잭션을 수행하지 않는다.
+```
+
+---
+
+### 13-6. Insight reputation update 실패
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Market 정산 완료 후 Scheduler가 Insight-Reputation Service로 prediction accuracy update 전송 |
+| 조건 | MarketStatus = SETTLED, PredictionStatus = SETTLED, `market_reputation_update` task 존재 |
+| 상태 변화 | `market_reputation_update.status`만 갱신 |
+| Market 상태 | SETTLED 유지 |
+| Prediction 상태 | SETTLED 유지 |
+| Member-Point 정산 결과 | 되돌리지 않음 |
+| 관련 API ErrorCode | 없음. 사용자 API 응답으로 직접 노출하지 않음 |
+
+처리 기준:
+
+| Insight update 결과 | outbox 상태 | 재시도 여부 |
+|---|---|---:|
+| 성공 또는 Insight 멱등 처리 성공 | `SUCCESS` | X |
+| `RESOURCE_NOT_FOUND` | `FAILED` | X |
+| `VALIDATION_FAILED` | `FAILED` | X |
+| timeout | `UNKNOWN` | O |
+| 5xx / 연결 실패 | `UNKNOWN` | O |
+| 응답 body null / parsing 실패 / 예상 못한 RuntimeException | `UNKNOWN` | O |
+| 아직 전송 전 | `PENDING` | O |
+
+재시도 정책:
+
+```text
+Scheduler는 PENDING / UNKNOWN task만 조회한다.
+SUCCESS / FAILED task는 자동 재처리하지 않는다.
+UNKNOWN은 Insight 측 멱등성 보장을 전제로 재시도 가능하다.
+Insight 측은 memberId + marketId 기준으로 중복 update를 방지한다.
+Market 측은 predictionId를 항상 요청에 포함한다.
+```
+
+금지 흐름:
+
+```text
+Insight update 실패로 Market 정산을 실패 처리하지 않는다.
+Insight update 실패로 Market.status를 SETTLEMENT_IN_PROGRESS로 되돌리지 않는다.
+Insight update 실패로 Prediction.status를 변경하지 않는다.
+Insight update 실패로 Member-Point 정산 지급을 취소하지 않는다.
+```
+
+---
+
+### 13-7. Insight reputation update 통합 검증 체크리스트
+
+사전 조건:
+
+```text
+1. Insight-Reputation Service가 POST /internal/api/v1/reputations/prediction 구현 완료
+2. Insight DB가 memberId + marketId 기준 멱등성 보장
+3. Market DB에 market_reputation_update 테이블 존재
+4. Market Service 환경변수 설정 완료
+```
+
+Market Service 환경변수:
+
+```text
+INSIGHT_CLIENT_MODE=http
+INSIGHT_SERVICE_URL=http://insight-reputation-service:8083
+MARKET_REPUTATION_UPDATE_SCHEDULER_ENABLED=true
+MARKET_REPUTATION_UPDATE_SCHEDULER_FIXED_DELAY_MS=180000
+MARKET_REPUTATION_UPDATE_SCHEDULER_LIMIT=50
+```
+
+정상 E2E 흐름:
+
+```text
+1. Market 생성
+2. Market 활성화
+3. 여러 회원 Prediction 참여
+4. 결과 확정
+5. 정산 실행
+6. market.status = SETTLED 확인
+7. market_prediction.status = SETTLED 확인
+8. market_reputation_update task 생성 확인
+9. Scheduler 실행 후 task SUCCESS 확인
+10. Insight reputation.prediction_count / prediction_correct / prediction_accuracy 반영 확인
+11. 동일 task 재시도 시 Insight 중복 증가 없음 확인
+```
+
+장애/복구 흐름:
+
+```text
+Insight 서비스 중단:
+- Scheduler 실행
+- task UNKNOWN 확인
+- Market SETTLED 유지 확인
+
+Insight 복구:
+- Scheduler 재실행
+- UNKNOWN task SUCCESS 전환 확인
+
+Insight 4xx 명확한 실패:
+- task FAILED 확인
+- 자동 재시도 대상에서 제외 확인
 ```
 
 ---

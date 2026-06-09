@@ -23,11 +23,13 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class MarketSettlementTransactionService {
 
     private static final BigDecimal HUNDRED = new BigDecimal("100");
@@ -106,6 +108,7 @@ public class MarketSettlementTransactionService {
             marketMapper.settleAllConfirmedPredictionsZero(marketId, now);
             marketMapper.completeMarketSettlement(settlement.getId(), now);
             marketMapper.completeMarket(marketId, now);
+            createReputationUpdateTasksForSettledMarket(marketId, now);
         }
 
         return new SettlementPreparation(
@@ -153,7 +156,12 @@ public class MarketSettlementTransactionService {
                 successCount++;
                 continue;
             }
-            markDetail(detail, TransactionItemStatus.FAILED, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+            if (isFailed(result.status())) {
+                markDetail(detail, TransactionItemStatus.FAILED, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+                failedCount++;
+                continue;
+            }
+            markDetail(detail, TransactionItemStatus.UNKNOWN, failureReason(result.errorCode(), "MEMBER_POINT_STATUS_UNKNOWN"), now);
             failedCount++;
         }
 
@@ -161,6 +169,7 @@ public class MarketSettlementTransactionService {
         if (failedCount == 0) {
             marketMapper.completeMarketSettlement(preparation.settlementId(), now);
             marketMapper.completeMarket(preparation.marketId(), now);
+            createReputationUpdateTasksForSettledMarket(preparation.marketId(), now);
             return preparation.toResponse(
                     MarketStatus.SETTLED,
                     SettlementStatus.COMPLETED,
@@ -230,6 +239,7 @@ public class MarketSettlementTransactionService {
             if (nonSuccessCount == 0) {
                 marketMapper.completeMarketSettlement(settlement.getId(), now);
                 marketMapper.completeMarket(marketId, now);
+                createReputationUpdateTasksForSettledMarket(marketId, now);
                 return toRetryPreparation(marketId, settlement, List.of(), true);
             }
             throw new CustomException(MarketErrorCode.MARKET_INVALID_SETTLEMENT_DATA);
@@ -264,13 +274,18 @@ public class MarketSettlementTransactionService {
                 successCount++;
                 continue;
             }
-            markRetryDetail(detail, TransactionItemStatus.FAILED, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+            if (isFailed(result.status())) {
+                markRetryDetail(detail, TransactionItemStatus.FAILED, failureReason(result.errorCode(), "MEMBER_POINT_FAILED"), now);
+                continue;
+            }
+            markRetryDetail(detail, TransactionItemStatus.UNKNOWN, failureReason(result.errorCode(), "MEMBER_POINT_STATUS_UNKNOWN"), now);
         }
 
         long remainingNonSuccessCount = marketMapper.countNonSuccessSettlementDetails(preparation.settlementId());
         if (remainingNonSuccessCount == 0) {
             marketMapper.completeMarketSettlement(preparation.settlementId(), now);
             marketMapper.completeMarket(preparation.marketId(), now);
+            createReputationUpdateTasksForSettledMarket(preparation.marketId(), now);
             return preparation.toResponse(
                     MarketStatus.SETTLED,
                     SettlementStatus.COMPLETED,
@@ -314,6 +329,11 @@ public class MarketSettlementTransactionService {
             throw new CustomException(MarketErrorCode.MARKET_ALREADY_SETTLED);
         }
         throw new CustomException(MarketErrorCode.MARKET_INVALID_STATUS);
+    }
+
+    private void createReputationUpdateTasksForSettledMarket(long marketId, LocalDateTime now) {
+        int insertedCount = marketMapper.insertReputationUpdateTasksForSettledPredictions(marketId, now);
+        log.info("Created market reputation update tasks. marketId={}, insertedCount={}", marketId, insertedCount);
     }
 
     private void validateSettlementData(Market market) {
@@ -431,6 +451,10 @@ public class MarketSettlementTransactionService {
     private boolean isSuccess(MemberPointSettlementItemStatus status) {
         return status == MemberPointSettlementItemStatus.PROCESSED
                 || status == MemberPointSettlementItemStatus.ALREADY_PROCESSED;
+    }
+
+    private boolean isFailed(MemberPointSettlementItemStatus status) {
+        return status == MemberPointSettlementItemStatus.FAILED;
     }
 
     private BigDecimal floorAmount(BigDecimal amount) {

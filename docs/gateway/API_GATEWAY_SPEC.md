@@ -36,7 +36,8 @@ market-service            ──→ member-point-service:8080         POST /inte
 market-service            ──→ insight-reputation-service:8083   POST /internal/api/v1/reputations/prediction
 insight-reputation-service ──→ member-point-service:8080        POST /internal/api/v1/members/batch
 insight-reputation-service ──→ battle-service:8081              GET  /internal/api/v1/battles/{id}/votes/raw
-insight-reputation-service ──→ market-service:8082              GET  /internal/api/v1/markets/{id}/summary
+insight-reputation-service ──→ market-service:8082              GET  /internal/api/v1/markets/{id}/insight-summary
+insight-reputation-service ──→ market-service:8082              GET  /internal/api/v1/markets/{id}/insight-predictions
 
 [DB — 모든 서비스가 외부 RDS에 직접 연결]
 
@@ -91,12 +92,20 @@ JWT 서명 검증 (Member-Point와 동일한 JWT_SECRET 사용)
     └── 유효 ──→ memberId, role 추출
                     │
                     ▼
-              X-Member-Id: {memberId}    헤더 추가
-              X-Member-Role: {role}      헤더 추가
+              클라이언트가 보낸 X-Member-Id, X-Member-Role 헤더 제거 (스푸핑 차단)
+                    │
+                    ▼
+              X-Member-Id: {memberId}    헤더 추가 (JWT claim 기준)
+              X-Member-Role: {role}      헤더 추가 (JWT claim 기준)
                     │
                     ▼
               하위 서비스로 라우팅
 ```
+
+> **[보안 정책]** 클라이언트가 임의로 보낸 `X-Member-Id`, `X-Member-Role` 헤더는 반드시 제거 후
+> JWT claim 기준으로 덮어써야 한다. 클라이언트가 `X-Member-Role: ADMIN`을 임의로 설정하는
+> 스푸핑 공격을 차단한다.
+> `Idempotency-Key`는 건드리지 않고 원본 그대로 downstream 전달한다.
 
 **Gateway GlobalFilter 구현 핵심:**
 ```java
@@ -133,8 +142,12 @@ public class JwtAuthenticationFilter implements GlobalFilter {
 | `/api/v1/points/balance` | GET | 포인트 잔액 조회 |
 | `/api/v1/points/history` | GET | 포인트 내역 조회 |
 | `/api/v1/battles/**` | 전체 | Battle 관련 외부 API |
+| `/api/v1/admin/markets/**` | 전체 | Market 관리자 API (Market 팀 요청) |
 | `/api/v1/markets/**` | 전체 | Market 관련 외부 API |
 | `/api/v1/insights/**` | 전체 | Insight 관련 외부 API |
+
+> ⚠️ `/api/v1/admin/markets/**`는 `/api/v1/markets/**`보다 **먼저** 등록해야 한다.
+> Spring Cloud Gateway는 등록 순서대로 매칭하므로 더 구체적인 경로를 위에 둔다.
 
 ### 4-3. 내부 연계 API (Gateway를 통하지 않음)
 
@@ -155,9 +168,11 @@ public class JwtAuthenticationFilter implements GlobalFilter {
 | `/internal/api/v1/points/refunds` | POST | Market/Insight → Member-Point | 포인트 환불 |
 | `/internal/api/v1/points/transactions` | GET | Market → Member-Point | 거래 상태 조회 |
 | `/internal/api/v1/reputations/activity` | POST | Battle → Insight | 활동 점수 업데이트 |
+| `/internal/api/v1/insights/battles/{battleId}/report` | POST | Battle → Insight | Battle 종료 AI 분석 트리거 |
 | `/internal/api/v1/reputations/prediction` | POST | Market → Insight | 예측 정확도 업데이트 |
 | `/internal/api/v1/battles/{battleId}/votes/raw` | GET | Insight → Battle | 투표 원본 데이터 조회 |
-| `/internal/api/v1/markets/{marketId}/summary` | GET | Insight → Market | 예측/정산 데이터 조회 |
+| `/internal/api/v1/markets/{marketId}/insight-summary` | GET | Insight → Market | 예측/정산 요약 조회 |
+| `/internal/api/v1/markets/{marketId}/insight-predictions` | GET | Insight → Market | 예측 상세 조회 |
 
 ---
 
@@ -417,6 +432,8 @@ REB_API_BASE_URL=https://...
 [ ] SecurityConfig에서 /internal/** permitAll 설정
 [ ] 서비스 간 호출 URL 환경변수 분리
       MEMBER_POINT_SERVICE_URL, INSIGHT_SERVICE_URL
+[ ] Battle 종료(CLOSED) 시 Insight AI 분석 트리거 호출 구현
+      POST /internal/api/v1/insights/battles/{battleId}/report (BattleCloseScheduler)
 [ ] DB_URL → RDS 엔드포인트로 변경
 ```
 
@@ -426,7 +443,8 @@ REB_API_BASE_URL=https://...
 [ ] server.port: 8082 권장
       (현재 application.yml: 8081 → 통합 시 8082로 변경 권장)
 [ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
-      @RequestMapping: /internal/api/v1/markets/{marketId}/summary
+      @RequestMapping: /internal/api/v1/markets/{marketId}/insight-summary
+      @RequestMapping: /internal/api/v1/markets/{marketId}/insight-predictions
 [ ] SecurityConfig에서 /internal/** permitAll 설정
 [ ] 서비스 간 호출 URL 환경변수 분리
       MEMBER_POINT_SERVICE_URL, INSIGHT_SERVICE_URL
@@ -478,6 +496,7 @@ market-service → insight-reputation-service(:8083)    POST /internal/api/v1/re
 ### Insight AI 분석
 ```
 insight-reputation-service → battle-service(:8081)          GET  /internal/api/v1/battles/{id}/votes/raw
-insight-reputation-service → market-service(:8082)           GET  /internal/api/v1/markets/{id}/summary
+insight-reputation-service → market-service(:8082)           GET  /internal/api/v1/markets/{id}/insight-summary
+insight-reputation-service → market-service(:8082)           GET  /internal/api/v1/markets/{id}/insight-predictions
 insight-reputation-service → member-point-service(:8080)     POST /internal/api/v1/members/batch
 ```

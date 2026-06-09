@@ -402,6 +402,16 @@ DELETE /api/v1/battles/{battleId}/comments/{commentId}
 
 > 외부 노출 차단. 게이트웨이에서 외부 요청 차단 + 서비스 간 인증 토큰 검증 후 라우팅.
 
+### 5-0. 아웃바운드 호출 (Battle → 외부 서비스)
+
+Battle Service가 직접 호출하는 내부 엔드포인트 목록.
+
+| 대상 서비스 | 경로 | 메서드 | 호출 시점 | 실패 처리 |
+|---|---|---|---|---|
+| Insight | `/internal/api/v1/insights/battles/{battleId}/report` | POST | Battle CLOSED 전환 직후 | 로그만 (RetryQueue 없음) |
+| Member-Point | `/internal/api/v1/points/earn` | POST | 투표/댓글/승인 보상 | Timeout/5xx → RetryQueue |
+| Member-Point | `/internal/api/v1/points/settlements` | POST | 정산 보상 배치 | Timeout/5xx → RetryQueue |
+
 ### 5-1. Battle 투표 원본 데이터 조회 (Insight Service 전용)
 
 ```
@@ -560,3 +570,4 @@ GET /api/v1/battles/{battleId}/info
 | 2026-06-01 | 5-3 Battle 기본 정보 조회 내부 API 신설 (외부 API와 채널 분리) |
 | 2026-06-01 | 5-2 댓글 단건 조회 응답에 sido/sigu 미포함 정책 명시 (Battle 도메인은 지역 비종속) |
 | 2026-06-04 | 3-3/3-4 교차분석·인증자 필터 조회를 관리자 전용으로 변경. 포인트 차감 제거, 집계 통계만 응답 |
+| 2026-06-05 | 5-0 아웃바운드 호출 목록 신설. Battle 종료 시 Insight AI 분석 트리거(`POST /internal/api/v1/insights/battles/{battleId}/report`) 추가 |

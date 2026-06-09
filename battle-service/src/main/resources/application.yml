@@ -3,9 +3,9 @@ spring:
     name: battle-service
 
   datasource:
-    url: jdbc:mysql://localhost:3307/battle?useSSL=false&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true
-    username: root
-    password: 1234
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
@@ -23,8 +23,10 @@ server:
 
 external:
   member-point:
-    url: http://localhost:8081
-  internal-auth-token: internal-secret-token
+    url: ${MEMBER_POINT_SERVICE_URL:http://localhost:8081}
+  insight:
+    url: ${INSIGHT_SERVICE_URL:http://localhost:8083}
+  internal-auth-token: ${INTERNAL_AUTH_TOKEN}
 
 logging:
   level:

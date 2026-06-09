@@ -17,7 +17,7 @@
 | 교차분석 / 인증자 필터 조회 | — | 0P (관리자/내부 전용, 포인트 차감 없음) | 일반 사용자 접근 불가 (`FORBIDDEN`) |
 | 승리 진영 보상 (정산) | `EARN_VOTE_WIN` |    10P 지급 | BattleSettleScheduler에서 처리 |
 
-> `SPEND_*`는 RetryQueue 대상이 아니다. 실패 시 작ㅊ업 자체를 거부해야 한다.
+> `SPEND_*`는 RetryQueue 대상이 아니다. 실패 시 작업 자체를 거부해야 한다.
 
 ### 1-2. idempotency_key 패턴
 
