@@ -80,7 +80,6 @@ class HttpMemberPointClientTest {
                 new BigDecimal("100.00"),
                 "MARKET_PREDICTION",
                 1001L,
-                true,
                 new BigDecimal("30.00"),
                 null,
                 "POINT_INSUFFICIENT",

@@ -262,7 +262,6 @@ class InternalMarketPredictionReconciliationControllerTest {
                         null,
                         "MARKET_PREDICTION",
                         null,
-                        true,
                         null,
                         LocalDateTime.now(),
                         errorCode

@@ -55,7 +55,6 @@ public final class MemberPointHttpDtos {
             BigDecimal amount,
             String referenceType,
             Long referenceId,
-            Boolean requestHashMatched,
             BigDecimal balanceSnapshot,
             LocalDateTime createdAt,
             String failReason,

@@ -41,7 +41,6 @@ public class FakeMemberPointClient implements MemberPointClient {
                         null,
                         null,
                         null,
-                        null,
                         null
                 )
         );

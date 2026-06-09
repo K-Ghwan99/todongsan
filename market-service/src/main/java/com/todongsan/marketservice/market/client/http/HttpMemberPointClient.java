@@ -68,7 +68,6 @@ public class HttpMemberPointClient implements MemberPointClient {
                 response.amount(),
                 response.referenceType(),
                 response.referenceId(),
-                response.requestHashMatched(),
                 response.balanceSnapshot(),
                 response.createdAt(),
                 failureCode(response.failReason(), response.errorCode())
