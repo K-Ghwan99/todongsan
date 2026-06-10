@@ -236,6 +236,33 @@ MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}
 
 정산/환불은 Prediction 1건이 곧 Member 1명에 대한 포인트 거래 1건이므로, `predictionId` 기준 item별 멱등성 키를 사용한다.
 
+### 2-1-1. Idempotency-Key와 인증 memberId 불일치
+
+Gateway 경유 예측 참여 API는 JWT subject에서 주입된 `X-Member-Id`와 요청 헤더 `Idempotency-Key`의 member id가 일치해야 한다.
+
+예시:
+
+```http
+POST /api/v1/markets/6/predictions
+X-Member-Id: 1
+Idempotency-Key: MARKET_PREDICTION_SPEND:market:6:member:2
+```
+
+처리:
+
+- Market Service는 `VALIDATION_FAILED`를 반환한다.
+- Prediction row를 생성하지 않는다.
+- Member-Point 포인트 차감 요청을 보내지 않는다.
+- Member-Point `point_history`가 생성되지 않는다.
+
+동일하게 `Idempotency-Key`의 market id가 path variable `marketId`와 다르거나, literal placeholder를 그대로 사용한 잘못된 key도 `VALIDATION_FAILED`로 차단한다.
+
+의도:
+
+- 인증된 회원과 다른 회원의 멱등성 키를 사용한 요청을 차단한다.
+- 잘못된 market id, 잘못된 member id, placeholder 실수로 인한 포인트 차감 오염을 방지한다.
+- 클라이언트 key에는 `:attempt:{attemptNo}`를 포함하지 않고, attempt suffix는 Market Service 내부 Member-Point 요청에서만 사용한다.
+
 ---
 
 ### 3-5. 가격 확정 구간은 Market 단위 동시성 제어가 필요하다
