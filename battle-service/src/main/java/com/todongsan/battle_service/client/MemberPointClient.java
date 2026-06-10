@@ -29,7 +29,7 @@ public class MemberPointClient {
     private String memberPointUrl;
 
     public void earnPoint(PointEarnRequest request) {
-        String url = memberPointUrl + "/api/v1/points/earn";
+        String url = memberPointUrl + "/internal/api/v1/points/earn";
         try {
             restTemplate.postForObject(url, buildHttpEntity(request, request.getIdempotencyKey()), Void.class);
         } catch (HttpClientErrorException e) {
@@ -44,7 +44,7 @@ public class MemberPointClient {
     }
 
     public void spendPoint(PointSpendRequest request) {
-        String url = memberPointUrl + "/api/v1/points/spend";
+        String url = memberPointUrl + "/internal/api/v1/points/spend";
         try {
             restTemplate.postForObject(url, buildHttpEntity(request, request.getIdempotencyKey()), Void.class);
         } catch (HttpClientErrorException e) {
@@ -57,7 +57,7 @@ public class MemberPointClient {
     }
 
     public void settlePoints(List<PointSettleRequest> requests) {
-        String url = memberPointUrl + "/api/v1/points/settlements";
+        String url = memberPointUrl + "/internal/api/v1/points/settlements";
         try {
             restTemplate.postForObject(url, buildHttpEntity(requests, null), Void.class);
         } catch (HttpClientErrorException e) {
