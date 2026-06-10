@@ -3,7 +3,7 @@ package com.todongsan.battle_service.battle.scheduler;
 import com.todongsan.battle_service.battle.entity.Battle;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
 import com.todongsan.battle_service.client.MemberPointClient;
-import com.todongsan.battle_service.client.dto.PointSettleRequest;
+import com.todongsan.battle_service.client.dto.PointEarnRequest;
 import com.todongsan.battle_service.retry.entity.PointRewardRetryQueue;
 import com.todongsan.battle_service.retry.entity.RetryStatus;
 import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
@@ -48,15 +48,16 @@ public class BattleSettleScheduler {
             for (BattleVote vote : winners) {
                 String idempotencyKey = "battle:settle:" + battle.getId() + ":member:" + vote.getMemberId();
                 try {
-                    PointSettleRequest req = PointSettleRequest.builder()
+                    PointEarnRequest req = PointEarnRequest.builder()
                             .memberId(vote.getMemberId())
                             .type("EARN_VOTE_WIN")
                             .referenceType("BATTLE")
                             .referenceId(battle.getId())
                             .amount(VOTE_WIN_REWARD)
+                            .reason("배틀 승리 보상")
                             .idempotencyKey(idempotencyKey)
                             .build();
-                    memberPointClient.settlePoints(List.of(req));
+                    memberPointClient.earnPoint(req);
                     vote.markRewarded();
                 } catch (Exception e) {
                     log.warn("Settle reward failed for member [{}], enqueue retry", vote.getMemberId());

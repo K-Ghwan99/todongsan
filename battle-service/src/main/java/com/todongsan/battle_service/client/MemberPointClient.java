@@ -1,7 +1,6 @@
 package com.todongsan.battle_service.client;
 
 import com.todongsan.battle_service.client.dto.PointEarnRequest;
-import com.todongsan.battle_service.client.dto.PointSettleRequest;
 import com.todongsan.battle_service.client.dto.PointSpendRequest;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
@@ -15,8 +14,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
-
-import java.util.List;
 
 @Slf4j
 @Component
@@ -52,19 +49,6 @@ public class MemberPointClient {
             throw new CustomException(ErrorCode.POINT_INSUFFICIENT);
         } catch (ResourceAccessException e) {
             log.warn("Member-Point spend timeout: {}", e.getMessage());
-            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_TIMEOUT);
-        }
-    }
-
-    public void settlePoints(List<PointSettleRequest> requests) {
-        String url = memberPointUrl + "/internal/api/v1/points/settlements";
-        try {
-            restTemplate.postForObject(url, buildHttpEntity(requests, null), Void.class);
-        } catch (HttpClientErrorException e) {
-            log.warn("Member-Point settle failed (4xx): {}", e.getMessage());
-            throw new CustomException(ErrorCode.POINT_INSUFFICIENT);
-        } catch (ResourceAccessException e) {
-            log.warn("Member-Point settle timeout: {}", e.getMessage());
             throw new CustomException(ErrorCode.EXTERNAL_SERVICE_TIMEOUT);
         }
     }
