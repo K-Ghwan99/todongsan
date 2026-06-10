@@ -19,11 +19,11 @@ spring:
     open-in-view: false
 
 server:
-  port: 8082
+  port: 8081
 
 external:
   member-point:
-    url: ${MEMBER_POINT_SERVICE_URL:http://localhost:8081}
+    url: ${MEMBER_POINT_SERVICE_URL:http://localhost:8080}
   insight:
     url: ${INSIGHT_SERVICE_URL:http://localhost:8083}
   internal-auth-token: ${INTERNAL_AUTH_TOKEN}
