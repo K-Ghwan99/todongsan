@@ -110,6 +110,35 @@ referenceId = predictionId
 | 정산 보상 지급 item | `MARKET_SETTLEMENT_REWARD:market:{marketId}:prediction:{predictionId}:member:{memberId}` |
 | 무효 처리 환불 | `MARKET_REFUND:market:{marketId}:prediction:{predictionId}:member:{memberId}` |
 
+Gateway 경유 예측 참여 요청의 클라이언트용 `Idempotency-Key`는 아래 형식을 정확히 사용한다.
+
+```text
+MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}
+```
+
+검증 규칙:
+
+- `Idempotency-Key`의 `{marketId}`는 path variable `marketId`와 일치해야 한다.
+- `Idempotency-Key`의 `{memberId}`는 Gateway/JWT가 주입한 `X-Member-Id`와 일치해야 한다.
+- 둘 중 하나라도 일치하지 않으면 `VALIDATION_FAILED`를 반환한다.
+- 클라이언트가 보내는 `Idempotency-Key`에는 `:attempt:{attemptNo}`를 포함하지 않는다.
+- `:attempt:{attemptNo}`는 Market Service가 Member-Point 포인트 차감 요청을 만들 때 내부적으로만 붙인다.
+
+예시:
+
+```http
+POST /api/v1/markets/6/predictions
+X-Member-Id: 1
+Idempotency-Key: MARKET_PREDICTION_SPEND:market:6:member:1
+```
+
+Future refactor TODO:
+
+- 현재 엄격한 도메인 키 정책은 유지한다.
+- 추후 외부 클라이언트가 UUID 기반 `Idempotency-Key`를 보내는 방식으로 바꿀 수 있다.
+- 이 경우에도 Market Service는 path variable `marketId`와 Gateway/JWT 주입 `X-Member-Id`를 기준으로 예측 주체를 확정해야 한다.
+- Member-Point 포인트 차감용 내부 키는 `MARKET_PREDICTION_SPEND:market:{marketId}:member:{memberId}:attempt:{attemptNo}` 형식을 유지한다.
+
 예측 참여 포인트 차감 키에는 `optionId`를 포함하지 않는다.
 클라이언트는 재시도 여부와 관계없이 attempt suffix가 없는 API 요청 헤더 키를 전달한다.
 Market Service는 명확한 실패(`FAILED`) 후 재시도할 때 attemptNo를 증가시키고, Member-Point 차감 요청과 `market_prediction.point_spend_idempotency_key`에는 attempt별 키를 사용한다.
@@ -995,6 +1024,13 @@ Idempotency-Key 예시:
 ```text
 MARKET_PREDICTION_SPEND:market:1:member:10
 ```
+
+검증 규칙:
+
+- key의 market id는 path variable `marketId`와 같아야 한다.
+- key의 member id는 `X-Member-Id`와 같아야 한다.
+- Gateway/Auth 연동 시 `X-Member-Id`는 JWT subject에서 주입되므로, 클라이언트는 다른 member id를 key에 사용할 수 없다.
+- `:attempt:{attemptNo}`가 포함된 key는 공개 예측 참여 API 요청 헤더로 사용할 수 없다.
 
 요청 예시:
 
