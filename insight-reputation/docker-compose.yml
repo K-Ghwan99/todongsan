@@ -1,0 +1,32 @@
+# Default Docker Compose file (uses RDS)
+# For local development with MySQL container, use: docker-compose -f docker-compose.local.yml up
+# For RDS environment, use: docker-compose -f docker-compose.rds.yml up
+
+version: '3.8'
+
+services:
+  # Insight Reputation Service (RDS - Default)
+  insight-reputation-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: insight-reputation-service
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    env_file:
+      - .env
+    networks:
+      - insight-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+    volumes:
+      - ./logs:/app/logs
+
+networks:
+  insight-network:
+    driver: bridge
