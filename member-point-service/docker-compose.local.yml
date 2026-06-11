@@ -1,12 +1,14 @@
 services:
   member-point-service:
     build: .
-    container_name: member-point-service
+    env_file:
+      - ../.env
+      - .env.local
     ports:
       - "8080:8080"
-    env_file:
-      - .env.local
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      DB_URL: jdbc:mysql://host.docker.internal:3307/${DB_MEMBERPOINT}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    networks:
+      - todongsan-network
+
+networks:
+  todongsan-network:
+    external: true

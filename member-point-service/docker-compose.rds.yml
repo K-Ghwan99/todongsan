@@ -1,10 +1,14 @@
 services:
   member-point-service:
     build: .
-    container_name: member-point-service
+    env_file:
+      - ../.env
+      - .env.rds
     ports:
       - "8080:8080"
-    env_file:
-      - .env.rds
-    environment:
-      DB_URL: jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_MEMBERPOINT}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    networks:
+      - todongsan-network
+
+networks:
+  todongsan-network:
+    external: true

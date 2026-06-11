@@ -1,10 +1,14 @@
 services:
   api-gateway:
     build: .
-    container_name: gateway
+    env_file:
+      - ../.env
+      - .env.rds
     ports:
       - "9000:9000"
-    env_file:
-      - .env.rds
-    environment:
-      JWT_SECRET: ${JWT_SECRET}
+    networks:
+      - todongsan-network
+
+networks:
+  todongsan-network:
+    external: true
