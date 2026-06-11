@@ -1,0 +1,13 @@
+services:
+  battle-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: battle-service
+    env_file:
+      - path: .env.local
+        required: false
+    ports:
+      - "8081:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
