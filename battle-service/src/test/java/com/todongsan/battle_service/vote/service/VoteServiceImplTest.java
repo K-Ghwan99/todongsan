@@ -13,6 +13,7 @@ import com.todongsan.battle_service.vote.dto.response.VoteResponse;
 import com.todongsan.battle_service.vote.dto.response.VoteResultResponse;
 import com.todongsan.battle_service.vote.entity.BattleVote;
 import com.todongsan.battle_service.vote.repository.BattleVoteRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,6 +21,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -30,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -40,9 +44,17 @@ class VoteServiceImplTest {
     @Mock private BattleVoteRepository battleVoteRepository;
     @Mock private MemberPointClient memberPointClient;
     @Mock private PointRewardRetryQueueRepository retryQueueRepository;
+    @Mock private TransactionTemplate txTemplate;
 
     @InjectMocks
     private VoteServiceImpl voteService;
+
+    @BeforeEach
+    void setUpTxTemplate() {
+        // 실제 트랜잭션 매니저 없이 콜백을 즉시 실행하도록 모킹
+        lenient().when(txTemplate.execute(any())).thenAnswer(inv ->
+                inv.getArgument(0, TransactionCallback.class).doInTransaction(null));
+    }
 
     // ===================== vote =====================
 
