@@ -1,32 +1,7 @@
 version: '3.8'
 
 services:
-  # Local MySQL Database for Development/Testing
-  mysql:
-    image: mysql:8.0
-    container_name: insight-reputation-mysql-local
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: insight
-      MYSQL_USER: insight_user
-      MYSQL_PASSWORD: insight_password
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_local_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    networks:
-      - insight-local-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 3s
-      interval: 5s
-      retries: 5
-      start_period: 30s
-    command: --default-authentication-plugin=mysql_native_password
-
-  # Insight Reputation Service (Local DB)
+  # Insight Reputation Service (External MySQL)
   insight-reputation-service:
     build:
       context: .
@@ -35,36 +10,18 @@ services:
     restart: unless-stopped
     ports:
       - "8083:8083"
+    env_file:
+      - .env.local
     environment:
-      # Local Database Configuration
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_INSIGHT: insight
-      DB_USERNAME: insight_user
-      DB_PASSWORD: insight_password
-      DB_URL: jdbc:mysql://mysql:3306/insight?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
-      
-      # External API Configuration
-      REB_API_KEY: ${REB_API_KEY}
-      REB_API_BASE_URL: ${REB_API_BASE_URL}
-      
-      # Claude API Configuration
-      CLAUDE_API_KEY: ${CLAUDE_API_KEY}
-      CLAUDE_API_URL: ${CLAUDE_API_URL}
-      CLAUDE_MODEL: ${CLAUDE_MODEL}
+      # Application Profile
+      SPRING_PROFILES_ACTIVE: docker
       
       # Service Communication URLs (for local testing)
       BATTLE_SERVICE_BASE_URL: http://localhost:8081
       MEMBER_POINT_SERVICE_BASE_URL: http://localhost:8084
       MARKET_SERVICE_BASE_URL: http://localhost:8082
-      
-      # Application Profile
-      SPRING_PROFILES_ACTIVE: docker
-    depends_on:
-      mysql:
-        condition: service_healthy
     networks:
-      - insight-local-network
+      - infra_default
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health"]
       interval: 30s
@@ -75,9 +32,5 @@ services:
       - ./logs:/app/logs
 
 networks:
-  insight-local-network:
-    driver: bridge
-
-volumes:
-  mysql_local_data:
-    driver: local
+  infra_default:
+    external: true
