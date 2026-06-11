@@ -5,7 +5,6 @@ services:
     ports:
       - "8080:8080"
     env_file:
-      - ../.env
       - .env.rds
     environment:
       DB_URL: jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_MEMBERPOINT}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
