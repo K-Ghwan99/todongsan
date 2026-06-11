@@ -1,0 +1,14 @@
+services:
+  member-point-service:
+    build: .
+    env_file:
+      - ../.env
+      - .env.local
+    ports:
+      - "8080:8080"
+    networks:
+      - todongsan-network
+
+networks:
+  todongsan-network:
+    external: true
