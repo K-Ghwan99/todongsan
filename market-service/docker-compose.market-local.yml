@@ -1,0 +1,13 @@
+services:
+  market-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: market-service
+    env_file:
+      - path: .env.local
+        required: false
+    ports:
+      - "8082:8082"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
