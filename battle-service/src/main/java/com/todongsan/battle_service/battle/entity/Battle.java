@@ -52,6 +52,12 @@ public class Battle extends BaseEntity {
     @Column(name = "settled_at")
     private LocalDateTime settledAt; // NULL이면 미정산
 
+    @Column(name = "sido", length = 50)
+    private String sido;
+
+    @Column(name = "sigu", length = 50)
+    private String sigu;
+
     @Column(name = "created_by", nullable = false)
     private Long createdBy; // member.id (REST 참조)
 
@@ -65,11 +71,13 @@ public class Battle extends BaseEntity {
     private LocalDateTime deletedAt;
 
     @Builder
-    public Battle(String title, String optionA, String optionB, Long createdBy,
-                  LocalDateTime startAt, LocalDateTime endAt) {
+    public Battle(String title, String optionA, String optionB, String sido, String sigu,
+                  Long createdBy, LocalDateTime startAt, LocalDateTime endAt) {
         this.title = title;
         this.optionA = optionA;
         this.optionB = optionB;
+        this.sido = sido;
+        this.sigu = sigu;
         this.status = BattleStatus.PENDING;
         this.createdBy = createdBy;
         this.startAt = startAt;
