@@ -11,7 +11,7 @@ services:
     ports:
       - "8083:8083"
     env_file:
-      - .env
+      - .env.local
     environment:
       # Application Profile
       SPRING_PROFILES_ACTIVE: docker
