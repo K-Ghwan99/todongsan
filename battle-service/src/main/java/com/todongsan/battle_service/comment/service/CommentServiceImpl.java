@@ -21,13 +21,13 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class CommentServiceImpl implements CommentService {
 
     private static final int MAX_CONTENT_LENGTH = 500;
@@ -37,23 +37,33 @@ public class CommentServiceImpl implements CommentService {
     private final CommentRepository commentRepository;
     private final MemberPointClient memberPointClient;
     private final PointRewardRetryQueueRepository retryQueueRepository;
+    private final TransactionTemplate txTemplate;
 
     @Override
-    @Transactional
     public CommentResponse createComment(Long battleId, Long memberId, CommentCreateRequest request) {
-        Battle battle = findBattleForActivity(battleId);
+        // 1) 검증 + 댓글 저장은 트랜잭션 안에서 (외부 REST 호출 제외)
+        Comment comment = txTemplate.execute(status -> {
+            findBattleForActivity(battleId);
 
-        if (request.getContent().length() > MAX_CONTENT_LENGTH) {
-            throw new CustomException(ErrorCode.BATTLE_COMMENT_TOO_LONG);
-        }
+            if (request.getContent().length() > MAX_CONTENT_LENGTH) {
+                throw new CustomException(ErrorCode.BATTLE_COMMENT_TOO_LONG);
+            }
 
-        Comment comment = commentRepository.save(Comment.builder()
-                .battleId(battleId)
-                .memberId(memberId)
-                .content(request.getContent())
-                .build());
+            return commentRepository.save(Comment.builder()
+                    .battleId(battleId)
+                    .memberId(memberId)
+                    .content(request.getContent())
+                    .build());
+        });
 
-        String idempotencyKey = "battle:comment:" + comment.getId() + ":member:" + memberId;
+        // 2) 보상 지급은 트랜잭션 커밋 후 (외부 REST 호출은 트랜잭션 밖)
+        earnCommentReward(battleId, memberId, comment.getId());
+
+        return CommentResponse.from(comment);
+    }
+
+    private void earnCommentReward(Long battleId, Long memberId, Long commentId) {
+        String idempotencyKey = "battle:comment:" + commentId + ":member:" + memberId;
         try {
             memberPointClient.earnPoint(PointEarnRequest.builder()
                     .memberId(memberId)
@@ -75,16 +85,15 @@ public class CommentServiceImpl implements CommentService {
                             .idempotencyKey(idempotencyKey)
                             .build());
                 }
-                log.warn("Comment reward enqueued for retry: member={}, comment={}", memberId, comment.getId());
+                log.warn("Comment reward enqueued for retry: member={}, comment={}", memberId, commentId);
             } else {
-                log.warn("Comment reward failed (4xx), manual correction needed: member={}, comment={}", memberId, comment.getId());
+                log.warn("Comment reward failed (4xx), manual correction needed: member={}, comment={}", memberId, commentId);
             }
         }
-
-        return CommentResponse.from(comment);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Page<CommentResponse> getComments(Long battleId, int page, int size) {
         battleRepository.findByIdAndDeletedAtIsNull(battleId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BATTLE_NOT_FOUND));
@@ -108,6 +117,7 @@ public class CommentServiceImpl implements CommentService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public CommentInternalResponse getCommentInternal(Long commentId) {
         Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BATTLE_COMMENT_NOT_FOUND));

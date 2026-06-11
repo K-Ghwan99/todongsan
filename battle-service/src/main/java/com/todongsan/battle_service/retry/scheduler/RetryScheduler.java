@@ -5,6 +5,7 @@ import com.todongsan.battle_service.client.dto.PointEarnRequest;
 import com.todongsan.battle_service.retry.entity.PointRewardRetryQueue;
 import com.todongsan.battle_service.retry.entity.RetryStatus;
 import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
+import com.todongsan.battle_service.vote.repository.BattleVoteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -19,9 +20,11 @@ import java.util.List;
 public class RetryScheduler {
 
     private static final int MAX_RETRY = 3;
+    private static final String TYPE_VOTE_WIN = "EARN_VOTE_WIN";
 
     private final PointRewardRetryQueueRepository retryQueueRepository;
     private final MemberPointClient memberPointClient;
+    private final BattleVoteRepository battleVoteRepository;
 
     @Scheduled(fixedDelay = 60000)
     @Transactional
@@ -41,6 +44,11 @@ public class RetryScheduler {
                         .build();
                 memberPointClient.earnPoint(request);
                 queue.markSuccess();
+                // 정산 승리 보상 재시도 성공 시 battle_vote.is_rewarded 동기화 (멱등성 플래그)
+                if (TYPE_VOTE_WIN.equals(queue.getType())) {
+                    battleVoteRepository.findByBattleIdAndMemberId(queue.getReferenceId(), queue.getMemberId())
+                            .ifPresent(vote -> vote.markRewarded());
+                }
                 log.info("RetryQueue [{}] success", queue.getId());
             } catch (Exception e) {
                 queue.incrementRetryCount();

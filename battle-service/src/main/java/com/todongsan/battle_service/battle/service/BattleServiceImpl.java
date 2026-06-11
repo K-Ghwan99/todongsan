@@ -18,6 +18,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -27,7 +28,6 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class BattleServiceImpl implements BattleService {
 
     private static final BigDecimal APPROVED_REWARD = BigDecimal.valueOf(20);
@@ -35,6 +35,7 @@ public class BattleServiceImpl implements BattleService {
     private final BattleRepository battleRepository;
     private final MemberPointClient memberPointClient;
     private final PointRewardRetryQueueRepository retryQueueRepository;
+    private final TransactionTemplate txTemplate;
 
     @Override
     @Transactional
@@ -56,6 +57,7 @@ public class BattleServiceImpl implements BattleService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Page<BattleListResponse> getBattles(String status, int page, int size) {
         BattleStatus battleStatus = parsePublicStatus(status);
         PageRequest pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
@@ -64,6 +66,7 @@ public class BattleServiceImpl implements BattleService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public BattleDetailResponse getBattle(Long battleId) {
         Battle battle = battleRepository
                 .findByIdAndStatusInAndDeletedAtIsNull(battleId,
@@ -73,18 +76,28 @@ public class BattleServiceImpl implements BattleService {
     }
 
     @Override
-    @Transactional
     public BattleStatusResponse approveBattle(Long battleId) {
-        Battle battle = findByIdOrThrow(battleId);
-        if (battle.getStatus() != BattleStatus.PENDING) {
-            throw new CustomException(ErrorCode.BATTLE_INVALID_STATUS);
-        }
-        battle.approve();
+        // 1) 상태 전이는 트랜잭션 안에서 (외부 REST 호출 제외)
+        Battle battle = txTemplate.execute(status -> {
+            Battle b = findByIdOrThrow(battleId);
+            if (b.getStatus() != BattleStatus.PENDING) {
+                throw new CustomException(ErrorCode.BATTLE_INVALID_STATUS);
+            }
+            b.approve();
+            return b;
+        });
 
-        String idempotencyKey = "battle:approved:" + battleId + ":member:" + battle.getCreatedBy();
+        // 2) 승인 보상은 트랜잭션 커밋 후 (외부 REST 호출은 트랜잭션 밖)
+        earnApprovedReward(battleId, battle.getCreatedBy());
+
+        return BattleStatusResponse.from(battle);
+    }
+
+    private void earnApprovedReward(Long battleId, Long createdBy) {
+        String idempotencyKey = "battle:approved:" + battleId + ":member:" + createdBy;
         try {
             memberPointClient.earnPoint(PointEarnRequest.builder()
-                    .memberId(battle.getCreatedBy())
+                    .memberId(createdBy)
                     .type("EARN_BATTLE_APPROVED")
                     .referenceType("BATTLE")
                     .referenceId(battleId)
@@ -95,7 +108,7 @@ public class BattleServiceImpl implements BattleService {
             if (e.getErrorCode() == ErrorCode.EXTERNAL_SERVICE_TIMEOUT) {
                 if (!retryQueueRepository.existsByIdempotencyKey(idempotencyKey)) {
                     retryQueueRepository.save(PointRewardRetryQueue.builder()
-                            .memberId(battle.getCreatedBy())
+                            .memberId(createdBy)
                             .referenceType("BATTLE")
                             .referenceId(battleId)
                             .type("EARN_BATTLE_APPROVED")
@@ -103,13 +116,11 @@ public class BattleServiceImpl implements BattleService {
                             .idempotencyKey(idempotencyKey)
                             .build());
                 }
-                log.warn("Approved reward enqueued for retry: member={}, battle={}", battle.getCreatedBy(), battleId);
+                log.warn("Approved reward enqueued for retry: member={}, battle={}", createdBy, battleId);
             } else {
-                log.warn("Approved reward failed (4xx), manual correction needed: member={}, battle={}", battle.getCreatedBy(), battleId);
+                log.warn("Approved reward failed (4xx), manual correction needed: member={}, battle={}", createdBy, battleId);
             }
         }
-
-        return BattleStatusResponse.from(battle);
     }
 
     @Override
@@ -135,6 +146,7 @@ public class BattleServiceImpl implements BattleService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public BattleDetailResponse getBattleInternal(Long battleId) {
         Battle battle = findByIdOrThrow(battleId);
         return BattleDetailResponse.from(battle);
