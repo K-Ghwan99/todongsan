@@ -3,11 +3,35 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: todongsan/market-service:local
     container_name: market-service
+    restart: unless-stopped
     env_file:
       - path: .env.local
         required: false
+    environment:
+      SERVER_PORT: 8082
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: todongsan-mysql
+      DB_PORT: 3306
+      DB_MARKET: market
+      DB_USERNAME: root
+      DB_PASSWORD: 1234
+      MEMBER_POINT_CLIENT_MODE: http
+      MEMBER_POINT_SERVICE_URL: http://member-point-service:8080
+      INSIGHT_CLIENT_MODE: http
+      INSIGHT_SERVICE_URL: http://insight-reputation-service:8083
+      MARKET_SCHEDULER_PREDICTION_RECONCILIATION_ENABLED: "true"
+      MARKET_REPUTATION_UPDATE_SCHEDULER_ENABLED: "true"
+      MARKET_REPUTATION_UPDATE_SCHEDULER_FIXED_DELAY_MS: 5000
+      MARKET_REPUTATION_UPDATE_SCHEDULER_LIMIT: 50
     ports:
       - "8082:8082"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - todongsan-network
+
+networks:
+  todongsan-network:
+    external: true

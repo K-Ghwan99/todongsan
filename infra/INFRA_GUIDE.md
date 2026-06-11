@@ -285,3 +285,159 @@ docker exec -it todongsan-mysql mysql -u root -p
 4. 로컬 개발은 Docker MySQL을 사용한다.
 5. AWS RDS는 통합 테스트 및 운영 검증 용도로 사용한다.
 6. 환경 변수(.env)는 Git에 커밋하지 않는다.
+
+---
+
+## 15. Local MSA Docker Compose
+
+Local integrated Docker execution uses the infra compose plus the root app compose.
+
+```text
+infra/docker-compose.yml
+  - MySQL only
+  - creates todongsan-network
+  - runs todongsan-mysql
+
+docker-compose.yml
+  - app services only
+  - api-gateway
+  - member-point-service
+  - battle-service
+  - market-service
+  - insight-reputation-service
+  - uses external todongsan-network
+```
+
+`docker-compose.local.yml` is no longer used. The standard local integrated app compose file is root `docker-compose.yml`.
+
+Run order:
+
+```bash
+cp .env.example .env
+docker compose -f infra/docker-compose.yml up -d
+docker network inspect todongsan-network
+docker compose config
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Root Docker Compose uses `.env` for variable substitution. The `.env` file is local-only and must not be committed.
+
+Step-by-step startup:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+docker network inspect todongsan-network
+docker ps
+
+docker compose up -d member-point-service market-service
+docker logs --tail=100 member-point-service
+docker logs --tail=100 market-service
+curl http://localhost:8082/actuator/health
+curl http://localhost:8082/api/v1/markets
+
+docker compose up -d --no-deps api-gateway
+docker logs --tail=100 api-gateway
+curl http://localhost:9000/api/v1/markets
+
+docker compose up -d battle-service insight-reputation-service
+docker logs --tail=100 battle-service
+docker logs --tail=100 insight-reputation-service
+docker compose ps
+```
+
+Smoke test examples:
+
+```bash
+curl http://localhost:9000/api/v1/markets
+curl http://localhost:8082/actuator/health
+curl http://localhost:8082/api/v1/markets
+```
+
+Network rules:
+
+```text
+Inside Docker Compose, localhost means the current container itself.
+Container-to-container calls must use Docker Compose service names.
+DB host inside app containers is todongsan-mysql.
+Use localhost:3307 only from the host PC when connecting to MySQL.
+```
+
+Service URL examples for integrated compose:
+
+```text
+MEMBER_POINT_SERVICE_URL=http://member-point-service:8080
+BATTLE_SERVICE_URL=http://battle-service:8081
+MARKET_SERVICE_URL=http://market-service:8082
+INSIGHT_SERVICE_URL=http://insight-reputation-service:8083
+
+MEMBER_POINT_SERVICE_BASE_URL=http://member-point-service:8080
+BATTLE_SERVICE_BASE_URL=http://battle-service:8081
+MARKET_SERVICE_BASE_URL=http://market-service:8082
+```
+
+Local environment files:
+
+Linux/macOS/Git Bash:
+
+```bash
+cp .env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Actual `.env`, `.env.local`, and `.env.rds` files are local-only files and must not be committed.
+Use `.env.example` as the shared placeholder template for root `docker-compose.yml`.
+If you test external API features, fill local values such as `REB_API_KEY` and `CLAUDE_API_KEY` in `.env`.
+Simple routing smoke tests can use placeholder values.
+
+Environment file roles:
+
+```text
+root .env
+  - Used only for root docker-compose.yml integrated local app execution.
+  - Create it from .env.example and fill local values when needed.
+  - Do not commit.
+
+service .env.local
+  - Used for running one service independently.
+  - Kept separate from root .env.
+  - Do not delete and do not commit.
+
+service .env.rds
+  - Used for service-specific RDS/EC2 deployment settings.
+  - Do not merge into root .env for local integrated execution.
+  - Do not delete and do not commit.
+```
+
+JPA local policy:
+
+```text
+battle-service and insight-reputation-service are JPA-based services.
+In local Docker MySQL integration tests, ddl-auto=update may create or adjust their schema.
+This is allowed only for local integration testing.
+RDS/EC2 ddl-auto policy must be reviewed separately before deployment.
+```
+
+Forbidden commands for normal local verification:
+
+```bash
+docker compose down -v
+docker volume rm
+DROP DATABASE
+TRUNCATE
+DELETE
+```
+
+Use plain `docker compose down` only when containers need to be stopped without deleting volumes.
