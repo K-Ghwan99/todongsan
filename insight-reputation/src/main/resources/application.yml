@@ -52,6 +52,7 @@ claude:
 client:
   battle:
     base-url: ${BATTLE_SERVICE_BASE_URL:http://battle-service}
+    internal-auth-token: ${BATTLE_INTERNAL_AUTH_TOKEN}
   member-point:
     base-url: ${MEMBER_POINT_SERVICE_BASE_URL:http://member-point-service}
   market:
