@@ -1,9 +1,18 @@
 services:
   member-point-service:
-    build: .
-    env_file:
-      - ../.env
-      - .env.local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: todongsan/member-point-service:local
+    container_name: member-point-service
+    restart: unless-stopped
+    environment:
+      DB_URL: jdbc:mysql://todongsan-mysql:3306/memberpoint?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+      DB_USERNAME: root
+      DB_PASSWORD: 1234
+      JWT_SECRET: local-jwt-secret-change-me-32chars
+      CRYPTO_AES_KEY: 0123456789abcdef0123456789abcdef
+      KAKAO_CLIENT_ID: local-kakao-client-id
     ports:
       - "8080:8080"
     networks:

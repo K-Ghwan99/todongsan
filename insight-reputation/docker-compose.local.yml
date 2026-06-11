@@ -1,27 +1,31 @@
-version: '3.8'
-
 services:
-  # Insight Reputation Service (External MySQL)
   insight-reputation-service:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: insight-reputation-service-local
+    image: todongsan/insight-reputation-service:local
+    container_name: insight-reputation-service
     restart: unless-stopped
     ports:
       - "8083:8083"
     env_file:
-      - .env.local
+      - path: .env.local
+        required: false
     environment:
-      # Application Profile
       SPRING_PROFILES_ACTIVE: docker
-      
-      # Service Communication URLs (for local testing)
-      BATTLE_SERVICE_BASE_URL: http://localhost:8081
-      MEMBER_POINT_SERVICE_BASE_URL: http://localhost:8084
-      MARKET_SERVICE_BASE_URL: http://localhost:8082
+      DB_URL: jdbc:mysql://todongsan-mysql:3306/insight?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+      DB_USERNAME: root
+      DB_PASSWORD: 1234
+      REB_API_KEY: replace-me
+      REB_API_BASE_URL: replace-me
+      CLAUDE_API_KEY: replace-me
+      CLAUDE_API_URL: replace-me
+      CLAUDE_MODEL: replace-me
+      BATTLE_SERVICE_BASE_URL: http://battle-service:8081
+      MEMBER_POINT_SERVICE_BASE_URL: http://member-point-service:8080
+      MARKET_SERVICE_BASE_URL: http://market-service:8082
     networks:
-      - infra_default
+      - todongsan-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health"]
       interval: 30s
@@ -32,5 +36,5 @@ services:
       - ./logs:/app/logs
 
 networks:
-  infra_default:
+  todongsan-network:
     external: true

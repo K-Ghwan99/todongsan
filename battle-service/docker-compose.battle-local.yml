@@ -3,11 +3,30 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: todongsan/battle-service:local
     container_name: battle-service
+    restart: unless-stopped
     env_file:
       - path: .env.local
         required: false
+    environment:
+      SERVER_PORT: 8081
+      SPRING_PROFILES_ACTIVE: default
+      DB_HOST: todongsan-mysql
+      DB_PORT: 3306
+      DB_NAME: battle
+      DB_USERNAME: root
+      DB_PASSWORD: 1234
+      MEMBER_POINT_SERVICE_URL: http://member-point-service:8080
+      INSIGHT_SERVICE_URL: http://insight-reputation-service:8083
+      INTERNAL_AUTH_TOKEN: local-internal-token
     ports:
       - "8081:8081"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - todongsan-network
+
+networks:
+  todongsan-network:
+    external: true
