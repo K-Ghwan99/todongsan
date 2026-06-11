@@ -1,12 +1,11 @@
-FROM openjdk:17-jre-slim
+FROM amazoncorretto:17-alpine
 
 WORKDIR /app
 
-# 타임존 설정
-RUN apt-get update && apt-get install -y tzdata && \
+# 타임존 설정 및 curl 설치 (헬스체크용)
+RUN apk add --no-cache tzdata curl && \
     ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime && \
-    echo "Asia/Seoul" > /etc/timezone && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    echo "Asia/Seoul" > /etc/timezone
 
 # 애플리케이션 JAR 파일 복사
 COPY build/libs/insight-reputation-*.jar app.jar

@@ -1,0 +1,14 @@
+services:
+  api-gateway:
+    build: .
+    env_file:
+      - ../.env
+      - .env.rds
+    ports:
+      - "9000:9000"
+    networks:
+      - todongsan-network
+
+networks:
+  todongsan-network:
+    external: true

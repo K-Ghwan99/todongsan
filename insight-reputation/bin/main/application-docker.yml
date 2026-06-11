@@ -11,11 +11,11 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
-        format_sql: true
+        format_sql: false
     defer-datasource-initialization: false
   
   sql:
@@ -25,18 +25,27 @@ spring:
 server:
   port: 8083
 
-springdoc:
-  swagger-ui:
-    path: /swagger-ui.html
-  api-docs:
-    path: /api-docs
+# Actuator Configuration for Health Check
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+  health:
+    defaults:
+      enabled: true
 
 logging:
   level:
     org.springframework.web: INFO
-    org.hibernate.SQL: INFO
-    org.hibernate.type: INFO
-    com.todongsan.insightreputation: DEBUG
+    org.hibernate.SQL: WARN
+    org.hibernate.type: WARN
+    com.todongsan.insightreputation: INFO
+  file:
+    path: /app/logs
 
 reb:
   api:
@@ -51,9 +60,8 @@ claude:
 
 client:
   battle:
-    base-url: ${BATTLE_SERVICE_BASE_URL:http://battle-service}
-    internal-auth-token: ${BATTLE_INTERNAL_AUTH_TOKEN}
+    base-url: ${BATTLE_SERVICE_BASE_URL}
   member-point:
-    base-url: ${MEMBER_POINT_SERVICE_BASE_URL:http://member-point-service}
+    base-url: ${MEMBER_POINT_SERVICE_BASE_URL}
   market:
-    base-url: ${MARKET_SERVICE_BASE_URL:http://localhost:8082}
+    base-url: ${MARKET_SERVICE_BASE_URL}

@@ -1,0 +1,52 @@
+networks:
+  todongsan-network:
+    driver: bridge
+
+services:
+
+  gateway:
+    build: ./api-gateway
+    container_name: gateway
+    ports:
+      - "9000:9000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      MEMBER_POINT_SERVICE_URL: http://member-point-service:8080
+      MARKET_SERVICE_URL: http://market-service:8082
+    networks:
+      - todongsan-network
+    depends_on:
+      - member-point-service
+      - market-service
+
+  member-point-service:
+    build: ./member-point-service
+    container_name: member-point-service
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_MEMBERPOINT}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      CRYPTO_AES_KEY: ${CRYPTO_AES_KEY}
+    networks:
+      - todongsan-network
+
+  market-service:
+    build: ./market-service
+    container_name: market-service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_MARKET}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: com.mysql.cj.jdbc.Driver
+      MEMBER_POINT_SERVICE_URL: http://member-point-service:8080
+      MEMBER_POINT_CLIENT_MODE: http
+    networks:
+      - todongsan-network
+    depends_on:
+      - member-point-service
