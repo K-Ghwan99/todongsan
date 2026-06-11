@@ -1,0 +1,16 @@
+services:
+  api-gateway:
+    build: .
+    container_name: gateway
+    ports:
+      - "9000:9000"
+    env_file:
+      - ../.env
+      - .env.local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      MEMBER_POINT_SERVICE_URL: http://host.docker.internal:8080
+      BATTLE_SERVICE_URL: http://host.docker.internal:8081
+      MARKET_SERVICE_URL: http://host.docker.internal:8082
+      INSIGHT_SERVICE_URL: http://host.docker.internal:8083
