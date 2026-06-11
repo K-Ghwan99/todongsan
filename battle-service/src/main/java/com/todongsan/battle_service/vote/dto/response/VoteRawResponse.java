@@ -16,7 +16,7 @@ public class VoteRawResponse {
     private String title;
     private String optionA;
     private String optionB;
-    private int totalVoteCount;
+    private int totalVotes;
     private int optionACount;
     private int optionBCount;
     private String status;
@@ -29,6 +29,7 @@ public class VoteRawResponse {
     public static class VoteItem {
         private Long memberId;
         private String selectedOption;
+        private LocalDateTime votedAt;
     }
 
     public static VoteRawResponse from(Battle battle, List<BattleVote> votes) {
@@ -36,6 +37,7 @@ public class VoteRawResponse {
                 .map(v -> VoteItem.builder()
                         .memberId(v.getMemberId())
                         .selectedOption(v.getSelectedOption())
+                        .votedAt(v.getCreatedAt())
                         .build())
                 .toList();
 
@@ -44,7 +46,7 @@ public class VoteRawResponse {
                 .title(battle.getTitle())
                 .optionA(battle.getOptionA())
                 .optionB(battle.getOptionB())
-                .totalVoteCount(battle.getVoteCount())
+                .totalVotes(battle.getVoteCount())
                 .optionACount(battle.getOptionACount())
                 .optionBCount(battle.getOptionBCount())
                 .status(battle.getStatus().name())

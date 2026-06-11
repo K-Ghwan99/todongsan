@@ -15,7 +15,10 @@ public class BattleDetailResponse {
     private String title;
     private String optionA;
     private String optionB;
+    private String sido;
+    private String sigu;
     private String status;
+    private boolean isClosed;
     private int optionACount;
     private int optionBCount;
     private int voteCount;
@@ -33,7 +36,10 @@ public class BattleDetailResponse {
                 .title(battle.getTitle())
                 .optionA(battle.getOptionA())
                 .optionB(battle.getOptionB())
+                .sido(battle.getSido())
+                .sigu(battle.getSigu())
                 .status(battle.getStatus().name())
+                .isClosed(battle.getStatus() == com.todongsan.battle_service.battle.entity.BattleStatus.CLOSED)
                 .optionACount(battle.getOptionACount())
                 .optionBCount(battle.getOptionBCount())
                 .voteCount(battle.getVoteCount())

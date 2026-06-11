@@ -45,6 +45,8 @@ public class BattleServiceImpl implements BattleService {
                 .title(request.getTitle())
                 .optionA(request.getOptionA())
                 .optionB(request.getOptionB())
+                .sido(request.getSido())
+                .sigu(request.getSigu())
                 .createdBy(memberId)
                 .startAt(request.getStartAt())
                 .endAt(request.getEndAt())
