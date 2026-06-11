@@ -1,5 +1,6 @@
 package com.todongsan.battle_service.battle.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.todongsan.battle_service.battle.entity.Battle;
 import lombok.Builder;
 import lombok.Getter;
@@ -51,5 +52,11 @@ public class BattleDetailResponse {
                 .endAt(battle.getEndAt())
                 .createdAt(battle.getCreatedAt())
                 .build();
+    }
+
+    // Lombok이 생성하는 isClosed()는 JSON 키가 "closed"가 되므로, 명시적으로 "isClosed"로 고정한다.
+    @JsonProperty("isClosed")
+    public boolean isClosed() {
+        return isClosed;
     }
 }

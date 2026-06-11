@@ -29,7 +29,7 @@ public class BattleInternalController {
     @GetMapping("/{battleId}/votes/raw")
     public ApiResponse<VoteRawResponse> getRawVotes(
             @PathVariable Long battleId,
-            @RequestHeader("X-Internal-Auth") String authToken) {
+            @RequestHeader(value = "X-Internal-Auth", required = false) String authToken) {
         validateInternalAuth(authToken);
         return ApiResponse.ok(voteService.getRawVotes(battleId));
     }
@@ -38,7 +38,7 @@ public class BattleInternalController {
     @GetMapping("/comments/{commentId}")
     public ApiResponse<CommentInternalResponse> getComment(
             @PathVariable Long commentId,
-            @RequestHeader("X-Internal-Auth") String authToken) {
+            @RequestHeader(value = "X-Internal-Auth", required = false) String authToken) {
         validateInternalAuth(authToken);
         return ApiResponse.ok(commentService.getCommentInternal(commentId));
     }
@@ -47,7 +47,7 @@ public class BattleInternalController {
     @GetMapping("/{battleId}/info")
     public ApiResponse<BattleDetailResponse> getBattleInfo(
             @PathVariable Long battleId,
-            @RequestHeader("X-Internal-Auth") String authToken) {
+            @RequestHeader(value = "X-Internal-Auth", required = false) String authToken) {
         validateInternalAuth(authToken);
         return ApiResponse.ok(battleService.getBattleInternal(battleId));
     }
