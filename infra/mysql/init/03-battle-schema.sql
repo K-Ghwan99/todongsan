@@ -17,6 +17,10 @@ CREATE TABLE battle (
     reward_amount   DECIMAL(10,2)   NOT NULL DEFAULT 0,          -- 승자 1인당 지급 포인트
     settled_at      DATETIME,                                    -- 정산 완료 시각 (NULL이면 미정산. status는 CLOSED 유지)
 
+    -- 지역 (Insight 방문 인증 연동)
+    sido            VARCHAR(50),                                 -- 시/도 (예: 서울, 경기)
+    sigu            VARCHAR(50),                                 -- 시/구 (예: 성동구, 마포구)
+
     created_by      BIGINT          NOT NULL,                    -- member.id (REST)
     start_at        DATETIME        NOT NULL,
     end_at          DATETIME        NOT NULL,

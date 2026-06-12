@@ -28,6 +28,12 @@ public class BattleCreateRequest {
     @Size(max = 100)
     private String optionB;
 
+    @Size(max = 50)
+    private String sido;
+
+    @Size(max = 50)
+    private String sigu;
+
     @NotNull
     private LocalDateTime startAt;
 

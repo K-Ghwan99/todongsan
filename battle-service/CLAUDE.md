@@ -26,7 +26,7 @@
 ## 내 서비스 컨텍스트
 
 - **서비스명:** Battle Service
-- **포트:** 8082
+- **포트:** 8081
 - **패키지 루트:** `com.todongsan.battle_service`
 - **담당 문서:**
   - `docs/battle/BATTLE_ERD.md` (ERD 최신본)

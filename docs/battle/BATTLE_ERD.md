@@ -40,6 +40,8 @@ erDiagram
         VARCHAR winning_option "A/B/DRAW"
         DECIMAL reward_amount
         DATETIME settled_at "정산 완료 시각 (status는 CLOSED 유지)"
+        VARCHAR sido "시/도 (Insight 방문 인증 연동)"
+        VARCHAR sigu "시/구 (Insight 방문 인증 연동)"
         BIGINT created_by "member.id (REST)"
         DATETIME start_at
         DATETIME end_at
@@ -142,6 +144,10 @@ CREATE TABLE battle (
     winning_option  VARCHAR(4),                                  -- 'A', 'B', 'DRAW' (정산 전 NULL)
     reward_amount   DECIMAL(10,2)   NOT NULL DEFAULT 0,          -- 승자 1인당 지급 포인트
     settled_at      DATETIME,                                    -- 정산 완료 시각 (NULL이면 미정산. status는 CLOSED 유지)
+
+    -- 지역 (Insight 방문 인증 연동)
+    sido            VARCHAR(50),                                 -- 시/도 (예: 서울, 경기)
+    sigu            VARCHAR(50),                                 -- 시/구 (예: 성동구, 마포구)
 
     created_by      BIGINT          NOT NULL,                    -- member.id (REST)
     start_at        DATETIME        NOT NULL,
@@ -311,10 +317,6 @@ flowchart TD
   (이미 Insight Service도 `POST /api/v1/members/batch`를 필요로 함).
 - **마이페이지 "내가 만든 Battle"**: 해당 기능이 MVP에 포함되면
   `KEY idx_battle_creator (created_by, deleted_at, created_at)` 인덱스 추가.
-- **댓글 기반 방문 인증 검증 정책 (Insight 요청 관련)**: Insight Service의
-  `VISIT_CERT_COMMENT_REGION_MISMATCH` 검증을 위해 Battle에 sido/sigu 추가가 필요한지
-  Insight 담당자와 합의 필요. Battle의 본질은 지역 비종속(예: "강남 vs 강북")이므로
-  Battle 도메인에 지역을 강제하는 것은 부적절. Insight 측에서 검증을 완화하는 방향 권장.
 
 ---
 
@@ -328,3 +330,4 @@ flowchart TD
 | v4 | BattleStatus를 CONVENTION.md 6-1 기준(`PENDING/ACTIVE/CLOSED/CANCELLED`)으로 정정. ONGOING/SETTLED 제거. 정산 완료는 `settled_at` 컬럼으로 표현 |
 | v4 | `point_reward_retry_queue`에 `reference_type` 컬럼 추가 (Member-Point `point_history`와 정합성) |
 | v4 | `ALREADY_VOTED` 참조를 `BATTLE_ALREADY_VOTED`로 정정 |
+| v5 | `battle` 테이블에 `sido`, `sigu` 컬럼 추가 (Insight 방문 인증 연동) |

@@ -1,5 +1,6 @@
 package com.todongsan.battle_service.battle.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.todongsan.battle_service.battle.entity.Battle;
 import lombok.Builder;
 import lombok.Getter;
@@ -15,7 +16,10 @@ public class BattleDetailResponse {
     private String title;
     private String optionA;
     private String optionB;
+    private String sido;
+    private String sigu;
     private String status;
+    private boolean isClosed;
     private int optionACount;
     private int optionBCount;
     private int voteCount;
@@ -33,7 +37,10 @@ public class BattleDetailResponse {
                 .title(battle.getTitle())
                 .optionA(battle.getOptionA())
                 .optionB(battle.getOptionB())
+                .sido(battle.getSido())
+                .sigu(battle.getSigu())
                 .status(battle.getStatus().name())
+                .isClosed(battle.getStatus() == com.todongsan.battle_service.battle.entity.BattleStatus.CLOSED)
                 .optionACount(battle.getOptionACount())
                 .optionBCount(battle.getOptionBCount())
                 .voteCount(battle.getVoteCount())
@@ -45,5 +52,11 @@ public class BattleDetailResponse {
                 .endAt(battle.getEndAt())
                 .createdAt(battle.getCreatedAt())
                 .build();
+    }
+
+    // Lombok이 생성하는 isClosed()는 JSON 키가 "closed"가 되므로, 명시적으로 "isClosed"로 고정한다.
+    @JsonProperty("isClosed")
+    public boolean isClosed() {
+        return isClosed;
     }
 }

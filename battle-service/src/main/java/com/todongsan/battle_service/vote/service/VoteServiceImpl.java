@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -25,7 +26,6 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class VoteServiceImpl implements VoteService {
 
     private static final BigDecimal VOTE_REWARD = BigDecimal.valueOf(10);
@@ -34,38 +34,52 @@ public class VoteServiceImpl implements VoteService {
     private final BattleVoteRepository battleVoteRepository;
     private final MemberPointClient memberPointClient;
     private final PointRewardRetryQueueRepository retryQueueRepository;
+    private final TransactionTemplate txTemplate;
 
     private static final long RESULT_OPEN_HOURS = 72;
 
     @Override
-    @Transactional
     public VoteResponse vote(Long battleId, Long memberId, VoteRequest request) {
-        Battle battle = findActiveOrThrow(battleId);
+        // 1) 검증 + 투표 저장 + 집계는 한 트랜잭션 안에서 (외부 REST 호출 제외)
+        String option = txTemplate.execute(status -> {
+            Battle battle = findActiveOrThrow(battleId);
 
-        if (LocalDateTime.now().isBefore(battle.getStartAt())) {
-            throw new CustomException(ErrorCode.BATTLE_CLOSED);
-        }
+            if (LocalDateTime.now().isBefore(battle.getStartAt())) {
+                throw new CustomException(ErrorCode.BATTLE_CLOSED);
+            }
 
-        String option = request.getOption().toUpperCase();
-        if (!option.equals("A") && !option.equals("B")) {
-            throw new CustomException(ErrorCode.BATTLE_INVALID_OPTION);
-        }
+            String opt = request.getOption().toUpperCase();
+            if (!opt.equals("A") && !opt.equals("B")) {
+                throw new CustomException(ErrorCode.BATTLE_INVALID_OPTION);
+            }
 
-        // uq_battle_vote 충돌 → GlobalExceptionHandler에서 BATTLE_ALREADY_VOTED 변환
-        BattleVote vote = BattleVote.builder()
+            // uq_battle_vote 충돌 → GlobalExceptionHandler에서 BATTLE_ALREADY_VOTED 변환
+            battleVoteRepository.save(BattleVote.builder()
+                    .battleId(battleId)
+                    .memberId(memberId)
+                    .selectedOption(opt)
+                    .build());
+
+            // 같은 트랜잭션에서 집계 UPDATE (원자성 보장)
+            if (opt.equals("A")) {
+                battleRepository.incrementOptionA(battleId);
+            } else {
+                battleRepository.incrementOptionB(battleId);
+            }
+            return opt;
+        });
+
+        // 2) 보상 지급은 트랜잭션 커밋 후 (외부 REST 호출은 트랜잭션 밖)
+        earnVoteReward(battleId, memberId);
+
+        return VoteResponse.builder()
                 .battleId(battleId)
-                .memberId(memberId)
                 .selectedOption(option)
+                .message("투표가 완료되었습니다.")
                 .build();
-        battleVoteRepository.save(vote);
+    }
 
-        // 같은 트랜잭션에서 집계 UPDATE (원자성 보장)
-        if (option.equals("A")) {
-            battleRepository.incrementOptionA(battleId);
-        } else {
-            battleRepository.incrementOptionB(battleId);
-        }
-
+    private void earnVoteReward(Long battleId, Long memberId) {
         String idempotencyKey = "battle:vote:" + battleId + ":member:" + memberId;
         try {
             memberPointClient.earnPoint(PointEarnRequest.builder()
@@ -93,15 +107,10 @@ public class VoteServiceImpl implements VoteService {
                 log.warn("Vote reward failed (4xx), manual correction needed: member={}, battle={}", memberId, battleId);
             }
         }
-
-        return VoteResponse.builder()
-                .battleId(battleId)
-                .selectedOption(option)
-                .message("투표가 완료되었습니다.")
-                .build();
     }
 
     @Override
+    @Transactional(readOnly = true)
     public VoteResultResponse getResult(Long battleId, Long memberId) {
         Battle battle = battleRepository.findByIdAndDeletedAtIsNull(battleId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BATTLE_NOT_FOUND));
@@ -144,6 +153,7 @@ public class VoteServiceImpl implements VoteService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public CrossAnalysisResponse getCrossResult(Long battleId) {
         Battle battle = battleRepository.findByIdAndDeletedAtIsNull(battleId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BATTLE_NOT_FOUND));
@@ -160,6 +170,7 @@ public class VoteServiceImpl implements VoteService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public CertifiedResultResponse getCertifiedResult(Long battleId) {
         Battle battle = battleRepository.findByIdAndDeletedAtIsNull(battleId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BATTLE_NOT_FOUND));
@@ -176,6 +187,7 @@ public class VoteServiceImpl implements VoteService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public VoteRawResponse getRawVotes(Long battleId) {
         Battle battle = battleRepository.findByIdAndDeletedAtIsNull(battleId)
                 .orElseThrow(() -> new CustomException(ErrorCode.BATTLE_NOT_FOUND));

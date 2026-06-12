@@ -11,6 +11,7 @@ import com.todongsan.battle_service.comment.repository.CommentRepository;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
 import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,6 +22,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -32,6 +35,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -42,9 +46,17 @@ class CommentServiceImplTest {
     @Mock private CommentRepository commentRepository;
     @Mock private MemberPointClient memberPointClient;
     @Mock private PointRewardRetryQueueRepository retryQueueRepository;
+    @Mock private TransactionTemplate txTemplate;
 
     @InjectMocks
     private CommentServiceImpl commentService;
+
+    @BeforeEach
+    void setUpTxTemplate() {
+        // 실제 트랜잭션 매니저 없이 콜백을 즉시 실행하도록 모킹
+        lenient().when(txTemplate.execute(any())).thenAnswer(inv ->
+                inv.getArgument(0, TransactionCallback.class).doInTransaction(null));
+    }
 
     // ===================== createComment =====================
 

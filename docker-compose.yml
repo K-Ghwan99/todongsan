@@ -1,0 +1,138 @@
+services:
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    image: todongsan/api-gateway:local
+    container_name: api-gateway
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-local-jwt-secret-change-me-32chars}
+      MEMBER_POINT_SERVICE_URL: http://member-point-service:8080
+      BATTLE_SERVICE_URL: http://battle-service:8081
+      MARKET_SERVICE_URL: http://market-service:8082
+      INSIGHT_SERVICE_URL: http://insight-reputation-service:8083
+    depends_on:
+      - member-point-service
+      - battle-service
+      - market-service
+      - insight-reputation-service
+    networks:
+      - todongsan-network
+
+  member-point-service:
+    build:
+      context: ./member-point-service
+      dockerfile: Dockerfile
+    image: todongsan/member-point-service:local
+    container_name: member-point-service
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      DB_URL: jdbc:mysql://todongsan-mysql:3306/${DB_MEMBERPOINT:-memberpoint}?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-1234}
+      JWT_SECRET: ${JWT_SECRET:-local-jwt-secret-change-me-32chars}
+      CRYPTO_AES_KEY: ${CRYPTO_AES_KEY:-0123456789abcdef0123456789abcdef}
+      KAKAO_CLIENT_ID: ${KAKAO_CLIENT_ID:-local-kakao-client-id}
+    networks:
+      - todongsan-network
+
+  battle-service:
+    build:
+      context: ./battle-service
+      dockerfile: Dockerfile
+    image: todongsan/battle-service:local
+    container_name: battle-service
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      SERVER_PORT: 8081
+      SPRING_PROFILES_ACTIVE: default
+      DB_HOST: todongsan-mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_BATTLE:-battle}
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-1234}
+      MEMBER_POINT_SERVICE_URL: http://member-point-service:8080
+      INSIGHT_SERVICE_URL: http://insight-reputation-service:8083
+      INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-local-internal-token}
+    networks:
+      - todongsan-network
+
+  market-service:
+    build:
+      context: ./market-service
+      dockerfile: Dockerfile
+    image: todongsan/market-service:local
+    container_name: market-service
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      SERVER_PORT: 8082
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: todongsan-mysql
+      DB_PORT: 3306
+      DB_MARKET: ${DB_MARKET:-market}
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-1234}
+      MEMBER_POINT_CLIENT_MODE: http
+      MEMBER_POINT_SERVICE_URL: http://member-point-service:8080
+      INSIGHT_CLIENT_MODE: http
+      INSIGHT_SERVICE_URL: http://insight-reputation-service:8083
+      MARKET_SCHEDULER_PREDICTION_RECONCILIATION_ENABLED: "true"
+      MARKET_REPUTATION_UPDATE_SCHEDULER_ENABLED: "true"
+      MARKET_REPUTATION_UPDATE_SCHEDULER_FIXED_DELAY_MS: 5000
+      MARKET_REPUTATION_UPDATE_SCHEDULER_LIMIT: 50
+    networks:
+      - todongsan-network
+
+  insight-reputation-service:
+    build:
+      context: ./insight-reputation
+      dockerfile: Dockerfile
+    image: todongsan/insight-reputation-service:local
+    container_name: insight-reputation-service
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mysql://todongsan-mysql:3306/${DB_INSIGHT:-insight}?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-1234}
+      REB_API_KEY: ${REB_API_KEY:-replace-me}
+      REB_API_BASE_URL: ${REB_API_BASE_URL:-replace-me}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-replace-me}
+      CLAUDE_API_URL: ${CLAUDE_API_URL:-replace-me}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-replace-me}
+      BATTLE_INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-local-internal-token}
+      BATTLE_SERVICE_BASE_URL: http://battle-service:8081
+      MEMBER_POINT_SERVICE_BASE_URL: http://member-point-service:8080
+      MARKET_SERVICE_BASE_URL: http://market-service:8082
+    networks:
+      - todongsan-network
+
+networks:
+  todongsan-network:
+    external: true

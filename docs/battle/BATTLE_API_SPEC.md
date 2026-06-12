@@ -61,6 +61,8 @@ POST /api/v1/battles
   "optionA": "성수",
   "optionB": "연남",
   "description": "주말 데이트 코스로 어디가 더 매력적인지 투표해주세요!",
+  "sido": "서울",
+  "sigu": "성동구",
   "startAt": "2026-05-29T00:00:00",
   "endAt": "2026-06-05T00:00:00"
 }
@@ -78,6 +80,8 @@ POST /api/v1/battles
     "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
     "optionA": "성수",
     "optionB": "연남",
+    "sido": "서울",
+    "sigu": "성동구",
     "status": "PENDING",
     "startAt": "2026-05-29T00:00:00",
     "endAt": "2026-06-05T00:00:00",
@@ -432,15 +436,15 @@ GET /api/v1/battles/{battleId}/votes/raw
     "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
     "optionA": "성수",
     "optionB": "연남",
-    "totalVoteCount": 320,
+    "totalVotes": 320,
     "optionACount": 195,
     "optionBCount": 125,
     "status": "CLOSED",
     "winningOption": "A",
     "settledAt": "2026-06-05T10:00:00",
     "votes": [
-      { "memberId": 1, "selectedOption": "A" },
-      { "memberId": 2, "selectedOption": "B" }
+      { "memberId": 1, "selectedOption": "A", "votedAt": "2026-05-30T14:23:00" },
+      { "memberId": 2, "selectedOption": "B", "votedAt": "2026-05-31T09:11:00" }
     ]
   },
   "timestamp": "2026-05-28T10:00:00"
@@ -501,9 +505,8 @@ GET /api/v1/battles/comments/{commentId}
   응답 비대화·개인정보 노출 최소화를 위함.
 - soft delete된 댓글은 `BATTLE_COMMENT_NOT_FOUND`로 응답 (인증 무효 처리).
   → 인증 후 댓글을 지우는 우회를 방지.
-- **지역 정보(sido/sigu)는 응답에 포함하지 않음.** Battle 도메인은 본질적으로 지역 비종속
-  (예: "강남 vs 강북" Battle은 어느 지역도 아님)이므로 Battle 테이블에 sido/sigu를 두지 않는다.
-  Insight 측의 `VISIT_CERT_COMMENT_REGION_MISMATCH` 검증 정책은 Insight 담당자와 별도 합의 필요.
+- **지역 정보(sido/sigu)는 이 응답에 포함하지 않음.** Insight가 지역 검증이 필요한 경우
+  `battleId`로 `GET /api/v1/battles/{battleId}/info` (5-3)를 별도 호출하여 `sido`/`sigu`를 확인한다.
 
 **Error Codes**
 
@@ -536,7 +539,10 @@ GET /api/v1/battles/{battleId}/info
     "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
     "optionA": "성수",
     "optionB": "연남",
+    "sido": "서울",
+    "sigu": "성동구",
     "status": "CLOSED",
+    "isClosed": true,
     "createdBy": 7,
     "startAt": "2026-05-29T00:00:00",
     "endAt": "2026-06-05T00:00:00",
@@ -571,3 +577,4 @@ GET /api/v1/battles/{battleId}/info
 | 2026-06-01 | 5-2 댓글 단건 조회 응답에 sido/sigu 미포함 정책 명시 (Battle 도메인은 지역 비종속) |
 | 2026-06-04 | 3-3/3-4 교차분석·인증자 필터 조회를 관리자 전용으로 변경. 포인트 차감 제거, 집계 통계만 응답 |
 | 2026-06-05 | 5-0 아웃바운드 호출 목록 신설. Battle 종료 시 Insight AI 분석 트리거(`POST /internal/api/v1/insights/battles/{battleId}/report`) 추가 |
+| 2026-06-11 | 2-1 요청/응답에 `sido`, `sigu` 추가. 5-1 `totalVoteCount` → `totalVotes` 변경, votes 항목에 `votedAt` 추가. 5-2 sido/sigu 정책 설명 수정. 5-3 응답에 `sido`, `sigu`, `isClosed` 추가 |
