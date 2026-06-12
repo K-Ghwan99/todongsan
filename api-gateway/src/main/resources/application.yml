@@ -3,6 +3,20 @@ spring:
     name: api-gateway
   cloud:
     gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origins:
+              - "http://localhost:5173"
+            allowed-methods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowed-headers: "*"
+            allow-credentials: true
       routes:
         - id: admin-market
           uri: ${MARKET_SERVICE_URL:http://localhost:8082}
@@ -27,7 +41,7 @@ spring:
         - id: insight
           uri: ${INSIGHT_SERVICE_URL:http://localhost:8083}
           predicates:
-            - Path=/api/v1/insights/**
+            - Path=/api/v1/insights/**, /api/v1/reputations/**
 
 server:
   port: 9000

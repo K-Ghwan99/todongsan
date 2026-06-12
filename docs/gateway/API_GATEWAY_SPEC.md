@@ -25,7 +25,8 @@
         ├── /api/v1/points/**    ──→ member-point-service:8080
         ├── /api/v1/battles/**   ──→ battle-service:8081
         ├── /api/v1/markets/**   ──→ market-service:8082
-        └── /api/v1/insights/**  ──→ insight-reputation-service:8083
+        ├── /api/v1/insights/**  ──→ insight-reputation-service:8083
+        └── /api/v1/reputations/**  ──→ insight-reputation-service:8083
 
 [서비스 간 직접 호출 — Gateway 통과 안 함 / /internal/** 경로 사용]
 
