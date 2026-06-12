@@ -11,7 +11,7 @@ services:
     ports:
       - "8083:8083"
     env_file:
-      - .env.rds
+      - ......env.rds
     networks:
       - insight-rds-network
     healthcheck:

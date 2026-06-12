@@ -2,8 +2,8 @@ services:
   member-point-service:
     build: .
     env_file:
-      - ../.env
-      - .env.rds
+      - ../..env
+      - ......env.rds
     ports:
       - "8080:8080"
     networks:
