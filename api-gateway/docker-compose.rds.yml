@@ -2,8 +2,8 @@ services:
   api-gateway:
     build: .
     env_file:
-      - ../.env
-      - .env.rds
+      - ../..env
+      - ......env.rds
     ports:
       - "9000:9000"
     networks:

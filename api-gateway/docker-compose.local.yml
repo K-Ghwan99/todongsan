@@ -7,9 +7,9 @@ services:
     container_name: api-gateway
     restart: unless-stopped
     env_file:
-      - path: ../.env.local
+      - path: ../..env.local
         required: false
-      - path: .env.local
+      - path: ..env.local
         required: false
     environment:
       JWT_SECRET: local-jwt-secret-change-me-32chars

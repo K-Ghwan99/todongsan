@@ -1030,7 +1030,33 @@ Market → Client                  무효 처리 결과 표시
 
 ---
 
-## 18. 팀 구성
+## 18. 배포 기준
+
+현재 배포 기준은 **EC2 1대 + Docker Compose + Docker MySQL**이다.
+
+```text
+EC2
+├── Docker MySQL: todongsan-mysql
+├── api-gateway: 9000
+├── member-point-service: 8080
+├── battle-service: 8081
+├── market-service: 8082
+└── insight-reputation-service: 8083
+```
+
+RDS는 비용 문제로 현재 사용하지 않으며, 기존 RDS 관련 example 파일은 향후 재도입 시 참고용으로만 남긴다.
+
+배포 절차, MySQL volume 보존, 백업/복구, 보안그룹 정책은 다음 문서를 따른다.
+
+```text
+docs/infra/EC2_DOCKER_DEPLOY.md
+```
+
+실제 EC2 환경 변수는 `.env.ec2.example`을 `.env`로 복사한 뒤 서버에서 직접 작성한다. 실제 `.env`와 secret은 Git에 커밋하지 않는다.
+
+---
+
+## 19. 팀 구성
 
 | 담당자 | 담당 영역 | 주요 역할 |
 |---|---|---|
@@ -1041,9 +1067,9 @@ Market → Client                  무효 처리 결과 표시
 
 ---
 
-## 19. Git 협업 전략
+## 20. Git 협업 전략
 
-### 19-1. 브랜치 전략
+### 20-1. 브랜치 전략
 
 ```text
 main
@@ -1055,7 +1081,7 @@ main
         └── feature/frontend
 ```
 
-### 19-2. 머지 규칙
+### 20-2. 머지 규칙
 
 - 모든 기능 브랜치는 `develop`으로 Pull Request를 생성한다.
 - 최소 1명 이상 코드 리뷰 후 머지한다.
@@ -1064,7 +1090,7 @@ main
 
 ---
 
-## 20. 기대 효과
+## 21. 기대 효과
 
 동네대전은 단순히 지역 정보를 보여주는 서비스가 아니다.
 
