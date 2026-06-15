@@ -85,10 +85,24 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     }
 
     private boolean isPublicPath(ServerHttpRequest request) {
-        return PUBLIC_PATHS.stream().anyMatch(p ->
-                p.method().equals(request.getMethod()) &&
-                request.getURI().getPath().equals(p.path())
-        );
+        HttpMethod method = request.getMethod();
+        String path = request.getURI().getPath();
+
+        if (PUBLIC_PATHS.stream().anyMatch(p -> p.method().equals(method) && p.path().equals(path))) {
+            return true;
+        }
+
+        // Market 공개 GET 경로 (/predictions/me 제외)
+        if (HttpMethod.GET.equals(method) && path.startsWith("/api/v1/markets")) {
+            return !path.endsWith("/predictions/me");
+        }
+
+        // Market 예측 시세 조회 (quote) - 비로그인 허용
+        if (HttpMethod.POST.equals(method) && path.matches("/api/v1/markets/[^/]+/predictions/quote")) {
+            return true;
+        }
+
+        return false;
     }
 
     @Override
