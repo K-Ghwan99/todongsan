@@ -41,7 +41,7 @@ spring:
         - id: insight
           uri: ${INSIGHT_SERVICE_URL:http://localhost:8083}
           predicates:
-            - Path=/api/v1/insights/**, /api/v1/reputations/**
+            - Path=/api/v1/insights/**, /api/v1/reputations/**, /api/v1/admin/insights/**
 
 server:
   port: 9000
