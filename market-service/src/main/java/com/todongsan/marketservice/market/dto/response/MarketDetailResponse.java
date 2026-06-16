@@ -2,6 +2,7 @@ package com.todongsan.marketservice.market.dto.response;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.todongsan.marketservice.market.type.MarketDisplayStatus;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
@@ -29,4 +30,10 @@ public class MarketDetailResponse {
     @JsonSerialize(using = ToStringSerializer.class)
     private BigDecimal totalPoolAmount;
     private List<MarketOptionResponse> options;
+
+    @Schema(description = "현재 시점 기준 예측 참여 가능 여부. status=ACTIVE && closeAt > now 일 때만 true")
+    private Boolean canPredict;
+
+    @Schema(description = "프론트 표시용 상태. status=ACTIVE 라도 closeAt <= now 이면 CLOSED_BY_TIME", example = "CLOSED_BY_TIME")
+    private MarketDisplayStatus displayStatus;
 }

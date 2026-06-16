@@ -7,6 +7,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -413,6 +414,17 @@ class MarketPredictionControllerTest {
         insertOptions(MARKET_ID);
 
         expectPredictionError(MARKET_ID, MEMBER_ID, IDEMPOTENCY_KEY, 1L, "100.00", 409, "MARKET_CLOSED");
+
+        // closeAt이 지난 ACTIVE Market에서는 차단 외에 어떤 부작용도 없어야 한다.
+        verifyNoInteractions(memberPointClient);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM market_prediction",
+                Integer.class
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM market_price_history",
+                Integer.class
+        )).isZero();
     }
 
     @Test

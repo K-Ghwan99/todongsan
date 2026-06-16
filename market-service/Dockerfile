@@ -12,10 +12,12 @@ RUN ./gradlew clean bootJar --no-daemon
 
 FROM eclipse-temurin:17-jre
 
+ENV TZ=Asia/Seoul
+
 WORKDIR /app
 
 COPY --from=build /app/build/libs/*.jar app.jar
 
 EXPOSE 8082
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Duser.timezone=Asia/Seoul", "-jar", "app.jar"]

@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -110,6 +111,43 @@ class MarketControllerTest {
                 .andExpect(jsonPath("$.data.resultAnnounceAt").value("2026-06-04T18:00:00"))
                 .andExpect(jsonPath("$.data.options[0].realPoolAmount").value("10000.00"))
                 .andExpect(jsonPath("$.data.options[0].virtualPoolAmount").value("5000.00"));
+    }
+
+    @Test
+    void getMarketDetailMarksClosedByTimeWhenCloseAtPassed() throws Exception {
+        // seed Market: status=ACTIVE, close_at=2026-06-01 (이미 지남)
+        mockMvc.perform(get("/api/v1/markets/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.canPredict").value(false))
+                .andExpect(jsonPath("$.data.displayStatus").value("CLOSED_BY_TIME"));
+    }
+
+    @Test
+    void getMarketsMarksClosedByTimeWhenCloseAtPassed() throws Exception {
+        mockMvc.perform(get("/api/v1/markets")
+                        .param("page", "0")
+                        .param("size", "20")
+                        .param("status", "ACTIVE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.content[0].canPredict").value(false))
+                .andExpect(jsonPath("$.data.content[0].displayStatus").value("CLOSED_BY_TIME"));
+    }
+
+    @Test
+    void getMarketDetailAllowsPredictionWhenCloseAtInFuture() throws Exception {
+        // 하드코딩 미래 날짜는 시한폭탄이 되므로 반드시 상대 시간을 사용한다.
+        jdbcTemplate.update(
+                "UPDATE market SET close_at = ? WHERE id = 1",
+                LocalDateTime.now().plusDays(1)
+        );
+
+        mockMvc.perform(get("/api/v1/markets/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.canPredict").value(true))
+                .andExpect(jsonPath("$.data.displayStatus").value("ACTIVE"));
     }
 
     @Test
