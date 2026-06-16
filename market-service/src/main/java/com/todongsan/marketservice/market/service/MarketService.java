@@ -10,9 +10,11 @@ import com.todongsan.marketservice.market.entity.Market;
 import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.repository.MarketMapper;
 import com.todongsan.marketservice.market.repository.MarketPriceHistoryRow;
+import com.todongsan.marketservice.market.type.MarketDisplayStatus;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +34,7 @@ public class MarketService {
     private final MarketMapper marketMapper;
 
     public MarketListResponse getMarkets(int page, int size, MarketStatus status, String keyword) {
+        LocalDateTime now = LocalDateTime.now();
         int offset = page * size;
         List<Market> markets = marketMapper.selectMarkets(status, keyword, offset, size);
         List<Long> marketIds = markets.stream()
@@ -51,7 +54,9 @@ public class MarketService {
                         market.getTotalPool(),
                         optionsByMarketId.getOrDefault(market.getId(), Collections.emptyList()).stream()
                                 .map(this::toListOptionResponse)
-                                .toList()
+                                .toList(),
+                        canPredict(market, now),
+                        displayStatus(market, now)
                 ))
                 .toList();
         long totalElements = marketMapper.countMarkets(status, keyword);
@@ -67,6 +72,7 @@ public class MarketService {
     }
 
     public MarketDetailResponse getMarket(long marketId) {
+        LocalDateTime now = LocalDateTime.now();
         Market market = findMarket(marketId);
         List<MarketOptionResponse> options = marketMapper.selectOptionsByMarketId(marketId).stream()
                 .map(this::toDetailOptionResponse)
@@ -80,8 +86,23 @@ public class MarketService {
                 market.getCloseAt(),
                 market.getSettleDueAt(),
                 market.getTotalPool(),
-                options
+                options,
+                canPredict(market, now),
+                displayStatus(market, now)
         );
+    }
+
+    private boolean canPredict(Market market, LocalDateTime now) {
+        return market.getStatus() == MarketStatus.ACTIVE
+                && market.getCloseAt().isAfter(now);
+    }
+
+    private MarketDisplayStatus displayStatus(Market market, LocalDateTime now) {
+        if (market.getStatus() == MarketStatus.ACTIVE
+                && !market.getCloseAt().isAfter(now)) {
+            return MarketDisplayStatus.CLOSED_BY_TIME;
+        }
+        return MarketDisplayStatus.valueOf(market.getStatus().name());
     }
 
     public MarketPriceHistoryResponse getPriceHistory(long marketId, int page, int size, Long optionId) {

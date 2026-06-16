@@ -479,6 +479,8 @@ GET /api/v1/markets?page=0&size=20&status=ACTIVE
         "title": "이번 주 OO구 아파트 가격 변동률은?",
         "status": "ACTIVE",
         "closeAt": "2026-06-01T18:00:00",
+        "canPredict": true,
+        "displayStatus": "ACTIVE",
         "totalRealPoolAmount": "25000.00",
         "totalVirtualPoolAmount": "10000.00",
         "totalEffectivePoolAmount": "35000.00",
@@ -538,6 +540,8 @@ priceChangeRate = (currentPrice - initialPrice) / initialPrice * 100
     "status": "ACTIVE",
     "priceModel": "POOL_SHARE",
     "closeAt": "2026-06-01T18:00:00",
+    "canPredict": true,
+    "displayStatus": "ACTIVE",
     "judgeDate": "2026-06-04",
     "settleDueAt": "2026-06-04T18:00:00",
     "totalRealPoolAmount": "25000.00",
@@ -588,6 +592,16 @@ pool 관련 조회 필드는 다음 의미로 사용한다.
 | `judgeDate` | 결과 판정 기준일 |
 | `settleDueAt` | 정산 예정 또는 정산 마감 기준 시각 |
 | `resultAnnounceAt` | 신규 응답 예시에서는 사용하지 않음. 필요한 경우 `settleDueAt` 기반 alias로만 취급 |
+| `canPredict` | 현재 시점 기준 예측 참여 가능 여부. `status == ACTIVE && closeAt > now`일 때만 `true`. 그 외에는 `false` |
+| `displayStatus` | 프론트 표시용 상태. `status == ACTIVE`라도 `closeAt <= now`이면 `CLOSED_BY_TIME`. 그 외에는 DB `status` 값과 동일. **DB의 `MarketStatus`와 분리된 표시 전용 값으로, DB 상태는 변경되지 않는다** |
+
+목록/상세 조회 모두 `canPredict`, `displayStatus`를 제공한다. 프론트는 `status`가 아니라 `canPredict`를 기준으로 Quote/예측 참여 UI를 제어하고, `displayStatus == CLOSED_BY_TIME`이면 화면에 "마감"으로 표시한다.
+
+```text
+status = ACTIVE, closeAt > now   → canPredict = true,  displayStatus = ACTIVE
+status = ACTIVE, closeAt <= now  → canPredict = false, displayStatus = CLOSED_BY_TIME
+그 외 status                      → canPredict = false, displayStatus = status.name()
+```
 
 ### 발생 가능한 ErrorCode
 
@@ -1063,7 +1077,9 @@ Content-Type: application/json
 ```text
 [트랜잭션 A]
 1. Market 조회
-2. Market ACTIVE 상태 검증
+2. Market 참여 가능 검증 (status == ACTIVE AND closeAt > now)
+   - status != ACTIVE → MARKET_NOT_ACTIVE
+   - status == ACTIVE 이지만 closeAt <= now → MARKET_CLOSED
 3. 선택지 검증
 4. `(market_id, member_id)` 기준 기존 Prediction row 락 조회
 5. 기존 Prediction이 없으면 POINT_PENDING Prediction 저장
@@ -1099,6 +1115,18 @@ Content-Type: application/json
 19. 트랜잭션 B 커밋
 20. 응답 반환
 ```
+
+closeAt 마감 정책:
+
+```text
+status = ACTIVE && closeAt <= now
+→ 트랜잭션 A 2단계에서 409 MARKET_CLOSED
+→ Prediction 생성 없음 (insert 안 함)
+→ Member-Point 포인트 차감 요청 없음 (트랜잭션 밖 9단계까지 도달하지 않음)
+→ PriceHistory 생성 없음
+```
+
+프론트가 버튼을 막더라도 API를 직접 호출할 수 있으므로, 최종 방어는 서버의 closeAt 검증으로 보장한다.
 
 ---
 
