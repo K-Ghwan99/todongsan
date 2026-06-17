@@ -22,6 +22,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -170,9 +171,21 @@ public class MarketController {
             @Parameter(description = "페이지 번호. 0부터 시작", example = "0")
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @Parameter(description = "페이지 크기. 최대 100", example = "20")
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+            @Parameter(description = "Market display status filter. Repeated or comma-separated values are supported.",
+                    example = "ACTIVE,CLOSED_BY_TIME")
+            @RequestParam(required = false) List<String> marketDisplayStatus,
+            @Parameter(description = "Prediction status filter. Repeated or comma-separated values are supported.",
+                    example = "POINT_PENDING,POINT_UNKNOWN")
+            @RequestParam(required = false) List<String> predictionStatus
     ) {
-        return ApiResponse.ok(marketPredictionQueryService.getMyPredictions(memberId, page, size));
+        return ApiResponse.ok(marketPredictionQueryService.getMyPredictions(
+                memberId,
+                page,
+                size,
+                marketDisplayStatus,
+                predictionStatus
+        ));
     }
 
     @GetMapping("/{marketId}/predictions/me")
