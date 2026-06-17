@@ -743,6 +743,191 @@ class MarketPredictionControllerTest {
                 .andExpect(jsonPath("$.data.content[0].refundAmount").value("100.00"));
     }
 
+    @Test
+    void getMyPredictionsFiltersByMarketDisplayStatusActive() throws Exception {
+        insertMarket(1L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(1L, 1L, "A", 1);
+        insertMarket(2L, "ACTIVE", LocalDateTime.now().minusSeconds(1));
+        insertOption(2L, 2L, "B", 1);
+        insertMarket(3L, "SETTLED", LocalDateTime.now().minusDays(1));
+        insertOption(3L, 3L, "C", 1);
+        insertPredictionForMarket(100L, 1L, 1L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+        insertPredictionForMarket(101L, 2L, 2L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT.plusSeconds(1), PREDICTION_CREATED_AT.plusSeconds(1), null, null);
+        insertPredictionForMarket(102L, 3L, 3L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "SETTLED", PREDICTION_CREATED_AT.plusSeconds(2), PREDICTION_CREATED_AT.plusSeconds(2), "100.00", null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("marketDisplayStatus", "ACTIVE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].predictionId").value(100))
+                .andExpect(jsonPath("$.data.content[0].marketDisplayStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.totalElements").value(1));
+    }
+
+    @Test
+    void getMyPredictionsFiltersByMarketDisplayStatusClosedByTime() throws Exception {
+        insertMarket(1L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(1L, 1L, "A", 1);
+        insertMarket(2L, "ACTIVE", LocalDateTime.now().minusSeconds(1));
+        insertOption(2L, 2L, "B", 1);
+        insertPredictionForMarket(100L, 1L, 1L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+        insertPredictionForMarket(101L, 2L, 2L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT.plusSeconds(1), PREDICTION_CREATED_AT.plusSeconds(1), null, null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("marketDisplayStatus", "CLOSED_BY_TIME"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].predictionId").value(101))
+                .andExpect(jsonPath("$.data.content[0].marketDisplayStatus").value("CLOSED_BY_TIME"))
+                .andExpect(jsonPath("$.data.totalElements").value(1));
+    }
+
+    @Test
+    void getMyPredictionsFiltersByPredictionStatusConfirmed() throws Exception {
+        insertMarket(1L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(1L, 1L, "A", 1);
+        insertMarket(2L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(2L, 2L, "B", 1);
+        insertPredictionForMarket(100L, 1L, 1L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+        insertPredictionForMarket(101L, 2L, 2L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "POINT_PENDING", PREDICTION_CREATED_AT.plusSeconds(1), PREDICTION_CREATED_AT.plusSeconds(1), null, null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("predictionStatus", "CONFIRMED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].predictionStatus").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.totalElements").value(1));
+    }
+
+    @Test
+    void getMyPredictionsFiltersByRepeatedPredictionStatuses() throws Exception {
+        insertMarket(1L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(1L, 1L, "A", 1);
+        insertMarket(2L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(2L, 2L, "B", 1);
+        insertMarket(3L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(3L, 3L, "C", 1);
+        insertPredictionForMarket(100L, 1L, 1L, MEMBER_ID, "100.00", null, null,
+                "POINT_PENDING", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+        insertPredictionForMarket(101L, 2L, 2L, MEMBER_ID, "100.00", null, null,
+                "POINT_UNKNOWN", PREDICTION_CREATED_AT.plusSeconds(1), PREDICTION_CREATED_AT.plusSeconds(1), null, null);
+        insertPredictionForMarket(102L, 3L, 3L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT.plusSeconds(2), PREDICTION_CREATED_AT.plusSeconds(2), null, null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("predictionStatus", "POINT_PENDING", "POINT_UNKNOWN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(2))
+                .andExpect(jsonPath("$.data.content[0].predictionId").value(101))
+                .andExpect(jsonPath("$.data.content[1].predictionId").value(100))
+                .andExpect(jsonPath("$.data.totalElements").value(2));
+    }
+
+    @Test
+    void getMyPredictionsFiltersByCommaSeparatedPredictionStatuses() throws Exception {
+        insertMarket(1L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(1L, 1L, "A", 1);
+        insertMarket(2L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(2L, 2L, "B", 1);
+        insertPredictionForMarket(100L, 1L, 1L, MEMBER_ID, "100.00", null, null,
+                "POINT_PENDING", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+        insertPredictionForMarket(101L, 2L, 2L, MEMBER_ID, "100.00", null, null,
+                "POINT_UNKNOWN", PREDICTION_CREATED_AT.plusSeconds(1), PREDICTION_CREATED_AT.plusSeconds(1), null, null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("predictionStatus", "POINT_PENDING,POINT_UNKNOWN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(2))
+                .andExpect(jsonPath("$.data.totalElements").value(2));
+    }
+
+    @Test
+    void getMyPredictionsReturnsEmptyPageWhenFilterHasNoMatches() throws Exception {
+        insertMarket(1L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(1L, 1L, "A", 1);
+        insertPredictionForMarket(100L, 1L, 1L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("marketDisplayStatus", "VOIDED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(0))
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+    }
+
+    @Test
+    void getMyPredictionsCombinesMarketAndPredictionStatusFilters() throws Exception {
+        insertMarket(1L, "ACTIVE", LocalDateTime.now().minusSeconds(1));
+        insertOption(1L, 1L, "A", 1);
+        insertMarket(2L, "ACTIVE", LocalDateTime.now().minusSeconds(1));
+        insertOption(2L, 2L, "B", 1);
+        insertMarket(3L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(3L, 3L, "C", 1);
+        insertPredictionForMarket(100L, 1L, 1L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+        insertPredictionForMarket(101L, 2L, 2L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "SETTLED", PREDICTION_CREATED_AT.plusSeconds(1), PREDICTION_CREATED_AT.plusSeconds(1), "100.00", null);
+        insertPredictionForMarket(102L, 3L, 3L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT.plusSeconds(2), PREDICTION_CREATED_AT.plusSeconds(2), null, null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("marketDisplayStatus", "CLOSED_BY_TIME")
+                        .param("predictionStatus", "CONFIRMED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].predictionId").value(100))
+                .andExpect(jsonPath("$.data.content[0].marketDisplayStatus").value("CLOSED_BY_TIME"))
+                .andExpect(jsonPath("$.data.content[0].predictionStatus").value("CONFIRMED"));
+    }
+
+    @Test
+    void getMyPredictionsDoesNotReturnAnotherMembersPredictionWhenFiltered() throws Exception {
+        insertMarket(1L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(1L, 1L, "A", 1);
+        insertPredictionForMarket(100L, 1L, 1L, 99L, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("marketDisplayStatus", "ACTIVE")
+                        .param("predictionStatus", "CONFIRMED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(0))
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+    }
+
+    @Test
+    void getMyPredictionsRejectsInvalidFilterEnum() throws Exception {
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("marketDisplayStatus", "UNKNOWN_STATUS"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void getMyPredictionsRejectsInvalidPredictionStatusFilter() throws Exception {
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("predictionStatus", "UNKNOWN_STATUS"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_FAILED"));
+    }
+
     private void insertActiveMarketWithOptions() {
         insertMarket(MARKET_ID, "ACTIVE", LocalDateTime.now().plusDays(1));
         insertOptions(MARKET_ID);

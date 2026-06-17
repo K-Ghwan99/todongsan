@@ -8,10 +8,16 @@ import com.todongsan.marketservice.market.dto.response.MyMarketPredictionRespons
 import com.todongsan.marketservice.market.dto.response.MarketPredictionResponse;
 import com.todongsan.marketservice.market.entity.MarketPrediction;
 import com.todongsan.marketservice.market.repository.MarketMapper;
+import com.todongsan.marketservice.market.repository.MyMarketPredictionSearchCondition;
 import com.todongsan.marketservice.market.repository.MyMarketPredictionRow;
 import com.todongsan.marketservice.market.type.MarketDisplayStatus;
 import com.todongsan.marketservice.market.type.MarketStatus;
+import com.todongsan.marketservice.market.type.PredictionStatus;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,14 +29,29 @@ public class MarketPredictionQueryService {
     private final MarketMapper marketMapper;
 
     @Transactional(readOnly = true)
-    public MyMarketPredictionPageResponse getMyPredictions(Long memberId, int page, int size) {
+    public MyMarketPredictionPageResponse getMyPredictions(
+            Long memberId,
+            int page,
+            int size,
+            List<String> marketDisplayStatusValues,
+            List<String> predictionStatusValues
+    ) {
         validateMemberId(memberId);
-        int offset = offset(page, size);
+        List<MarketDisplayStatus> marketDisplayStatuses = parseMarketDisplayStatuses(marketDisplayStatusValues);
+        List<PredictionStatus> predictionStatuses = parsePredictionStatuses(predictionStatusValues);
         LocalDateTime now = LocalDateTime.now();
-        long totalElements = marketMapper.countPredictionsByMemberId(memberId);
+        MyMarketPredictionSearchCondition condition = toCondition(
+                memberId,
+                offset(page, size),
+                size,
+                now,
+                marketDisplayStatuses,
+                predictionStatuses
+        );
+        long totalElements = marketMapper.countPredictionsByMemberId(condition);
 
         return new MyMarketPredictionPageResponse(
-                marketMapper.selectPredictionsByMemberId(memberId, offset, size).stream()
+                marketMapper.selectPredictionsByMemberId(condition).stream()
                         .map(row -> toResponse(row, now))
                         .toList(),
                 page,
@@ -39,6 +60,76 @@ public class MarketPredictionQueryService {
                 totalPages(totalElements, size),
                 isLast(page, size, totalElements)
         );
+    }
+
+    private MyMarketPredictionSearchCondition toCondition(
+            Long memberId,
+            int offset,
+            int size,
+            LocalDateTime now,
+            List<MarketDisplayStatus> marketDisplayStatuses,
+            List<PredictionStatus> predictionStatuses
+    ) {
+        boolean includeDisplayActive = marketDisplayStatuses.contains(MarketDisplayStatus.ACTIVE);
+        boolean includeClosedByTime = marketDisplayStatuses.contains(MarketDisplayStatus.CLOSED_BY_TIME);
+        List<MarketStatus> marketStatusesForDisplayFilter = marketDisplayStatuses.stream()
+                .filter(status -> status != MarketDisplayStatus.ACTIVE)
+                .filter(status -> status != MarketDisplayStatus.CLOSED_BY_TIME)
+                .map(status -> MarketStatus.valueOf(status.name()))
+                .toList();
+
+        return new MyMarketPredictionSearchCondition(
+                memberId,
+                offset,
+                size,
+                now,
+                !marketDisplayStatuses.isEmpty(),
+                includeDisplayActive,
+                includeClosedByTime,
+                marketStatusesForDisplayFilter,
+                predictionStatuses
+        );
+    }
+
+    private List<MarketDisplayStatus> parseMarketDisplayStatuses(List<String> values) {
+        return parseEnumValues(values, MarketDisplayStatus.class);
+    }
+
+    private List<PredictionStatus> parsePredictionStatuses(List<String> values) {
+        return parseEnumValues(values, PredictionStatus.class);
+    }
+
+    private <E extends Enum<E>> List<E> parseEnumValues(List<String> values, Class<E> enumType) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+
+        Set<E> parsed = new LinkedHashSet<>();
+        for (String value : values) {
+            for (String token : splitValue(value)) {
+                try {
+                    parsed.add(Enum.valueOf(enumType, token));
+                } catch (IllegalArgumentException e) {
+                    throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+                }
+            }
+        }
+        return List.copyOf(parsed);
+    }
+
+    private List<String> splitValue(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+
+        List<String> tokens = new ArrayList<>();
+        for (String token : value.split(",")) {
+            String trimmed = token.trim();
+            if (!trimmed.isEmpty()) {
+                tokens.add(trimmed);
+            }
+        }
+        return tokens;
     }
 
     @Transactional(readOnly = true)

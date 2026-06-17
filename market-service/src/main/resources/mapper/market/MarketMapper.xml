@@ -711,6 +711,31 @@
           AND member_id = #{memberId}
     </select>
 
+    <sql id="myPredictionFilters">
+        <if test="predictionStatuses != null and predictionStatuses.size() > 0">
+            AND p.status IN
+            <foreach collection="predictionStatuses" item="predictionStatus" open="(" close=")" separator=",">
+                #{predictionStatus}
+            </foreach>
+        </if>
+        <if test="marketDisplayStatusFilterApplied">
+            <trim prefix="AND (" suffix=")" prefixOverrides="OR">
+                <if test="includeDisplayActive">
+                    OR (m.status = 'ACTIVE' AND m.close_at &gt; #{now})
+                </if>
+                <if test="includeClosedByTime">
+                    OR (m.status = 'ACTIVE' AND m.close_at &lt;= #{now})
+                </if>
+                <if test="marketStatusesForDisplayFilter != null and marketStatusesForDisplayFilter.size() > 0">
+                    OR m.status IN
+                    <foreach collection="marketStatusesForDisplayFilter" item="marketStatus" open="(" close=")" separator=",">
+                        #{marketStatus}
+                    </foreach>
+                </if>
+            </trim>
+        </if>
+    </sql>
+
     <select id="countPredictionsByMemberId" resultType="long">
         SELECT COUNT(*)
         FROM market_prediction p
@@ -718,6 +743,7 @@
           ON m.id = p.market_id
          AND m.deleted_at IS NULL
         WHERE p.member_id = #{memberId}
+        <include refid="myPredictionFilters"/>
     </select>
 
     <select id="selectPredictionsByMemberId" resultType="com.todongsan.marketservice.market.repository.MyMarketPredictionRow">
@@ -745,6 +771,7 @@
           ON o.id = p.option_id
          AND o.market_id = p.market_id
         WHERE p.member_id = #{memberId}
+        <include refid="myPredictionFilters"/>
         ORDER BY p.created_at DESC, p.id DESC
         LIMIT #{limit} OFFSET #{offset}
     </select>

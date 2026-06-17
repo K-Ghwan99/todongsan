@@ -2894,6 +2894,20 @@ GET /api/v1/markets/predictions/me?page=0&size=20
 |---|---|---:|---|
 | `page` | int | X | 페이지 번호. 기본값 0 |
 | `size` | int | X | 페이지 크기. 기본값 20, 최대 100 |
+| `marketDisplayStatus` | string/list | X | 선택적 표시 상태 필터. 반복 파라미터와 콤마 구분 값을 모두 지원한다. 예: `ACTIVE,CLOSED_BY_TIME` |
+| `predictionStatus` | string/list | X | 선택적 Prediction 상태 필터. 반복 파라미터와 콤마 구분 값을 모두 지원한다. 예: `POINT_PENDING,POINT_UNKNOWN` |
+
+필터는 서버 DB 조회 단계에서 `count`와 `list` 쿼리 모두에 동일하게 적용한다.
+`marketDisplayStatus`와 `predictionStatus`가 함께 전달되면 AND 조건으로 조합한다.
+필터 결과가 없으면 `MARKET_PREDICTION_NOT_FOUND`가 아니라 200 OK와 빈 페이지를 반환한다.
+
+복수 값 예시:
+
+```http
+GET /api/v1/markets/predictions/me?predictionStatus=POINT_PENDING&predictionStatus=POINT_UNKNOWN
+GET /api/v1/markets/predictions/me?predictionStatus=POINT_PENDING,POINT_UNKNOWN
+GET /api/v1/markets/predictions/me?marketDisplayStatus=ACTIVE,CLOSED_BY_TIME
+```
 
 ### 정렬
 
@@ -2941,13 +2955,14 @@ market_prediction.id DESC
 }
 ```
 
-예측 내역이 없으면 200 OK와 함께 `content: []`, `totalElements: 0`, `last: true`를 반환한다.
+예측 내역이 없거나 필터 결과가 없으면 200 OK와 함께 `content: []`, `totalElements: 0`, `last: true`를 반환한다.
 
 ### 표시 상태
 
 `marketDisplayStatus`는 DB 상태가 아니라 프론트 표시 전용 값이다.
 
 ```text
+market.status = ACTIVE && closeAt > now   -> ACTIVE
 market.status = ACTIVE && closeAt <= now  -> CLOSED_BY_TIME
 그 외                                      -> market.status 값
 ```
@@ -2962,4 +2977,4 @@ market.status = ACTIVE && closeAt <= now  -> CLOSED_BY_TIME
 
 | ErrorCode | HTTP Status | 설명 |
 |---|---:|---|
-| `VALIDATION_FAILED` | 400 | `X-Member-Id` 누락 또는 page/size 검증 실패 |
+| `VALIDATION_FAILED` | 400 | `X-Member-Id` 누락, page/size 검증 실패, 또는 `marketDisplayStatus`/`predictionStatus` enum 값 오류 |
