@@ -711,6 +711,44 @@
           AND member_id = #{memberId}
     </select>
 
+    <select id="countPredictionsByMemberId" resultType="long">
+        SELECT COUNT(*)
+        FROM market_prediction p
+        JOIN market m
+          ON m.id = p.market_id
+         AND m.deleted_at IS NULL
+        WHERE p.member_id = #{memberId}
+    </select>
+
+    <select id="selectPredictionsByMemberId" resultType="com.todongsan.marketservice.market.repository.MyMarketPredictionRow">
+        SELECT
+            p.id AS prediction_id,
+            p.market_id,
+            m.title AS market_title,
+            m.status AS market_status,
+            p.option_id AS selected_option_id,
+            o.option_text AS selected_option_content,
+            p.point_amount,
+            p.price_snapshot,
+            p.contract_quantity,
+            p.status AS prediction_status,
+            p.created_at,
+            p.updated_at,
+            m.close_at,
+            p.settled_amount,
+            p.refund_amount
+        FROM market_prediction p
+        JOIN market m
+          ON m.id = p.market_id
+         AND m.deleted_at IS NULL
+        JOIN market_option o
+          ON o.id = p.option_id
+         AND o.market_id = p.market_id
+        WHERE p.member_id = #{memberId}
+        ORDER BY p.created_at DESC, p.id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
     <select id="lockPredictionByMarketIdAndMemberId" resultType="com.todongsan.marketservice.market.entity.MarketPrediction">
         SELECT *
         FROM market_prediction

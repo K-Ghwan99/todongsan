@@ -624,6 +624,125 @@ class MarketPredictionControllerTest {
         expectMyPredictionNotFound(99L);
     }
 
+    @Test
+    void getMyPredictionsReturnsOnlyCurrentMemberPredictionsInLatestOrder() throws Exception {
+        insertMarket(1L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(1L, 1L, "A", 1);
+        insertMarket(2L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(2L, 2L, "B", 1);
+        insertMarket(3L, "ACTIVE", LocalDateTime.now().plusDays(1));
+        insertOption(3L, 3L, "C", 1);
+
+        insertPredictionForMarket(100L, 1L, 1L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT.plusSeconds(1), null, null);
+        insertPredictionForMarket(101L, 2L, 2L, MEMBER_ID, "200.00", "0.25000000", "800.00000000",
+                "SETTLED", PREDICTION_CREATED_AT.plusDays(1), PREDICTION_CREATED_AT.plusDays(1).plusSeconds(1),
+                "350.00", null);
+        insertPredictionForMarket(102L, 3L, 3L, 2L, "300.00", "0.75000000", "400.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT.plusDays(2), PREDICTION_CREATED_AT.plusDays(2), null, null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("page", "0")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.content.length()").value(2))
+                .andExpect(jsonPath("$.data.content[0].predictionId").value(101))
+                .andExpect(jsonPath("$.data.content[0].marketId").value(2))
+                .andExpect(jsonPath("$.data.content[0].marketTitle").value("Prediction Test Market"))
+                .andExpect(jsonPath("$.data.content[0].marketStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.content[0].marketDisplayStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.content[0].canPredict").value(true))
+                .andExpect(jsonPath("$.data.content[0].selectedOptionId").value(2))
+                .andExpect(jsonPath("$.data.content[0].selectedOptionContent").value("B"))
+                .andExpect(jsonPath("$.data.content[0].pointAmount").value("200.00"))
+                .andExpect(jsonPath("$.data.content[0].priceSnapshot").value("0.25000000"))
+                .andExpect(jsonPath("$.data.content[0].contractQuantity").value("800.00000000"))
+                .andExpect(jsonPath("$.data.content[0].predictionStatus").value("SETTLED"))
+                .andExpect(jsonPath("$.data.content[0].settledAmount").value("350.00"))
+                .andExpect(jsonPath("$.data.content[0].refundAmount").value(nullValue()))
+                .andExpect(jsonPath("$.data.content[1].predictionId").value(100))
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.size").value(20))
+                .andExpect(jsonPath("$.data.totalElements").value(2))
+                .andExpect(jsonPath("$.data.totalPages").value(1))
+                .andExpect(jsonPath("$.data.last").value(true));
+    }
+
+    @Test
+    void getMyPredictionsReturnsEmptyPageWhenMemberHasNoPredictions() throws Exception {
+        insertActiveMarketWithOptions();
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID)
+                        .param("page", "0")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(0))
+                .andExpect(jsonPath("$.data.totalElements").value(0))
+                .andExpect(jsonPath("$.data.totalPages").value(0))
+                .andExpect(jsonPath("$.data.last").value(true));
+    }
+
+    @Test
+    void getMyPredictionsShowsClosedByTimeForActiveMarketAfterCloseAt() throws Exception {
+        insertMarket(MARKET_ID, "ACTIVE", LocalDateTime.now().minusSeconds(1));
+        insertOptions(MARKET_ID);
+        insertPrediction(
+                100L,
+                MEMBER_ID,
+                "100.00",
+                "0.50000000",
+                "200.00000000",
+                "CONFIRMED",
+                PREDICTION_CREATED_AT,
+                PREDICTION_CREATED_AT
+        );
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].marketStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.content[0].canPredict").value(false))
+                .andExpect(jsonPath("$.data.content[0].marketDisplayStatus").value("CLOSED_BY_TIME"));
+    }
+
+    @Test
+    void getMyPredictionsShowsActiveDisplayStatusForFutureActiveMarket() throws Exception {
+        insertActiveMarketWithOptions();
+        insertPrediction(
+                100L,
+                MEMBER_ID,
+                "100.00",
+                "0.50000000",
+                "200.00000000",
+                "CONFIRMED",
+                PREDICTION_CREATED_AT,
+                PREDICTION_CREATED_AT
+        );
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].canPredict").value(true))
+                .andExpect(jsonPath("$.data.content[0].marketDisplayStatus").value("ACTIVE"));
+    }
+
+    @Test
+    void getMyPredictionsReturnsNullableSettlementAndRefundAmounts() throws Exception {
+        insertMarket(MARKET_ID, "VOIDED", LocalDateTime.now().minusDays(1));
+        insertOptions(MARKET_ID);
+        insertPredictionForMarket(100L, MARKET_ID, 1L, MEMBER_ID, "100.00", "0.50000000", "200.00000000",
+                "REFUNDED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT.plusSeconds(1), null, "100.00");
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].settledAmount").value(nullValue()))
+                .andExpect(jsonPath("$.data.content[0].refundAmount").value("100.00"));
+    }
+
     private void insertActiveMarketWithOptions() {
         insertMarket(MARKET_ID, "ACTIVE", LocalDateTime.now().plusDays(1));
         insertOptions(MARKET_ID);
@@ -693,6 +812,42 @@ class MarketPredictionControllerTest {
                 contractQuantity,
                 predictionStatus,
                 "MARKET_PREDICTION_SPEND:market:%d:member:%d:attempt:1".formatted(MARKET_ID, memberId),
+                createdAt,
+                updatedAt
+        );
+    }
+
+    private void insertPredictionForMarket(
+            long predictionId,
+            long marketId,
+            long optionId,
+            long memberId,
+            String pointAmount,
+            String priceSnapshot,
+            String contractQuantity,
+            String predictionStatus,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt,
+            String settledAmount,
+            String refundAmount
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO market_prediction (
+                    id, market_id, option_id, member_id, point_amount, price_snapshot, contract_quantity,
+                    status, point_spend_idempotency_key, settled_amount, refund_amount, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                predictionId,
+                marketId,
+                optionId,
+                memberId,
+                pointAmount,
+                priceSnapshot,
+                contractQuantity,
+                predictionStatus,
+                "MARKET_PREDICTION_SPEND:market:%d:member:%d:attempt:1".formatted(marketId, memberId),
+                settledAmount,
+                refundAmount,
                 createdAt,
                 updatedAt
         );
