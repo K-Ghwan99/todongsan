@@ -2871,3 +2871,95 @@ limit 건만 조회
 - [ ] Insight-Reputation 내부 API는 요약/선택지 집계와 Prediction 페이지 조회를 분리한다.
 - [ ] Insight-Reputation 내부 API는 memberId까지만 제공하고 회원 프로필 정보는 제공하지 않는다.
 - [ ] `SETTLEMENT_IN_PROGRESS`, `SETTLED` 상태는 VOIDED 처리할 수 없다.
+
+---
+
+## 부록. 내 예측 목록 조회 API
+
+```http
+GET /api/v1/markets/predictions/me?page=0&size=20
+```
+
+마이페이지에서 현재 회원의 모든 Market 예측 참여 목록을 조회한다. 기존 단건 조회 API인 `GET /api/v1/markets/{marketId}/predictions/me`는 그대로 유지한다.
+
+### Headers
+
+| 이름 | 필수 | 설명 |
+|---|---:|---|
+| `X-Member-Id` | O | MVP 임시 회원 식별자. 추후 Gateway/Auth 연동 시 인증 정보에서 주입 |
+
+### Query Parameters
+
+| 이름 | 타입 | 필수 | 설명 |
+|---|---|---:|---|
+| `page` | int | X | 페이지 번호. 기본값 0 |
+| `size` | int | X | 페이지 크기. 기본값 20, 최대 100 |
+
+### 정렬
+
+```text
+market_prediction.created_at DESC
+market_prediction.id DESC
+```
+
+### Response
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "content": [
+      {
+        "predictionId": 100,
+        "marketId": 1,
+        "marketTitle": "이번 주 서울 아파트 매매가격은 상승할까?",
+        "marketStatus": "ACTIVE",
+        "marketDisplayStatus": "ACTIVE",
+        "canPredict": true,
+        "selectedOptionId": 2,
+        "selectedOptionContent": "상승",
+        "pointAmount": "100.00",
+        "priceSnapshot": "0.68750000",
+        "contractQuantity": "145.45454545",
+        "predictionStatus": "CONFIRMED",
+        "createdAt": "2026-05-29T15:30:00",
+        "updatedAt": "2026-05-29T15:31:00",
+        "closeAt": "2026-06-01T18:00:00",
+        "settledAmount": null,
+        "refundAmount": null
+      }
+    ],
+    "page": 0,
+    "size": 20,
+    "totalElements": 1,
+    "totalPages": 1,
+    "last": true
+  },
+  "timestamp": "2026-05-29T15:31:00"
+}
+```
+
+예측 내역이 없으면 200 OK와 함께 `content: []`, `totalElements: 0`, `last: true`를 반환한다.
+
+### 표시 상태
+
+`marketDisplayStatus`는 DB 상태가 아니라 프론트 표시 전용 값이다.
+
+```text
+market.status = ACTIVE && closeAt <= now  -> CLOSED_BY_TIME
+그 외                                      -> market.status 값
+```
+
+`CLOSED_BY_TIME`은 `MarketStatus`에 추가하지 않는다. `canPredict`는 `market.status == ACTIVE && closeAt > now`일 때만 `true`다.
+
+### settledAmount / refundAmount
+
+목록 조회에서는 `market_prediction.settled_amount`, `market_prediction.refund_amount`를 nullable Decimal String으로 반환한다. 정산 또는 환불 전이면 `null`이다.
+
+### 발생 가능한 ErrorCode
+
+| ErrorCode | HTTP Status | 설명 |
+|---|---:|---|
+| `VALIDATION_FAILED` | 400 | `X-Member-Id` 누락 또는 page/size 검증 실패 |

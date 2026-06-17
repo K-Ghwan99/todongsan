@@ -8,6 +8,7 @@ import com.todongsan.marketservice.market.dto.response.MarketDetailResponse;
 import com.todongsan.marketservice.market.dto.response.MarketListResponse;
 import com.todongsan.marketservice.market.dto.response.MarketPredictionResponse;
 import com.todongsan.marketservice.market.dto.response.MarketPriceHistoryResponse;
+import com.todongsan.marketservice.market.dto.response.MyMarketPredictionPageResponse;
 import com.todongsan.marketservice.market.dto.response.QuoteMarketPredictionResponse;
 import com.todongsan.marketservice.market.service.MarketPredictionQueryService;
 import com.todongsan.marketservice.market.service.MarketPredictionService;
@@ -149,6 +150,29 @@ public class MarketController {
             @Valid @RequestBody QuoteMarketPredictionRequest request
     ) {
         return ApiResponse.ok(marketPredictionService.quotePrediction(marketId, request));
+    }
+
+    @GetMapping("/predictions/me")
+    @Tag(name = "Market Prediction API", description = "Gateway를 통해 노출되는 예측 참여 API")
+    @Operation(
+            summary = "내 예측 목록 조회",
+            description = "Gateway가 주입한 X-Member-Id 기준으로 내 예측 목록을 최신 참여 시점 순으로 조회한다."
+    )
+    public ApiResponse<MyMarketPredictionPageResponse> getMyPredictions(
+            @Parameter(
+                    name = "X-Member-Id",
+                    description = "Gateway가 주입하는 회원 ID. Market Service는 JWT를 직접 파싱하지 않는다.",
+                    required = true,
+                    in = ParameterIn.HEADER,
+                    example = "10"
+            )
+            @RequestHeader(value = "X-Member-Id", required = false) Long memberId,
+            @Parameter(description = "페이지 번호. 0부터 시작", example = "0")
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @Parameter(description = "페이지 크기. 최대 100", example = "20")
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size
+    ) {
+        return ApiResponse.ok(marketPredictionQueryService.getMyPredictions(memberId, page, size));
     }
 
     @GetMapping("/{marketId}/predictions/me")

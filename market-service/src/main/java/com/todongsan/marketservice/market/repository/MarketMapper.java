@@ -128,6 +128,14 @@ public interface MarketMapper {
             @Param("memberId") long memberId
     );
 
+    long countPredictionsByMemberId(@Param("memberId") long memberId);
+
+    List<MyMarketPredictionRow> selectPredictionsByMemberId(
+            @Param("memberId") long memberId,
+            @Param("offset") int offset,
+            @Param("limit") int limit
+    );
+
     MarketPrediction lockPredictionByMarketIdAndMemberId(
             @Param("marketId") long marketId,
             @Param("memberId") long memberId
