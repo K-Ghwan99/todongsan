@@ -68,16 +68,16 @@ public class MemberAuthServiceImpl implements MemberAuthService {
                     .refreshTokenExpiresAt(LocalDateTime.now().plusDays(60))
                     .build());
 
-            // 가입 보상 50P (멱등성 보장)
+            // 가입 보상 200P (멱등성 보장)
             String signupKey = "SIGNUP:" + member.getId();
             if (pointHistoryRepository.findByIdempotencyKey(signupKey).isEmpty()) {
-                memberRepository.earnPoint(member.getId(), BigDecimal.valueOf(50));
+                memberRepository.earnPoint(member.getId(), BigDecimal.valueOf(200));
                 Member afterEarn = memberRepository.findById(member.getId()).orElseThrow();
 
                 pointHistoryRepository.save(PointHistory.builder()
                         .memberId(member.getId())
                         .type(PointHistoryType.EARN_SIGNUP)
-                        .amount(BigDecimal.valueOf(50))
+                        .amount(BigDecimal.valueOf(200))
                         .balanceSnapshot(afterEarn.getPointBalance())
                         .reason("신규 가입 보상")
                         .idempotencyKey(signupKey)
