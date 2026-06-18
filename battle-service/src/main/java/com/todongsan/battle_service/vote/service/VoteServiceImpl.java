@@ -15,12 +15,16 @@ import com.todongsan.battle_service.vote.entity.BattleVote;
 import com.todongsan.battle_service.vote.repository.BattleVoteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -150,6 +154,38 @@ public class VoteServiceImpl implements VoteService {
                 .optionBRatio(bRatio)
                 .winningOption(battle.getWinningOption())
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<MyVoteBattleResponse> getMyVotedBattles(Long memberId, String status, int page, int size) {
+        List<BattleStatus> statuses = parseMyStatuses(status);
+        Pageable pageable = PageRequest.of(page, size); // 정렬은 쿼리의 ORDER BY(최신 투표순)로 처리
+        return battleVoteRepository.findMyVotedBattles(memberId, statuses, pageable)
+                .map(row -> MyVoteBattleResponse.of((Battle) row[0], (BattleVote) row[1]));
+    }
+
+    private List<BattleStatus> parseMyStatuses(String status) {
+        if (status == null || status.isBlank()) {
+            return List.of(BattleStatus.ACTIVE, BattleStatus.CLOSED);
+        }
+        List<BattleStatus> result = new ArrayList<>();
+        for (String token : status.split(",")) {
+            String s = token.trim().toUpperCase();
+            if (s.isEmpty()) continue;
+            if (s.equals("ACTIVE")) {
+                if (!result.contains(BattleStatus.ACTIVE)) result.add(BattleStatus.ACTIVE);
+            } else if (s.equals("CLOSED")) {
+                if (!result.contains(BattleStatus.CLOSED)) result.add(BattleStatus.CLOSED);
+            } else {
+                // PENDING/CANCELLED 등 사용자 노출 대상이 아닌 값
+                throw new CustomException(ErrorCode.VALIDATION_FAILED);
+            }
+        }
+        if (result.isEmpty()) {
+            return List.of(BattleStatus.ACTIVE, BattleStatus.CLOSED);
+        }
+        return result;
     }
 
     @Override

@@ -8,6 +8,7 @@ import com.todongsan.battle_service.vote.dto.response.*;
 import com.todongsan.battle_service.vote.service.VoteService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,6 +27,16 @@ public class VoteController {
             @RequestHeader("X-Member-Id") Long memberId,
             @Valid @RequestBody VoteRequest request) {
         return ApiResponse.ok(voteService.vote(battleId, memberId, request));
+    }
+
+    // GET /api/v1/battles/votes/me?status=ACTIVE,CLOSED&page=0&size=20
+    @GetMapping("/votes/me")
+    public ApiResponse<Page<MyVoteBattleResponse>> getMyVotedBattles(
+            @RequestHeader("X-Member-Id") Long memberId,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.ok(voteService.getMyVotedBattles(memberId, status, page, size));
     }
 
     // GET /api/v1/battles/{battleId}/result

@@ -322,6 +322,93 @@ GET /api/v1/battles/{battleId}/result/certified
 
 ---
 
+### 3-5. 내 참여 배틀 목록 조회
+
+```
+GET /api/v1/battles/votes/me?status={status}&page={page}&size={size}
+```
+
+**용도**: 마이페이지의 "내가 참여(투표)한 배틀 목록/현황". Market의 `GET /api/v1/markets/predictions/me`와 대응한다.
+
+**인증**: 필요 (게이트웨이 인증 후 `X-Member-Id` 기준 조회)
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| status | String | N | `ACTIVE`, `CLOSED` 중 하나 이상(콤마 구분 허용). 미지정 시 전체. `PENDING`/`CANCELLED`는 사용자 노출 대상 아님 |
+| page | Integer | N | 페이지 번호 (기본: 0) |
+| size | Integer | N | 페이지 크기 (기본: 20) |
+
+**Response**: Spring `Page<T>` 직렬화 형태(다른 목록 API와 동일: `content`, `number`, `size`, `totalElements`, `totalPages`, `first`, `last`).
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "content": [
+      {
+        "battleId": 42,
+        "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
+        "optionA": "성수",
+        "optionB": "연남",
+        "sido": "서울",
+        "sigu": "성동구",
+        "status": "CLOSED",
+        "selectedOption": "A",
+        "winningOption": "A",
+        "isWin": true,
+        "rewardAmount": "50.00",
+        "settledAt": "2026-06-05T10:00:00",
+        "votedAt": "2026-05-30T14:23:00",
+        "startAt": "2026-05-29T00:00:00",
+        "endAt": "2026-06-05T00:00:00"
+      }
+    ],
+    "number": 0,
+    "size": 20,
+    "totalElements": 1,
+    "totalPages": 1,
+    "first": true,
+    "last": true
+  },
+  "timestamp": "2026-06-18T10:00:00"
+}
+```
+
+**응답 item 필드**
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| battleId | Long | 배틀 ID |
+| title / optionA / optionB | String | 배틀 제목·선택지 |
+| sido / sigu | String\|null | 지역 |
+| status | String | `ACTIVE` / `CLOSED` |
+| selectedOption | String | 내가 투표한 선택지 `A`/`B` |
+| winningOption | String\|null | 정산 결과 `A`/`B`/`DRAW`. 미정산이면 null |
+| isWin | Boolean\|null | 내 승리 여부. 미정산이면 null |
+| rewardAmount | String(Decimal)\|null | 내가 받은 승리 보상. 없으면 null |
+| settledAt | String\|null | 정산 시각. null이면 미정산 |
+| votedAt | String | 내가 투표한 시각 |
+| startAt / endAt | String | 배틀 기간 |
+
+**설계 메모**
+
+- **참여 내역이 없으면 404가 아니라 `200 + content=[]`** 로 응답한다.
+- 상태 필터는 **서버 쿼리 파라미터로 처리**한다(프론트에서 현재 페이지 content만 거르는 방식 금지).
+- `battle_vote`를 `member_id`로 조회 후 `battle`을 조인해 한 번에 내려준다(배틀 전체 조회 후 단건 API N회 호출 금지). 내부 API(`votes/raw`)는 사용하지 않는다.
+
+**Error Codes**
+
+| ErrorCode | HTTP | 상황 |
+|---|---:|---|
+| `UNAUTHORIZED` | 401 | JWT 없음/만료 |
+| `VALIDATION_FAILED` | 400 | 잘못된 status 값 |
+
+---
+
 ## 4. 댓글
 
 ### 4-1. 댓글 작성
@@ -578,3 +665,4 @@ GET /api/v1/battles/{battleId}/info
 | 2026-06-04 | 3-3/3-4 교차분석·인증자 필터 조회를 관리자 전용으로 변경. 포인트 차감 제거, 집계 통계만 응답 |
 | 2026-06-05 | 5-0 아웃바운드 호출 목록 신설. Battle 종료 시 Insight AI 분석 트리거(`POST /internal/api/v1/insights/battles/{battleId}/report`) 추가 |
 | 2026-06-11 | 2-1 요청/응답에 `sido`, `sigu` 추가. 5-1 `totalVoteCount` → `totalVotes` 변경, votes 항목에 `votedAt` 추가. 5-2 sido/sigu 정책 설명 수정. 5-3 응답에 `sido`, `sigu`, `isClosed` 추가 |
+| 2026-06-18 | 3-5 내 참여 배틀 목록 조회(`GET /api/v1/battles/votes/me`) 신설. 마이페이지 "내가 참여한 배틀" 용도, Market `/markets/predictions/me` 대응 |
