@@ -128,6 +128,11 @@ public interface MarketMapper {
             @Param("memberId") long memberId
     );
 
+    MyMarketPredictionRow selectPredictionForPayoutEstimate(
+            @Param("marketId") long marketId,
+            @Param("memberId") long memberId
+    );
+
     long countPredictionsByMemberId(MyMarketPredictionSearchCondition condition);
 
     List<MyMarketPredictionRow> selectPredictionsByMemberId(MyMarketPredictionSearchCondition condition);

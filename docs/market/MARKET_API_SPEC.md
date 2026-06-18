@@ -1312,15 +1312,24 @@ GET /api/v1/markets/{marketId}/predictions/me
     "pointAmount": "100.00",
     "priceSnapshot": "0.68750000",
     "contractQuantity": "145.45454545",
-    "status": "POINT_UNKNOWN",
+    "status": "CONFIRMED",
     "createdAt": "2026-05-29T15:30:00",
-    "updatedAt": "2026-05-29T15:31:00"
+    "updatedAt": "2026-05-29T15:31:00",
+    "estimatedPayoutIfWin": "137.77",
+    "estimatedProfitIfWin": "37.77",
+    "estimatedProfitRateIfWin": "37.77",
+    "currentPayoutPerContract": "0.94722222",
+    "estimateBaseTotalPool": "150.00",
+    "estimateBaseSettlementPool": "142.50",
+    "estimateBaseOptionContractQuantity": "150.44117647"
   },
   "timestamp": "2026-05-29T15:31:00"
 }
 ```
 
-`POINT_PENDING`, `POINT_UNKNOWN` 상태에서는 `priceSnapshot`, `contractQuantity`가 아직 `null`일 수 있다.
+예상 정산 필드는 현재 `CONFIRMED` 예측만을 기준으로, 내 선택지가 최종 정답일 경우를 가정한 추정값이다. 확정 수익이 아니며 다른 사용자의 추가 참여나 정산 전 상태 변화에 따라 달라질 수 있다. `estimateBaseTotalPool`에는 `virtualPoolAmount`를 포함하지 않는다.
+
+`POINT_PENDING`, `POINT_UNKNOWN` 상태에서는 `priceSnapshot`, `contractQuantity`가 아직 `null`일 수 있다. `POINT_PENDING`, `POINT_UNKNOWN`, `FAILED`, `SETTLED`, `REFUND_PENDING`, `REFUND_UNKNOWN`, `REFUNDED` 상태에서는 모든 예상 정산 필드를 `null`로 반환한다. `FAILED`는 정산 대기가 아닌 예측 참여 실패 상태이며, `SETTLED` 상태에서는 예상값이 아니라 실제 `settledAmount`를 사용한다.
 
 ### 발생 가능한 ErrorCode
 
@@ -2942,7 +2951,14 @@ market_prediction.id DESC
         "updatedAt": "2026-05-29T15:31:00",
         "closeAt": "2026-06-01T18:00:00",
         "settledAmount": null,
-        "refundAmount": null
+        "refundAmount": null,
+        "estimatedPayoutIfWin": "137.77",
+        "estimatedProfitIfWin": "37.77",
+        "estimatedProfitRateIfWin": "37.77",
+        "currentPayoutPerContract": "0.94722222",
+        "estimateBaseTotalPool": "150.00",
+        "estimateBaseSettlementPool": "142.50",
+        "estimateBaseOptionContractQuantity": "150.44117647"
       }
     ],
     "page": 0,
@@ -2972,6 +2988,22 @@ market.status = ACTIVE && closeAt <= now  -> CLOSED_BY_TIME
 ### settledAmount / refundAmount
 
 목록 조회에서는 `market_prediction.settled_amount`, `market_prediction.refund_amount`를 nullable Decimal String으로 반환한다. 정산 또는 환불 전이면 `null`이다.
+
+### 현재 기준 예상 정산 필드
+
+| 필드 | 설명 |
+|---|---|
+| `estimatedPayoutIfWin` | 내 선택지가 정답일 경우 현재 풀 기준 예상 정산금. 금액 scale 2 |
+| `estimatedProfitIfWin` | `estimatedPayoutIfWin - pointAmount`. 금액 scale 2 |
+| `estimatedProfitRateIfWin` | `estimatedProfitIfWin / pointAmount * 100`. 비율 scale 2 |
+| `currentPayoutPerContract` | 현재 정산 가능 풀을 선택 option의 CONFIRMED 계약 수량으로 나눈 값. scale 8 |
+| `estimateBaseTotalPool` | 해당 Market의 CONFIRMED Prediction `pointAmount` 합. scale 2 |
+| `estimateBaseSettlementPool` | 수수료 차감 후 현재 기준 예상 정산 가능 풀. scale 2 |
+| `estimateBaseOptionContractQuantity` | 내 선택 option의 CONFIRMED Prediction `contractQuantity` 합. scale 8 |
+
+이 값들은 확정 수익이 아니다. 현재 `CONFIRMED` 예측 기준으로 내 선택지가 최종 정답일 경우를 가정하며, 추가 참여나 정산 전 상태 변화에 따라 달라질 수 있다. 가격 계산용 `virtualPoolAmount`는 정산 및 예상 수익 계산에 포함하지 않는다.
+
+예상값은 Prediction 상태가 `CONFIRMED`이고 계산 근거값이 유효할 때만 제공한다. `POINT_PENDING`, `POINT_UNKNOWN`, `FAILED`, `SETTLED`, `REFUND_PENDING`, `REFUND_UNKNOWN`, `REFUNDED`에서는 일곱 필드를 모두 `null`로 반환한다. `FAILED`는 참여 실패 상태이고, `SETTLED`에서는 실제 `settledAmount`를 사용한다.
 
 ### 발생 가능한 ErrorCode
 

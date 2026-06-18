@@ -29,4 +29,7 @@ public class MyMarketPredictionRow {
     private LocalDateTime closeAt;
     private BigDecimal settledAmount;
     private BigDecimal refundAmount;
+    private BigDecimal feeRate;
+    private BigDecimal estimateBaseTotalPool;
+    private BigDecimal estimateBaseOptionContractQuantity;
 }
