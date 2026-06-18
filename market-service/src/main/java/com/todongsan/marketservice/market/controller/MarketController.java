@@ -13,6 +13,7 @@ import com.todongsan.marketservice.market.dto.response.QuoteMarketPredictionResp
 import com.todongsan.marketservice.market.service.MarketPredictionQueryService;
 import com.todongsan.marketservice.market.service.MarketPredictionService;
 import com.todongsan.marketservice.market.service.MarketService;
+import com.todongsan.marketservice.market.type.MarketDisplayStatus;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.PredictionStatus;
 import io.swagger.v3.oas.annotations.Operation;
@@ -53,7 +54,7 @@ public class MarketController {
     @GetMapping
     @Operation(
             summary = "Market 목록 조회",
-            description = "Market 목록을 상태, 키워드, 페이지 조건으로 조회한다. Decimal 응답은 JSON String으로 제공한다."
+            description = "Market 목록을 상태, 표시 상태, 키워드, 정렬, 페이지 조건으로 조회한다. Decimal 응답은 JSON String으로 제공한다."
     )
     public ApiResponse<MarketListResponse> getMarkets(
             @Parameter(description = "페이지 번호. 0부터 시작", example = "0")
@@ -63,9 +64,13 @@ public class MarketController {
             @Parameter(description = "Market 상태 필터", example = "ACTIVE")
             @RequestParam(required = false) MarketStatus status,
             @Parameter(description = "제목 검색 키워드", example = "아파트")
-            @RequestParam(required = false) String keyword
+            @RequestParam(required = false) String keyword,
+            @Parameter(description = "프론트 표시 상태 필터", example = "ACTIVE")
+            @RequestParam(required = false) MarketDisplayStatus displayStatus,
+            @Parameter(description = "정렬 방식: popular, closingSoon, latest", example = "popular")
+            @RequestParam(required = false) String sort
     ) {
-        return ApiResponse.ok(marketService.getMarkets(page, size, status, keyword));
+        return ApiResponse.ok(marketService.getMarkets(page, size, status, keyword, displayStatus, sort));
     }
 
     @GetMapping("/{marketId}")

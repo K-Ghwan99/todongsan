@@ -541,6 +541,8 @@ UNKNOWN 또는 조회 timeout/5xx
 
 ## 10. 정산 실패 시나리오
 
+정산은 **Pool Share 가격 형성 + 계약 수량 가중 Pari-mutuel 정산**을 따른다. 수수료는 전체 풀이 아닌 오답 선택지의 실제 참여 포인트 합인 `losingPool`에만 부과한다. 승자는 원금과 `rewardPool`의 계약 수량 가중 분배액을 받고, 패자 계약 수량은 만기 시 가치가 0이다. 정답 option은 유효하지만 정답자가 없는 경우는 ErrorCode가 아니라 정상 정산 완료 케이스다. `virtualPoolAmount`는 정산 재원에 포함하지 않는다.
+
 ### 10-1. 정산 처리 흐름
 
 ```text

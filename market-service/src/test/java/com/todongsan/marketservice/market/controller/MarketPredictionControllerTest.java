@@ -563,12 +563,12 @@ class MarketPredictionControllerTest {
                 .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.data.createdAt").value("2026-06-02T15:30:00"))
                 .andExpect(jsonPath("$.data.updatedAt").value("2026-06-02T15:30:01"))
-                .andExpect(jsonPath("$.data.estimatedPayoutIfWin").value("11.87"))
-                .andExpect(jsonPath("$.data.estimatedProfitIfWin").value("1.87"))
-                .andExpect(jsonPath("$.data.estimatedProfitRateIfWin").value("18.70"))
-                .andExpect(jsonPath("$.data.currentPayoutPerContract").value("0.47500000"))
+                .andExpect(jsonPath("$.data.estimatedPayoutIfWin").value("15.93"))
+                .andExpect(jsonPath("$.data.estimatedProfitIfWin").value("5.93"))
+                .andExpect(jsonPath("$.data.estimatedProfitRateIfWin").value("59.30"))
+                .andExpect(jsonPath("$.data.currentPayoutPerContract").value("0.23750000"))
                 .andExpect(jsonPath("$.data.estimateBaseTotalPool").value("100.00"))
-                .andExpect(jsonPath("$.data.estimateBaseSettlementPool").value("95.00"))
+                .andExpect(jsonPath("$.data.estimateBaseSettlementPool").value("47.50"))
                 .andExpect(jsonPath("$.data.estimateBaseOptionContractQuantity").value("200.00000000"));
     }
 
@@ -739,12 +739,12 @@ class MarketPredictionControllerTest {
         mockMvc.perform(get("/api/v1/markets/predictions/me")
                         .header("X-Member-Id", MEMBER_ID))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content[0].estimatedPayoutIfWin").value("11.87"))
-                .andExpect(jsonPath("$.data.content[0].estimatedProfitIfWin").value("1.87"))
-                .andExpect(jsonPath("$.data.content[0].estimatedProfitRateIfWin").value("18.70"))
-                .andExpect(jsonPath("$.data.content[0].currentPayoutPerContract").value("0.47500000"))
+                .andExpect(jsonPath("$.data.content[0].estimatedPayoutIfWin").value("15.93"))
+                .andExpect(jsonPath("$.data.content[0].estimatedProfitIfWin").value("5.93"))
+                .andExpect(jsonPath("$.data.content[0].estimatedProfitRateIfWin").value("59.30"))
+                .andExpect(jsonPath("$.data.content[0].currentPayoutPerContract").value("0.23750000"))
                 .andExpect(jsonPath("$.data.content[0].estimateBaseTotalPool").value("100.00"))
-                .andExpect(jsonPath("$.data.content[0].estimateBaseSettlementPool").value("95.00"))
+                .andExpect(jsonPath("$.data.content[0].estimateBaseSettlementPool").value("47.50"))
                 .andExpect(jsonPath("$.data.content[0].estimateBaseOptionContractQuantity")
                         .value("200.00000000"));
     }

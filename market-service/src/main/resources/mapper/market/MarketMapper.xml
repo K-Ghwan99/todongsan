@@ -6,34 +6,61 @@
 
     <select id="selectMarkets" resultType="com.todongsan.marketservice.market.entity.Market">
         SELECT
-            id,
-            title,
-            status,
-            close_at,
-            total_pool,
-            created_at
-        FROM market
-        WHERE deleted_at IS NULL
-        <if test="status != null">
-            AND status = #{status}
-        </if>
-        <if test="keyword != null and keyword != ''">
-            AND title LIKE CONCAT('%', #{keyword}, '%')
-        </if>
-        ORDER BY created_at DESC
+            m.id,
+            m.title,
+            m.status,
+            m.close_at,
+            m.total_pool,
+            m.created_at
+        FROM market m
+        WHERE m.deleted_at IS NULL
+        <include refid="marketListFilters"/>
+        <choose>
+            <when test="sort != null and sort.name() == 'POPULAR'">
+                ORDER BY m.total_pool DESC, m.created_at DESC, m.id DESC
+            </when>
+            <when test="sort != null and sort.name() == 'CLOSING_SOON'">
+                ORDER BY m.close_at ASC, m.id DESC
+            </when>
+            <when test="sort != null and sort.name() == 'LATEST'">
+                ORDER BY m.created_at DESC, m.id DESC
+            </when>
+            <otherwise>
+                ORDER BY m.created_at DESC
+            </otherwise>
+        </choose>
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
-    <select id="countMarkets" resultType="long">
-        SELECT COUNT(*)
-        FROM market
-        WHERE deleted_at IS NULL
+    <sql id="marketListFilters">
         <if test="status != null">
-            AND status = #{status}
+            AND m.status = #{status}
         </if>
         <if test="keyword != null and keyword != ''">
-            AND title LIKE CONCAT('%', #{keyword}, '%')
+            AND m.title LIKE CONCAT('%', #{keyword}, '%')
         </if>
+        <if test="displayStatus != null">
+            <choose>
+                <when test="displayStatus.name() == 'ACTIVE'">
+                    AND m.status = 'ACTIVE'
+                    AND m.close_at &gt; #{now}
+                </when>
+                <when test="displayStatus.name() == 'CLOSED_BY_TIME'">
+                    AND m.status = 'ACTIVE'
+                    AND m.close_at &lt;= #{now}
+                </when>
+                <otherwise>
+                    AND m.status = #{displayStatus}
+                </otherwise>
+            </choose>
+        </if>
+    </sql>
+
+    <select id="countMarkets" resultType="long">
+        SELECT COUNT(*)
+        FROM market m
+        WHERE m.deleted_at IS NULL
+        <include refid="marketListFilters"/>
     </select>
 
     <select id="selectMarketById" resultType="com.todongsan.marketservice.market.entity.Market">
@@ -714,6 +741,8 @@
     <sql id="predictionEstimateColumns">
         m.fee_rate,
         COALESCE(estimate_total.estimate_base_total_pool, 0.00) AS estimate_base_total_pool,
+        COALESCE(estimate_option.estimate_base_option_point_amount, 0.00)
+            AS estimate_base_option_point_amount,
         COALESCE(estimate_option.estimate_base_option_contract_quantity, 0.00000000)
             AS estimate_base_option_contract_quantity
     </sql>
@@ -728,6 +757,7 @@
           ON estimate_total.market_id = p.market_id
         LEFT JOIN (
             SELECT market_id, option_id,
+                   SUM(point_amount) AS estimate_base_option_point_amount,
                    SUM(contract_quantity) AS estimate_base_option_contract_quantity
             FROM market_prediction
             WHERE status = 'CONFIRMED'

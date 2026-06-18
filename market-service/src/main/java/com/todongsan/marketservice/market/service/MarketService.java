@@ -11,6 +11,7 @@ import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.repository.MarketMapper;
 import com.todongsan.marketservice.market.repository.MarketPriceHistoryRow;
 import com.todongsan.marketservice.market.type.MarketDisplayStatus;
+import com.todongsan.marketservice.market.type.MarketSort;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -33,10 +34,26 @@ public class MarketService {
 
     private final MarketMapper marketMapper;
 
-    public MarketListResponse getMarkets(int page, int size, MarketStatus status, String keyword) {
+    public MarketListResponse getMarkets(
+            int page,
+            int size,
+            MarketStatus status,
+            String keyword,
+            MarketDisplayStatus displayStatus,
+            String sortValue
+    ) {
         LocalDateTime now = LocalDateTime.now();
+        MarketSort sort = MarketSort.from(sortValue);
         int offset = page * size;
-        List<Market> markets = marketMapper.selectMarkets(status, keyword, offset, size);
+        List<Market> markets = marketMapper.selectMarkets(
+                status,
+                keyword,
+                displayStatus,
+                sort,
+                now,
+                offset,
+                size
+        );
         List<Long> marketIds = markets.stream()
                 .map(Market::getId)
                 .toList();
@@ -59,7 +76,7 @@ public class MarketService {
                         displayStatus(market, now)
                 ))
                 .toList();
-        long totalElements = marketMapper.countMarkets(status, keyword);
+        long totalElements = marketMapper.countMarkets(status, keyword, displayStatus, now);
 
         return new MarketListResponse(
                 content,

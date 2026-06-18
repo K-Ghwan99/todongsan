@@ -28,7 +28,7 @@ public class MarketPredictionResponse {
     @JsonSerialize(using = ToStringSerializer.class)
     private BigDecimal priceSnapshot;
 
-    @Schema(description = "확정 계약 수량. Decimal String으로 응답", type = "string", example = "200.00000000")
+    @Schema(description = "정답 선택지 내 rewardPool 분배 가중치로 사용하는 확정 계약 수량. 고정 지급권이 아님", type = "string", example = "200.00000000")
     @JsonSerialize(using = ToStringSerializer.class)
     private BigDecimal contractQuantity;
 
@@ -37,7 +37,7 @@ public class MarketPredictionResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    @Schema(description = "현재 기준 예상 정산금. 내 선택지가 정답일 경우의 추정값", type = "string", example = "11.87")
+    @Schema(description = "현재 기준 예상 정산금. 내 선택지가 정답일 경우 원금과 패자 reward share의 합", type = "string", example = "15.93")
     @JsonSerialize(using = ToStringSerializer.class)
     private BigDecimal estimatedPayoutIfWin;
 
@@ -49,7 +49,7 @@ public class MarketPredictionResponse {
     @JsonSerialize(using = ToStringSerializer.class)
     private BigDecimal estimatedProfitRateIfWin;
 
-    @Schema(description = "현재 기준 계약당 예상 지급 포인트", type = "string", example = "0.47500000")
+    @Schema(description = "패자 rewardPool의 현재 기준 계약당 보상액. 원금은 포함하지 않음", type = "string", example = "0.23750000")
     @JsonSerialize(using = ToStringSerializer.class)
     private BigDecimal currentPayoutPerContract;
 
@@ -57,7 +57,7 @@ public class MarketPredictionResponse {
     @JsonSerialize(using = ToStringSerializer.class)
     private BigDecimal estimateBaseTotalPool;
 
-    @Schema(description = "현재 기준 수수료 차감 후 예상 정산 풀", type = "string", example = "95.00")
+    @Schema(description = "내 선택지가 정답일 때 다른 option의 실제 참여 풀에서 수수료를 제외한 rewardPool", type = "string", example = "47.50")
     @JsonSerialize(using = ToStringSerializer.class)
     private BigDecimal estimateBaseSettlementPool;
 

@@ -202,6 +202,7 @@ public class MarketPredictionQueryService {
                 row.getContractQuantity(),
                 row.getFeeRate(),
                 row.getEstimateBaseTotalPool(),
+                row.getEstimateBaseOptionPointAmount(),
                 row.getEstimateBaseOptionContractQuantity()
         );
     }

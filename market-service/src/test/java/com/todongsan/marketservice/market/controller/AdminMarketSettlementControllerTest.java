@@ -75,6 +75,7 @@ class AdminMarketSettlementControllerTest {
     void settleMarketCompletesWinnersAndLosers() throws Exception {
         insertSettlementMarket("CLOSED", WIN_OPTION_ID, "5.00");
         insertSettlementOptions();
+        jdbcTemplate.update("UPDATE market_option SET virtual_pool_amount = 999999.00 WHERE market_id = ?", MARKET_ID);
         insertPrediction(1001L, WIN_OPTION_ID, 1L, "100.00", "200.00000000", "CONFIRMED");
         insertPrediction(1002L, LOSE_OPTION_ID, 2L, "100.00", "200.00000000", "CONFIRMED");
         stubSettlementResults(Map.of());
@@ -85,10 +86,10 @@ class AdminMarketSettlementControllerTest {
                 .andExpect(jsonPath("$.data.marketId").value(MARKET_ID))
                 .andExpect(jsonPath("$.data.resultOptionId").value(WIN_OPTION_ID))
                 .andExpect(jsonPath("$.data.totalPool").value("200.00"))
-                .andExpect(jsonPath("$.data.feeAmount").value("10.00"))
-                .andExpect(jsonPath("$.data.settlementPool").value("190.00"))
+                .andExpect(jsonPath("$.data.feeAmount").value("5.00"))
+                .andExpect(jsonPath("$.data.settlementPool").value("195.00"))
                 .andExpect(jsonPath("$.data.winningContractQuantity").value("200.00000000"))
-                .andExpect(jsonPath("$.data.payoutPerContract").value("0.95000000"))
+                .andExpect(jsonPath("$.data.payoutPerContract").value("0.47500000"))
                 .andExpect(jsonPath("$.data.burnedPointAmount").value("0.00"))
                 .andExpect(jsonPath("$.data.winnerCount").value(1))
                 .andExpect(jsonPath("$.data.loserCount").value(1))
@@ -112,7 +113,7 @@ class AdminMarketSettlementControllerTest {
                 "SELECT idempotency_key FROM market_settlement_detail WHERE prediction_id = 1001",
                 String.class
         )).isEqualTo("MARKET_SETTLEMENT_REWARD:market:100:prediction:1001:member:1");
-        assertPrediction(1001L, "SETTLED", "190.00");
+        assertPrediction(1001L, "SETTLED", "195.00");
         assertPrediction(1002L, "SETTLED", "0.00");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM market_reputation_update WHERE market_id = ?",
@@ -131,6 +132,11 @@ class AdminMarketSettlementControllerTest {
                 .startsWith("MARKET_SETTLEMENT_BATCH:market:100:settlement:")
                 .endsWith(":attempt:1");
         assertThat(requestCaptor.getValue().items()).hasSize(1);
+        assertThat(requestCaptor.getValue().items().get(0).amount()).isEqualByComparingTo("195.00");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM market_settlement_detail",
+                Integer.class
+        )).isEqualTo(1);
         assertThat(requestCaptor.getValue().items().get(0).idempotencyKey())
                 .isEqualTo("MARKET_SETTLEMENT_REWARD:market:100:prediction:1001:member:1");
         assertThat(requestCaptor.getValue().items().get(0).referenceType()).isEqualTo("MARKET_PREDICTION");
@@ -175,26 +181,95 @@ class AdminMarketSettlementControllerTest {
     void settleMarketFloorsRewardAmountsAndBurnsRemainder() throws Exception {
         insertSettlementMarket("CLOSED", WIN_OPTION_ID, "0.00");
         insertSettlementOptions();
-        insertPrediction(1001L, WIN_OPTION_ID, 1L, "33.34", "1.00000000", "CONFIRMED");
-        insertPrediction(1002L, WIN_OPTION_ID, 2L, "33.33", "1.00000000", "CONFIRMED");
-        insertPrediction(1003L, WIN_OPTION_ID, 3L, "33.33", "1.00000000", "CONFIRMED");
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "10.00", "1.00000000", "CONFIRMED");
+        insertPrediction(1002L, WIN_OPTION_ID, 2L, "10.00", "1.00000000", "CONFIRMED");
+        insertPrediction(1003L, WIN_OPTION_ID, 3L, "10.00", "1.00000000", "CONFIRMED");
+        insertPrediction(1004L, LOSE_OPTION_ID, 4L, "10.00", "1.00000000", "CONFIRMED");
         stubSettlementResults(Map.of());
 
         mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements", MARKET_ID))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.totalPool").value("100.00"))
-                .andExpect(jsonPath("$.data.payoutPerContract").value("33.33333333"))
+                .andExpect(jsonPath("$.data.totalPool").value("40.00"))
+                .andExpect(jsonPath("$.data.payoutPerContract").value("3.33333333"))
                 .andExpect(jsonPath("$.data.burnedPointAmount").value("0.01"));
 
         assertThat(jdbcTemplate.queryForList(
                 "SELECT settled_amount FROM market_settlement_detail ORDER BY prediction_id",
                 String.class
-        )).containsExactly("33.33", "33.33", "33.33");
+        )).containsExactly("13.33", "13.33", "13.33");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT burned_point_amount FROM market_settlement WHERE market_id = ?",
                 String.class,
                 MARKET_ID
         )).isEqualTo("0.01");
+        assertPrediction(1004L, "SETTLED", "0.00");
+    }
+
+    @Test
+    void settleMarketReturnsPrincipalWhenThereIsNoLosingPool() throws Exception {
+        insertSettlementMarket("CLOSED", WIN_OPTION_ID, "5.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "10.00", "20.00000000", "CONFIRMED");
+        stubSettlementResults(Map.of());
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalPool").value("10.00"))
+                .andExpect(jsonPath("$.data.feeAmount").value("0.00"))
+                .andExpect(jsonPath("$.data.settlementPool").value("10.00"))
+                .andExpect(jsonPath("$.data.payoutPerContract").value("0.00000000"))
+                .andExpect(jsonPath("$.data.burnedPointAmount").value("0.00"));
+
+        assertPrediction(1001L, "SETTLED", "10.00");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT profit_amount FROM market_settlement_detail WHERE prediction_id = 1001",
+                String.class
+        )).isEqualTo("0.00");
+    }
+
+    @Test
+    void settleMarketWeightsLosingPoolRewardByWinnerContractQuantity() throws Exception {
+        insertSettlementMarket("CLOSED", WIN_OPTION_ID, "5.00");
+        insertSettlementOptions();
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "10.00", "20.00000000", "CONFIRMED");
+        insertPrediction(1002L, WIN_OPTION_ID, 2L, "10.00", "11.11111111", "CONFIRMED");
+        insertPrediction(1003L, LOSE_OPTION_ID, 3L, "100.00", "200.00000000", "CONFIRMED");
+        stubSettlementResults(Map.of());
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.feeAmount").value("5.00"))
+                .andExpect(jsonPath("$.data.settlementPool").value("115.00"));
+
+        List<String> settledAmounts = jdbcTemplate.queryForList(
+                "SELECT settled_amount FROM market_settlement_detail ORDER BY prediction_id",
+                String.class
+        );
+        assertThat(settledAmounts).containsExactly("71.07", "43.92");
+        assertThat(new BigDecimal(settledAmounts.get(0))).isGreaterThan(new BigDecimal(settledAmounts.get(1)));
+        assertPrediction(1003L, "SETTLED", "0.00");
+    }
+
+    @Test
+    void settleMarketIncludesEveryNonResultOptionInLosingPool() throws Exception {
+        long thirdOptionId = 103L;
+        insertSettlementMarket("CLOSED", WIN_OPTION_ID, "5.00");
+        insertSettlementOptions();
+        insertSettlementOption(thirdOptionId, "C", false);
+        insertPrediction(1001L, WIN_OPTION_ID, 1L, "20.00", "20.00000000", "CONFIRMED");
+        insertPrediction(1002L, LOSE_OPTION_ID, 2L, "40.00", "40.00000000", "CONFIRMED");
+        insertPrediction(1003L, thirdOptionId, 3L, "60.00", "60.00000000", "CONFIRMED");
+        stubSettlementResults(Map.of());
+
+        mockMvc.perform(post("/api/v1/admin/markets/{marketId}/settlements", MARKET_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalPool").value("120.00"))
+                .andExpect(jsonPath("$.data.feeAmount").value("5.00"))
+                .andExpect(jsonPath("$.data.settlementPool").value("115.00"));
+
+        assertPrediction(1001L, "SETTLED", "115.00");
+        assertPrediction(1002L, "SETTLED", "0.00");
+        assertPrediction(1003L, "SETTLED", "0.00");
     }
 
     @Test
@@ -280,7 +355,7 @@ class AdminMarketSettlementControllerTest {
                 "SELECT status FROM market_settlement_detail ORDER BY prediction_id",
                 String.class
         )).containsExactly("SUCCESS", "FAILED");
-        assertPrediction(1001L, "SETTLED", "100.00");
+        assertPrediction(1001L, "SETTLED", "133.33");
         assertPrediction(1002L, "CONFIRMED", null);
         assertPrediction(1003L, "SETTLED", "0.00");
     }

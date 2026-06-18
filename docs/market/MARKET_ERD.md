@@ -143,7 +143,7 @@ API 응답 시 기존 컬럼을 조합해 계산한다.
 | `totalEffectivePoolBefore` | sum(all option realPoolAmount + virtualPoolAmount) |
 | `totalEffectivePoolAfter` | totalEffectivePoolBefore + pointAmount |
 
-이 값들은 화면 표시와 사용자 의사결정을 위한 계산 필드이며, 정산의 원천 데이터는 `market_prediction.price_snapshot`, `market_prediction.contract_quantity`, `market_option.current_price`, `market_price_history`를 기준으로 한다.
+이 값들은 화면 표시와 사용자 의사결정을 위한 계산 필드다. 정산 재원은 `market_prediction.point_amount`, reward 분배 가중치는 정답 선택지의 `market_prediction.contract_quantity`를 기준으로 한다. `market_option.current_price`, `virtual_pool_amount`, `market_price_history`는 정산 재원이 아니다.
 Quote 응답 필드의 scale과 RoundingMode는 `MARKET_API_SPEC.md`의 Quote API 정책을 따른다.
 Quote 계산 결과는 저장 컬럼이 아니다.
 
@@ -284,7 +284,13 @@ CREATE TABLE market (
     -- virtual_pool_amount는 포함하지 않는다.
     fee_rate                    DECIMAL(5,2)    NOT NULL DEFAULT 5.00,
     fee_amount                  DECIMAL(10,2)   NOT NULL DEFAULT 0.00,
+    -- 정산 완료 시 losingPool 기준 수수료
+    -- floor2(losingPool * feeRate / 100)
+    -- total_pool 전체 기준 수수료가 아니다.
     settlement_pool             DECIMAL(10,2)   NOT NULL DEFAULT 0.00,
+    -- 정산 지급 가능 풀: winningPrincipalPool + rewardPool
+    -- rewardPool = losingPool - feeAmount
+    -- virtual_pool_amount는 포함하지 않는다.
 
     initial_virtual_liquidity   DECIMAL(10,2)   NOT NULL DEFAULT 100.00,
     price_model                 VARCHAR(30)     NOT NULL DEFAULT 'POOL_SHARE',
@@ -376,6 +382,8 @@ CREATE TABLE market_prediction (
 
     contract_quantity                       DECIMAL(24,8),
     -- point_amount / price_snapshot
+    -- 고정 지급권이 아니라 정답 선택지 내 rewardPool 분배 가중치
+    -- 오답 선택지의 계약 수량은 만기 시 가치 0
     -- POINT_PENDING / POINT_UNKNOWN 상태에서는 NULL 가능
 
     expected_payout_per_contract_snapshot   DECIMAL(18,8),
@@ -546,7 +554,9 @@ Market 단위의 정산 결과를 저장한다.
 
 정산 멱등성은 batch 단위가 아니라 `market_settlement_detail.idempotency_key`로 보장한다.
 
-`burned_point_amount`는 승자 없음 또는 소수점 둘째 자리 버림 처리로 인해 지급되지 않은 `settlement_pool` 잔여 금액을 기록한다. 이 금액은 실제 Member-Point 지급 대상이 아니다.
+정산 정책은 **Pool Share 가격 형성 + 계약 수량 가중 Pari-mutuel 정산**이다. 계약 수량은 고정 지급권이 아니라 정답 선택지 안에서 패자 `rewardPool`을 분배하는 가중치다. 오답 선택지의 계약 수량은 만기 시 가치가 0이다.
+
+`burned_point_amount`는 정답자 없음 또는 소수점 둘째 자리 버림 처리로 인해 지급되지 않은 `settlement_pool` 잔여 금액을 기록한다. 이 금액은 실제 Member-Point 지급 대상이 아니다.
 
 Member-Point 정산 batch 요청의 Header `Idempotency-Key`는 batch 요청 전체 추적용 필수 헤더지만, Market DB에는 저장하지 않는다. 실제 유저별 중복 지급 방지는 `market_settlement_detail.idempotency_key`로 보장한다.
 
@@ -561,13 +571,16 @@ CREATE TABLE market_settlement (
     -- 정산 대상 실제 참여 포인트 총합. CONFIRMED Prediction point_amount 합
     fee_rate                        DECIMAL(5,2)    NOT NULL,
     fee_amount                      DECIMAL(10,2)   NOT NULL,
+    -- losingPool에만 부과한 수수료
     settlement_pool                 DECIMAL(10,2)   NOT NULL,
+    -- 실제 지급 가능 풀: winningPrincipalPool + rewardPool
 
     winning_contract_quantity       DECIMAL(24,8)   NOT NULL,
     payout_per_contract             DECIMAL(18,8)   NOT NULL,
+    -- 하위 호환 컬럼명. 원금 포함 지급액이 아니라 rewardPool의 계약당 보상액
 
     burned_point_amount             DECIMAL(10,2)   NOT NULL DEFAULT 0.00,
-    -- 승자 없음 또는 소수점 둘째 자리 버림 처리로 인해 지급되지 않은 settlement_pool 잔여 금액
+    -- 정답자 없음 또는 소수점 둘째 자리 버림 처리로 인해 지급되지 않은 settlement_pool 잔여 금액
     -- 실제 Member-Point 지급 대상이 아니다.
 
     status                          VARCHAR(30)     NOT NULL DEFAULT 'PENDING',
@@ -601,7 +614,7 @@ CREATE TABLE market_settlement (
 
 사용자별 정산 지급 상세를 저장한다.
 
-승리 선택지에 참여한 사용자별로 하나씩 생성된다.  
+승리 선택지에 참여한 사용자별로 하나씩 생성된다. detail의 `settled_amount`는 원금과 `rewardPool`의 계약 수량 가중 분배액을 합한 값이다.
 패자는 Member-Point 지급 대상이 아니므로 detail을 생성하지 않는다. 패자 Prediction은 `settled_amount = 0.00`, `status = SETTLED`로 처리한다.
 정산 지급 멱등성은 이 테이블의 `idempotency_key`가 담당한다.
 
@@ -617,8 +630,10 @@ CREATE TABLE market_settlement_detail (
 
     original_point_amount           DECIMAL(10,2)   NOT NULL,
     contract_quantity               DECIMAL(24,8)   NOT NULL,
+    -- 정답 선택지 내 rewardPool 분배 가중치
 
     payout_per_contract             DECIMAL(18,8)   NOT NULL,
+    -- 하위 호환 컬럼명. rewardPool의 계약당 보상액
     settled_amount                  DECIMAL(10,2)   NOT NULL,
     profit_amount                   DECIMAL(10,2)   NOT NULL,
 

@@ -136,6 +136,140 @@ class MarketControllerTest {
     }
 
     @Test
+    void getMarketsSortsByPopularUsingRealTotalPool() throws Exception {
+        jdbcTemplate.update("UPDATE market SET total_pool = 100.00 WHERE id = 1");
+        insertMarket(2L, "Market B", "ACTIVE", LocalDateTime.now().plusDays(1), "300.00",
+                LocalDateTime.of(2026, 6, 2, 12, 0));
+        insertMarket(3L, "Market C", "ACTIVE", LocalDateTime.now().plusDays(1), "200.00",
+                LocalDateTime.of(2026, 6, 3, 12, 0));
+
+        mockMvc.perform(get("/api/v1/markets").param("sort", "popular"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].marketId").value(2))
+                .andExpect(jsonPath("$.data.content[1].marketId").value(3))
+                .andExpect(jsonPath("$.data.content[2].marketId").value(1));
+    }
+
+    @Test
+    void getMarketsPopularSortUsesCreatedAtAndIdAsStableTieBreakers() throws Exception {
+        jdbcTemplate.update("UPDATE market SET total_pool = 100.00, created_at = '2026-06-01 12:00:00' WHERE id = 1");
+        insertMarket(2L, "Newer", "ACTIVE", LocalDateTime.now().plusDays(1), "100.00",
+                LocalDateTime.of(2026, 6, 2, 12, 0));
+        insertMarket(3L, "Same Created At Higher Id", "ACTIVE", LocalDateTime.now().plusDays(1), "100.00",
+                LocalDateTime.of(2026, 6, 2, 12, 0));
+
+        mockMvc.perform(get("/api/v1/markets").param("sort", "popular"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].marketId").value(3))
+                .andExpect(jsonPath("$.data.content[1].marketId").value(2))
+                .andExpect(jsonPath("$.data.content[2].marketId").value(1));
+    }
+
+    @Test
+    void getMarketsFiltersByActiveDisplayStatus() throws Exception {
+        insertMarket(2L, "Future Active", "ACTIVE", LocalDateTime.now().plusDays(1), "0.00",
+                LocalDateTime.now());
+        insertMarket(3L, "Closed", "CLOSED", LocalDateTime.now().minusDays(1), "0.00",
+                LocalDateTime.now());
+
+        mockMvc.perform(get("/api/v1/markets").param("displayStatus", "ACTIVE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].marketId").value(2))
+                .andExpect(jsonPath("$.data.content[0].displayStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.content[0].canPredict").value(true))
+                .andExpect(jsonPath("$.data.totalElements").value(1));
+    }
+
+    @Test
+    void getMarketsFiltersByClosedByTimeDisplayStatus() throws Exception {
+        insertMarket(2L, "Future Active", "ACTIVE", LocalDateTime.now().plusDays(1), "0.00",
+                LocalDateTime.now());
+
+        mockMvc.perform(get("/api/v1/markets").param("displayStatus", "CLOSED_BY_TIME"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].marketId").value(1))
+                .andExpect(jsonPath("$.data.content[0].displayStatus").value("CLOSED_BY_TIME"))
+                .andExpect(jsonPath("$.data.content[0].canPredict").value(false))
+                .andExpect(jsonPath("$.data.totalElements").value(1));
+    }
+
+    @Test
+    void getMarketsFiltersOtherDisplayStatusByDatabaseStatus() throws Exception {
+        insertMarket(2L, "Settled", "SETTLED", LocalDateTime.now().minusDays(1), "100.00",
+                LocalDateTime.now());
+
+        mockMvc.perform(get("/api/v1/markets").param("displayStatus", "SETTLED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].marketId").value(2))
+                .andExpect(jsonPath("$.data.content[0].status").value("SETTLED"))
+                .andExpect(jsonPath("$.data.content[0].displayStatus").value("SETTLED"));
+    }
+
+    @Test
+    void getMarketsCombinesStatusAndDisplayStatusWithAndCondition() throws Exception {
+        insertMarket(2L, "Closed", "CLOSED", LocalDateTime.now().minusDays(1), "0.00",
+                LocalDateTime.now());
+
+        mockMvc.perform(get("/api/v1/markets")
+                        .param("status", "CLOSED")
+                        .param("displayStatus", "ACTIVE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(0))
+                .andExpect(jsonPath("$.data.totalElements").value(0));
+    }
+
+    @Test
+    void getMarketsFiltersActiveThenSortsPopularBeforePagination() throws Exception {
+        insertMarket(2L, "Popular", "ACTIVE", LocalDateTime.now().plusDays(1), "300.00",
+                LocalDateTime.now());
+        insertMarket(3L, "Second", "ACTIVE", LocalDateTime.now().plusDays(2), "200.00",
+                LocalDateTime.now());
+        insertMarket(4L, "Third", "ACTIVE", LocalDateTime.now().plusDays(3), "100.00",
+                LocalDateTime.now());
+
+        mockMvc.perform(get("/api/v1/markets")
+                        .param("displayStatus", "ACTIVE")
+                        .param("sort", "popular")
+                        .param("page", "0")
+                        .param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(2))
+                .andExpect(jsonPath("$.data.content[0].marketId").value(2))
+                .andExpect(jsonPath("$.data.content[1].marketId").value(3))
+                .andExpect(jsonPath("$.data.totalElements").value(3))
+                .andExpect(jsonPath("$.data.totalPages").value(2))
+                .andExpect(jsonPath("$.data.last").value(false));
+    }
+
+    @Test
+    void getMarketsSortsByLatest() throws Exception {
+        jdbcTemplate.update("UPDATE market SET created_at = '2026-06-01 12:00:00' WHERE id = 1");
+        insertMarket(2L, "Latest", "ACTIVE", LocalDateTime.now().plusDays(1), "0.00",
+                LocalDateTime.of(2026, 6, 3, 12, 0));
+
+        mockMvc.perform(get("/api/v1/markets").param("sort", "latest"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].marketId").value(2))
+                .andExpect(jsonPath("$.data.content[1].marketId").value(1));
+    }
+
+    @Test
+    void getMarketsSortsByClosingSoonWithoutImplicitlyFilteringClosedMarkets() throws Exception {
+        jdbcTemplate.update("UPDATE market SET close_at = ? WHERE id = 1", LocalDateTime.now().minusDays(1));
+        insertMarket(2L, "Soon", "ACTIVE", LocalDateTime.now().plusDays(1), "0.00", LocalDateTime.now());
+        insertMarket(3L, "Later", "ACTIVE", LocalDateTime.now().plusDays(2), "0.00", LocalDateTime.now());
+
+        mockMvc.perform(get("/api/v1/markets").param("sort", "closingSoon"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].marketId").value(1))
+                .andExpect(jsonPath("$.data.content[1].marketId").value(2))
+                .andExpect(jsonPath("$.data.content[2].marketId").value(3));
+    }
+
+    @Test
     void getMarketDetailAllowsPredictionWhenCloseAtInFuture() throws Exception {
         // 하드코딩 미래 날짜는 시한폭탄이 되므로 반드시 상대 시간을 사용한다.
         jdbcTemplate.update(
@@ -286,9 +420,41 @@ class MarketControllerTest {
     }
 
     @Test
+    void getMarketsRejectsInvalidSort() throws Exception {
+        mockMvc.perform(get("/api/v1/markets").param("sort", "invalid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_FAILED"));
+    }
+
+    @Test
     void actuatorHealthReturnsUp() throws Exception {
         mockMvc.perform(get("/actuator/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"));
+    }
+
+    private void insertMarket(
+            long marketId,
+            String title,
+            String status,
+            LocalDateTime closeAt,
+            String totalPool,
+            LocalDateTime createdAt
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO market (
+                    id, title, category, answer_type, judge_data_source, judge_criteria, judge_date,
+                    status, close_at, total_pool, created_by, created_at, updated_at
+                ) VALUES (?, ?, 'PRICE_INDEX', 'YES_NO', 'TEST', 'TEST', ?, ?, ?, ?, 1, ?, ?)
+                """,
+                marketId,
+                title,
+                LocalDateTime.now().toLocalDate().plusDays(3),
+                status,
+                closeAt,
+                totalPool,
+                createdAt,
+                createdAt
+        );
     }
 }
