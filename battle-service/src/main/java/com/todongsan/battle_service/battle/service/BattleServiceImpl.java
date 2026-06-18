@@ -67,6 +67,15 @@ public class BattleServiceImpl implements BattleService {
 
     @Override
     @Transactional(readOnly = true)
+    public Page<MyCreatedBattleResponse> getMyCreatedBattles(Long memberId, String status, int page, int size) {
+        List<BattleStatus> statuses = parseAllStatuses(status);
+        PageRequest pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return battleRepository.findByCreatedByAndStatusInAndDeletedAtIsNull(memberId, statuses, pageable)
+                .map(MyCreatedBattleResponse::from);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public BattleDetailResponse getBattle(Long battleId) {
         Battle battle = battleRepository
                 .findByIdAndStatusInAndDeletedAtIsNull(battleId,
@@ -190,5 +199,27 @@ public class BattleServiceImpl implements BattleService {
         if (status == null || status.equalsIgnoreCase("ACTIVE")) return BattleStatus.ACTIVE;
         if (status.equalsIgnoreCase("CLOSED")) return BattleStatus.CLOSED;
         throw new CustomException(ErrorCode.VALIDATION_FAILED);
+    }
+
+    // 본인 배틀 조회: 모든 상태 허용, 콤마 구분, 미지정 시 전체
+    private List<BattleStatus> parseAllStatuses(String status) {
+        if (status == null || status.isBlank()) {
+            return List.of(BattleStatus.values());
+        }
+        List<BattleStatus> result = new ArrayList<>();
+        for (String token : status.split(",")) {
+            String s = token.trim().toUpperCase();
+            if (s.isEmpty()) continue;
+            try {
+                BattleStatus parsed = BattleStatus.valueOf(s);
+                if (!result.contains(parsed)) result.add(parsed);
+            } catch (IllegalArgumentException e) {
+                throw new CustomException(ErrorCode.VALIDATION_FAILED);
+            }
+        }
+        if (result.isEmpty()) {
+            return List.of(BattleStatus.values());
+        }
+        return result;
     }
 }

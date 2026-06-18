@@ -4,6 +4,7 @@ import com.todongsan.battle_service.battle.dto.request.BattleCreateRequest;
 import com.todongsan.battle_service.battle.dto.response.BattleCreateResponse;
 import com.todongsan.battle_service.battle.dto.response.BattleDetailResponse;
 import com.todongsan.battle_service.battle.dto.response.BattleStatusResponse;
+import com.todongsan.battle_service.battle.dto.response.MyCreatedBattleResponse;
 import com.todongsan.battle_service.battle.entity.Battle;
 import com.todongsan.battle_service.battle.entity.BattleStatus;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
@@ -25,6 +26,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -137,6 +139,79 @@ class BattleServiceImplTest {
     @DisplayName("Battle 목록 조회 실패 - PENDING 요청 시 VALIDATION_FAILED")
     void getBattles_fail_pendingStatus() {
         assertThatThrownBy(() -> battleService.getBattles("PENDING", 0, 20))
+                .isInstanceOf(CustomException.class)
+                .satisfies(e -> assertThat(((CustomException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.VALIDATION_FAILED));
+    }
+
+    // ===================== getMyCreatedBattles =====================
+
+    @Test
+    @DisplayName("내가 만든 배틀 목록 - status 미지정 시 전체 상태 조회")
+    void getMyCreatedBattles_noStatus_allStatuses() {
+        Page<Battle> page = new PageImpl<>(List.of(pendingBattle()));
+        given(battleRepository.findByCreatedByAndStatusInAndDeletedAtIsNull(eq(1L), any(), any(Pageable.class)))
+                .willReturn(page);
+
+        Page<MyCreatedBattleResponse> result = battleService.getMyCreatedBattles(1L, null, 0, 20);
+
+        assertThat(result.getContent()).hasSize(1);
+        assertThat(result.getContent().get(0).getStatus()).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("내가 만든 배틀 목록 - PENDING/CANCELLED 등 모든 상태 허용")
+    void getMyCreatedBattles_allStatusesAllowed() {
+        given(battleRepository.findByCreatedByAndStatusInAndDeletedAtIsNull(eq(1L), any(), any(Pageable.class)))
+                .willReturn(new PageImpl<>(List.of(pendingBattle())));
+
+        Page<MyCreatedBattleResponse> result =
+                battleService.getMyCreatedBattles(1L, "PENDING,CANCELLED", 0, 20);
+
+        assertThat(result.getContent()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("내가 만든 배틀 목록 - 미정산이면 winningOption=null")
+    void getMyCreatedBattles_unsettled_winningOptionNull() {
+        given(battleRepository.findByCreatedByAndStatusInAndDeletedAtIsNull(eq(1L), any(), any(Pageable.class)))
+                .willReturn(new PageImpl<>(List.of(activeBattle())));
+
+        MyCreatedBattleResponse item = battleService.getMyCreatedBattles(1L, null, 0, 20)
+                .getContent().get(0);
+
+        assertThat(item.getWinningOption()).isNull();
+        assertThat(item.getSettledAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("내가 만든 배틀 목록 - 정산 완료면 winningOption/settledAt 노출")
+    void getMyCreatedBattles_settled_winningOptionShown() {
+        given(battleRepository.findByCreatedByAndStatusInAndDeletedAtIsNull(eq(1L), any(), any(Pageable.class)))
+                .willReturn(new PageImpl<>(List.of(settledBattle())));
+
+        MyCreatedBattleResponse item = battleService.getMyCreatedBattles(1L, null, 0, 20)
+                .getContent().get(0);
+
+        assertThat(item.getWinningOption()).isEqualTo("A");
+        assertThat(item.getSettledAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("내가 만든 배틀 목록 - 생성 내역 없음 → 빈 페이지")
+    void getMyCreatedBattles_empty_returnsEmptyPage() {
+        given(battleRepository.findByCreatedByAndStatusInAndDeletedAtIsNull(eq(1L), any(), any(Pageable.class)))
+                .willReturn(new PageImpl<>(List.of()));
+
+        Page<MyCreatedBattleResponse> result = battleService.getMyCreatedBattles(1L, null, 0, 20);
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("내가 만든 배틀 목록 - 잘못된 status 값 → VALIDATION_FAILED")
+    void getMyCreatedBattles_invalidStatus_throwsValidationFailed() {
+        assertThatThrownBy(() -> battleService.getMyCreatedBattles(1L, "FOO", 0, 20))
                 .isInstanceOf(CustomException.class)
                 .satisfies(e -> assertThat(((CustomException) e).getErrorCode())
                         .isEqualTo(ErrorCode.VALIDATION_FAILED));
@@ -284,6 +359,13 @@ class BattleServiceImplTest {
     private Battle activeBattle() {
         Battle battle = pendingBattle();
         battle.approve();
+        return battle;
+    }
+
+    private Battle settledBattle() {
+        Battle battle = activeBattle();
+        battle.close("A");
+        battle.settle(BigDecimal.valueOf(10));
         return battle;
     }
 }

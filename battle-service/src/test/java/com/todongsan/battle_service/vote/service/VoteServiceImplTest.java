@@ -8,6 +8,7 @@ import com.todongsan.battle_service.global.exception.ErrorCode;
 import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
 import com.todongsan.battle_service.vote.dto.request.VoteRequest;
 import com.todongsan.battle_service.vote.dto.response.CrossAnalysisResponse;
+import com.todongsan.battle_service.vote.dto.response.MyVoteBattleResponse;
 import com.todongsan.battle_service.vote.dto.response.VoteRawResponse;
 import com.todongsan.battle_service.vote.dto.response.VoteResponse;
 import com.todongsan.battle_service.vote.dto.response.VoteResultResponse;
@@ -20,11 +21,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -234,6 +241,98 @@ class VoteServiceImplTest {
                         .isEqualTo(ErrorCode.BATTLE_NOT_FOUND));
     }
 
+    // ===================== getMyVotedBattles =====================
+
+    @Test
+    @DisplayName("내 참여 배틀 - 정산 승리 → isWin=true, rewardAmount 노출")
+    void getMyVotedBattles_settledWin_mapped() {
+        Battle battle = settledBattle("A", BigDecimal.valueOf(10));
+        BattleVote vote = votedVote("A");
+        given(battleVoteRepository.findMyVotedBattles(any(), any(), any()))
+                .willReturn(pageOf(battle, vote));
+
+        Page<MyVoteBattleResponse> result = voteService.getMyVotedBattles(1L, null, 0, 20);
+
+        assertThat(result.getContent()).hasSize(1);
+        MyVoteBattleResponse item = result.getContent().get(0);
+        assertThat(item.getSelectedOption()).isEqualTo("A");
+        assertThat(item.getWinningOption()).isEqualTo("A");
+        assertThat(item.getIsWin()).isTrue();
+        assertThat(item.getRewardAmount()).isEqualTo("10");
+        assertThat(item.getSettledAt()).isNotNull();
+        assertThat(item.getVotedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("내 참여 배틀 - 정산 패배 → isWin=false, rewardAmount=null")
+    void getMyVotedBattles_settledLose_noReward() {
+        Battle battle = settledBattle("A", BigDecimal.valueOf(10));
+        BattleVote vote = votedVote("B");
+        given(battleVoteRepository.findMyVotedBattles(any(), any(), any()))
+                .willReturn(pageOf(battle, vote));
+
+        MyVoteBattleResponse item = voteService.getMyVotedBattles(1L, null, 0, 20)
+                .getContent().get(0);
+
+        assertThat(item.getIsWin()).isFalse();
+        assertThat(item.getRewardAmount()).isNull();
+        assertThat(item.getWinningOption()).isEqualTo("A");
+    }
+
+    @Test
+    @DisplayName("내 참여 배틀 - 무승부(DRAW) → isWin=false, rewardAmount=null")
+    void getMyVotedBattles_draw_noReward() {
+        Battle battle = settledBattle("DRAW", BigDecimal.ZERO);
+        BattleVote vote = votedVote("A");
+        given(battleVoteRepository.findMyVotedBattles(any(), any(), any()))
+                .willReturn(pageOf(battle, vote));
+
+        MyVoteBattleResponse item = voteService.getMyVotedBattles(1L, null, 0, 20)
+                .getContent().get(0);
+
+        assertThat(item.getWinningOption()).isEqualTo("DRAW");
+        assertThat(item.getIsWin()).isFalse();
+        assertThat(item.getRewardAmount()).isNull();
+    }
+
+    @Test
+    @DisplayName("내 참여 배틀 - 미정산(ACTIVE) → winningOption/isWin/rewardAmount/settledAt 모두 null")
+    void getMyVotedBattles_unsettled_nullFields() {
+        Battle battle = activeBattle(LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(7));
+        BattleVote vote = votedVote("A");
+        given(battleVoteRepository.findMyVotedBattles(any(), any(), any()))
+                .willReturn(pageOf(battle, vote));
+
+        MyVoteBattleResponse item = voteService.getMyVotedBattles(1L, null, 0, 20)
+                .getContent().get(0);
+
+        assertThat(item.getWinningOption()).isNull();
+        assertThat(item.getIsWin()).isNull();
+        assertThat(item.getRewardAmount()).isNull();
+        assertThat(item.getSettledAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("내 참여 배틀 - 참여 내역 없음 → 빈 페이지(content=[])")
+    void getMyVotedBattles_empty_returnsEmptyPage() {
+        given(battleVoteRepository.findMyVotedBattles(any(), any(), any()))
+                .willReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        Page<MyVoteBattleResponse> result = voteService.getMyVotedBattles(1L, null, 0, 20);
+
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getTotalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("내 참여 배틀 - 잘못된 status 값 → VALIDATION_FAILED")
+    void getMyVotedBattles_invalidStatus_throwsValidationFailed() {
+        assertThatThrownBy(() -> voteService.getMyVotedBattles(1L, "PENDING", 0, 20))
+                .isInstanceOf(CustomException.class)
+                .satisfies(e -> assertThat(((CustomException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.VALIDATION_FAILED));
+    }
+
     // ===================== getCrossResult (관리자 전용) =====================
 
     @Test
@@ -318,5 +417,25 @@ class VoteServiceImplTest {
         Battle battle = pendingBattle();
         battle.reject();
         return battle;
+    }
+
+    private Battle settledBattle(String winningOption, BigDecimal rewardAmount) {
+        Battle battle = closedBattleWithEndAt(LocalDateTime.now().minusDays(1));
+        ReflectionTestUtils.setField(battle, "winningOption", winningOption);
+        battle.settle(rewardAmount);
+        return battle;
+    }
+
+    private BattleVote votedVote(String selectedOption) {
+        BattleVote vote = BattleVote.builder()
+                .battleId(1L).memberId(1L).selectedOption(selectedOption)
+                .build();
+        ReflectionTestUtils.setField(vote, "createdAt", LocalDateTime.now().minusDays(2));
+        return vote;
+    }
+
+    private Page<Object[]> pageOf(Battle battle, BattleVote vote) {
+        Pageable pageable = PageRequest.of(0, 20);
+        return new PageImpl<>(Collections.singletonList(new Object[]{battle, vote}), pageable, 1);
     }
 }

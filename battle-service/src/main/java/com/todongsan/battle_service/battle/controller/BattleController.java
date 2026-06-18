@@ -4,6 +4,7 @@ import com.todongsan.battle_service.battle.dto.request.BattleCreateRequest;
 import com.todongsan.battle_service.battle.dto.response.BattleCreateResponse;
 import com.todongsan.battle_service.battle.dto.response.BattleDetailResponse;
 import com.todongsan.battle_service.battle.dto.response.BattleListResponse;
+import com.todongsan.battle_service.battle.dto.response.MyCreatedBattleResponse;
 import com.todongsan.battle_service.battle.service.BattleService;
 import com.todongsan.battle_service.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -35,6 +36,16 @@ public class BattleController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.ok(battleService.getBattles(status, page, size));
+    }
+
+    // GET /api/v1/battles/created/me?status=PENDING,ACTIVE&page=0&size=20
+    @GetMapping("/created/me")
+    public ApiResponse<Page<MyCreatedBattleResponse>> getMyCreatedBattles(
+            @RequestHeader("X-Member-Id") Long memberId,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.ok(battleService.getMyCreatedBattles(memberId, status, page, size));
     }
 
     // GET /api/v1/battles/{battleId}
