@@ -6,10 +6,10 @@ import com.todongsan.marketservice.global.exception.errorcode.MarketErrorCode;
 import com.todongsan.marketservice.market.dto.response.MyMarketPredictionPageResponse;
 import com.todongsan.marketservice.market.dto.response.MyMarketPredictionResponse;
 import com.todongsan.marketservice.market.dto.response.MarketPredictionResponse;
-import com.todongsan.marketservice.market.entity.MarketPrediction;
 import com.todongsan.marketservice.market.repository.MarketMapper;
 import com.todongsan.marketservice.market.repository.MyMarketPredictionSearchCondition;
 import com.todongsan.marketservice.market.repository.MyMarketPredictionRow;
+import com.todongsan.marketservice.market.service.MarketPredictionPayoutEstimateCalculator.PredictionPayoutEstimate;
 import com.todongsan.marketservice.market.type.MarketDisplayStatus;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.PredictionStatus;
@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class MarketPredictionQueryService {
 
     private final MarketMapper marketMapper;
+    private final MarketPredictionPayoutEstimateCalculator payoutEstimateCalculator;
 
     @Transactional(readOnly = true)
     public MyMarketPredictionPageResponse getMyPredictions(
@@ -139,24 +140,33 @@ public class MarketPredictionQueryService {
             throw new CustomException(MarketErrorCode.MARKET_NOT_FOUND);
         }
 
-        MarketPrediction prediction = marketMapper.selectPredictionByMarketIdAndMemberId(marketId, memberId);
-        if (prediction == null) {
+        MyMarketPredictionRow row = marketMapper.selectPredictionForPayoutEstimate(marketId, memberId);
+        if (row == null) {
             throw new CustomException(MarketErrorCode.MARKET_PREDICTION_NOT_FOUND);
         }
+        PredictionPayoutEstimate estimate = estimate(row);
         return new MarketPredictionResponse(
-                prediction.getId(),
-                prediction.getMarketId(),
-                prediction.getOptionId(),
-                prediction.getPointAmount(),
-                prediction.getPriceSnapshot(),
-                prediction.getContractQuantity(),
-                prediction.getStatus(),
-                prediction.getCreatedAt(),
-                prediction.getUpdatedAt()
+                row.getPredictionId(),
+                row.getMarketId(),
+                row.getSelectedOptionId(),
+                row.getPointAmount(),
+                row.getPriceSnapshot(),
+                row.getContractQuantity(),
+                row.getPredictionStatus(),
+                row.getCreatedAt(),
+                row.getUpdatedAt(),
+                estimate.estimatedPayoutIfWin(),
+                estimate.estimatedProfitIfWin(),
+                estimate.estimatedProfitRateIfWin(),
+                estimate.currentPayoutPerContract(),
+                estimate.estimateBaseTotalPool(),
+                estimate.estimateBaseSettlementPool(),
+                estimate.estimateBaseOptionContractQuantity()
         );
     }
 
     private MyMarketPredictionResponse toResponse(MyMarketPredictionRow row, LocalDateTime now) {
+        PredictionPayoutEstimate estimate = estimate(row);
         return new MyMarketPredictionResponse(
                 row.getPredictionId(),
                 row.getMarketId(),
@@ -174,7 +184,25 @@ public class MarketPredictionQueryService {
                 row.getUpdatedAt(),
                 row.getCloseAt(),
                 row.getSettledAmount(),
-                row.getRefundAmount()
+                row.getRefundAmount(),
+                estimate.estimatedPayoutIfWin(),
+                estimate.estimatedProfitIfWin(),
+                estimate.estimatedProfitRateIfWin(),
+                estimate.currentPayoutPerContract(),
+                estimate.estimateBaseTotalPool(),
+                estimate.estimateBaseSettlementPool(),
+                estimate.estimateBaseOptionContractQuantity()
+        );
+    }
+
+    private PredictionPayoutEstimate estimate(MyMarketPredictionRow row) {
+        return payoutEstimateCalculator.calculate(
+                row.getPredictionStatus(),
+                row.getPointAmount(),
+                row.getContractQuantity(),
+                row.getFeeRate(),
+                row.getEstimateBaseTotalPool(),
+                row.getEstimateBaseOptionContractQuantity()
         );
     }
 

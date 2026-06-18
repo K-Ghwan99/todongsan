@@ -711,6 +711,56 @@
           AND member_id = #{memberId}
     </select>
 
+    <sql id="predictionEstimateColumns">
+        m.fee_rate,
+        COALESCE(estimate_total.estimate_base_total_pool, 0.00) AS estimate_base_total_pool,
+        COALESCE(estimate_option.estimate_base_option_contract_quantity, 0.00000000)
+            AS estimate_base_option_contract_quantity
+    </sql>
+
+    <sql id="predictionEstimateJoins">
+        LEFT JOIN (
+            SELECT market_id, SUM(point_amount) AS estimate_base_total_pool
+            FROM market_prediction
+            WHERE status = 'CONFIRMED'
+            GROUP BY market_id
+        ) estimate_total
+          ON estimate_total.market_id = p.market_id
+        LEFT JOIN (
+            SELECT market_id, option_id,
+                   SUM(contract_quantity) AS estimate_base_option_contract_quantity
+            FROM market_prediction
+            WHERE status = 'CONFIRMED'
+            GROUP BY market_id, option_id
+        ) estimate_option
+          ON estimate_option.market_id = p.market_id
+         AND estimate_option.option_id = p.option_id
+    </sql>
+
+    <select id="selectPredictionForPayoutEstimate"
+            resultType="com.todongsan.marketservice.market.repository.MyMarketPredictionRow">
+        SELECT
+            p.id AS prediction_id,
+            p.market_id,
+            p.option_id AS selected_option_id,
+            p.point_amount,
+            p.price_snapshot,
+            p.contract_quantity,
+            p.status AS prediction_status,
+            p.created_at,
+            p.updated_at,
+            p.settled_amount,
+            p.refund_amount,
+            <include refid="predictionEstimateColumns"/>
+        FROM market_prediction p
+        JOIN market m
+          ON m.id = p.market_id
+         AND m.deleted_at IS NULL
+        <include refid="predictionEstimateJoins"/>
+        WHERE p.market_id = #{marketId}
+          AND p.member_id = #{memberId}
+    </select>
+
     <sql id="myPredictionFilters">
         <if test="predictionStatuses != null and predictionStatuses.size() > 0">
             AND p.status IN
@@ -762,7 +812,8 @@
             p.updated_at,
             m.close_at,
             p.settled_amount,
-            p.refund_amount
+            p.refund_amount,
+            <include refid="predictionEstimateColumns"/>
         FROM market_prediction p
         JOIN market m
           ON m.id = p.market_id
@@ -770,6 +821,7 @@
         JOIN market_option o
           ON o.id = p.option_id
          AND o.market_id = p.market_id
+        <include refid="predictionEstimateJoins"/>
         WHERE p.member_id = #{memberId}
         <include refid="myPredictionFilters"/>
         ORDER BY p.created_at DESC, p.id DESC

@@ -538,13 +538,17 @@ class MarketPredictionControllerTest {
         insertPrediction(
                 100L,
                 MEMBER_ID,
-                "100.00",
-                "0.50000000",
-                "200.00000000",
+                "10.00",
+                "0.40000000",
+                "25.00000000",
                 "CONFIRMED",
                 PREDICTION_CREATED_AT,
                 PREDICTION_CREATED_AT.plusSeconds(1)
         );
+        insertPrediction(101L, 11L, "40.00", "0.22857143", "175.00000000", "CONFIRMED",
+                PREDICTION_CREATED_AT, PREDICTION_CREATED_AT);
+        insertPredictionForMarket(102L, MARKET_ID, 2L, 12L, "50.00", "0.50000000", "100.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
 
         mockMvc.perform(get("/api/v1/markets/{marketId}/predictions/me", MARKET_ID)
                         .header("X-Member-Id", MEMBER_ID))
@@ -553,12 +557,19 @@ class MarketPredictionControllerTest {
                 .andExpect(jsonPath("$.data.predictionId").value(100))
                 .andExpect(jsonPath("$.data.marketId").value(MARKET_ID))
                 .andExpect(jsonPath("$.data.selectedOptionId").value(1))
-                .andExpect(jsonPath("$.data.pointAmount").value("100.00"))
-                .andExpect(jsonPath("$.data.priceSnapshot").value("0.50000000"))
-                .andExpect(jsonPath("$.data.contractQuantity").value("200.00000000"))
+                .andExpect(jsonPath("$.data.pointAmount").value("10.00"))
+                .andExpect(jsonPath("$.data.priceSnapshot").value("0.40000000"))
+                .andExpect(jsonPath("$.data.contractQuantity").value("25.00000000"))
                 .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.data.createdAt").value("2026-06-02T15:30:00"))
-                .andExpect(jsonPath("$.data.updatedAt").value("2026-06-02T15:30:01"));
+                .andExpect(jsonPath("$.data.updatedAt").value("2026-06-02T15:30:01"))
+                .andExpect(jsonPath("$.data.estimatedPayoutIfWin").value("11.87"))
+                .andExpect(jsonPath("$.data.estimatedProfitIfWin").value("1.87"))
+                .andExpect(jsonPath("$.data.estimatedProfitRateIfWin").value("18.70"))
+                .andExpect(jsonPath("$.data.currentPayoutPerContract").value("0.47500000"))
+                .andExpect(jsonPath("$.data.estimateBaseTotalPool").value("100.00"))
+                .andExpect(jsonPath("$.data.estimateBaseSettlementPool").value("95.00"))
+                .andExpect(jsonPath("$.data.estimateBaseOptionContractQuantity").value("200.00000000"));
     }
 
     @Test
@@ -580,7 +591,52 @@ class MarketPredictionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.priceSnapshot").value(nullValue()))
                 .andExpect(jsonPath("$.data.contractQuantity").value(nullValue()))
-                .andExpect(jsonPath("$.data.status").value("POINT_PENDING"));
+                .andExpect(jsonPath("$.data.status").value("POINT_PENDING"))
+                .andExpect(jsonPath("$.data.estimatedPayoutIfWin").value(nullValue()))
+                .andExpect(jsonPath("$.data.estimatedProfitIfWin").value(nullValue()))
+                .andExpect(jsonPath("$.data.estimatedProfitRateIfWin").value(nullValue()))
+                .andExpect(jsonPath("$.data.currentPayoutPerContract").value(nullValue()))
+                .andExpect(jsonPath("$.data.estimateBaseTotalPool").value(nullValue()))
+                .andExpect(jsonPath("$.data.estimateBaseSettlementPool").value(nullValue()))
+                .andExpect(jsonPath("$.data.estimateBaseOptionContractQuantity").value(nullValue()));
+    }
+
+    @Test
+    void getMyPredictionReturnsNullEstimateForNonConfirmedStatuses() throws Exception {
+        String[] statuses = {"POINT_UNKNOWN", "FAILED", "SETTLED", "REFUND_PENDING", "REFUND_UNKNOWN", "REFUNDED"};
+
+        for (int index = 0; index < statuses.length; index++) {
+            long marketId = index + 1L;
+            insertMarket(marketId, "ACTIVE", LocalDateTime.now().plusDays(1));
+            insertOption(marketId, marketId, "A", 1);
+            insertPredictionForMarket(100L + index, marketId, marketId, MEMBER_ID, "10.00", "0.40000000",
+                    "25.00000000", statuses[index], PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+
+            mockMvc.perform(get("/api/v1/markets/{marketId}/predictions/me", marketId)
+                            .header("X-Member-Id", MEMBER_ID))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.estimatedPayoutIfWin").value(nullValue()))
+                    .andExpect(jsonPath("$.data.estimatedProfitIfWin").value(nullValue()))
+                    .andExpect(jsonPath("$.data.estimatedProfitRateIfWin").value(nullValue()))
+                    .andExpect(jsonPath("$.data.currentPayoutPerContract").value(nullValue()))
+                    .andExpect(jsonPath("$.data.estimateBaseTotalPool").value(nullValue()))
+                    .andExpect(jsonPath("$.data.estimateBaseSettlementPool").value(nullValue()))
+                    .andExpect(jsonPath("$.data.estimateBaseOptionContractQuantity").value(nullValue()));
+        }
+    }
+
+    @Test
+    void getMyPredictionReturnsNullEstimateWhenOptionContractQuantityIsZero() throws Exception {
+        insertActiveMarketWithOptions();
+        insertPrediction(100L, MEMBER_ID, "10.00", "0.40000000", "0.00000000", "CONFIRMED",
+                PREDICTION_CREATED_AT, PREDICTION_CREATED_AT);
+
+        mockMvc.perform(get("/api/v1/markets/{marketId}/predictions/me", MARKET_ID)
+                        .header("X-Member-Id", MEMBER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.currentPayoutPerContract").value(nullValue()))
+                .andExpect(jsonPath("$.data.estimatedPayoutIfWin").value(nullValue()))
+                .andExpect(jsonPath("$.data.estimatedProfitIfWin").value(nullValue()));
     }
 
     @Test
@@ -668,6 +724,29 @@ class MarketPredictionControllerTest {
                 .andExpect(jsonPath("$.data.totalElements").value(2))
                 .andExpect(jsonPath("$.data.totalPages").value(1))
                 .andExpect(jsonPath("$.data.last").value(true));
+    }
+
+    @Test
+    void getMyPredictionsReturnsCurrentPayoutEstimateWithoutPerItemLookup() throws Exception {
+        insertActiveMarketWithOptions();
+        insertPrediction(100L, MEMBER_ID, "10.00", "0.40000000", "25.00000000", "CONFIRMED",
+                PREDICTION_CREATED_AT, PREDICTION_CREATED_AT);
+        insertPrediction(101L, 11L, "40.00", "0.22857143", "175.00000000", "CONFIRMED",
+                PREDICTION_CREATED_AT, PREDICTION_CREATED_AT);
+        insertPredictionForMarket(102L, MARKET_ID, 2L, 12L, "50.00", "0.50000000", "100.00000000",
+                "CONFIRMED", PREDICTION_CREATED_AT, PREDICTION_CREATED_AT, null, null);
+
+        mockMvc.perform(get("/api/v1/markets/predictions/me")
+                        .header("X-Member-Id", MEMBER_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].estimatedPayoutIfWin").value("11.87"))
+                .andExpect(jsonPath("$.data.content[0].estimatedProfitIfWin").value("1.87"))
+                .andExpect(jsonPath("$.data.content[0].estimatedProfitRateIfWin").value("18.70"))
+                .andExpect(jsonPath("$.data.content[0].currentPayoutPerContract").value("0.47500000"))
+                .andExpect(jsonPath("$.data.content[0].estimateBaseTotalPool").value("100.00"))
+                .andExpect(jsonPath("$.data.content[0].estimateBaseSettlementPool").value("95.00"))
+                .andExpect(jsonPath("$.data.content[0].estimateBaseOptionContractQuantity")
+                        .value("200.00000000"));
     }
 
     @Test
