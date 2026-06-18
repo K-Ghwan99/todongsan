@@ -1,0 +1,36 @@
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3307/market?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&rewriteBatchedStatements=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: "1234"
+    hikari:
+      maximum-pool-size: 60
+      connection-timeout: 60000
+  # infra/docker-compose 로 이미 스키마가 올라가 있으므로 schema.sql 재실행 금지
+  sql:
+    init:
+      mode: never
+
+mybatis:
+  mapper-locations: classpath:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+client:
+  member-point:
+    mode: fake
+  insight:
+    mode: fake
+
+# 실험 중 스케줄러가 끼어들지 않도록 전부 비활성화
+market:
+  scheduler:
+    prediction-reconciliation:
+      enabled: false
+    settlement-retry:
+      enabled: false
+    refund-retry:
+      enabled: false
+    reputation-update:
+      enabled: false

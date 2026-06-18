@@ -8,6 +8,8 @@ import com.todongsan.marketservice.market.entity.MarketRefundDetail;
 import com.todongsan.marketservice.market.entity.MarketSettlement;
 import com.todongsan.marketservice.market.entity.MarketSettlementDetail;
 import com.todongsan.marketservice.market.entity.MarketVoid;
+import com.todongsan.marketservice.market.type.MarketDisplayStatus;
+import com.todongsan.marketservice.market.type.MarketSort;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.PredictionStatus;
 import com.todongsan.marketservice.market.type.RefundStatus;
@@ -22,13 +24,18 @@ public interface MarketMapper {
     List<Market> selectMarkets(
             @Param("status") MarketStatus status,
             @Param("keyword") String keyword,
+            @Param("displayStatus") MarketDisplayStatus displayStatus,
+            @Param("sort") MarketSort sort,
+            @Param("now") LocalDateTime now,
             @Param("offset") int offset,
             @Param("limit") int limit
     );
 
     long countMarkets(
             @Param("status") MarketStatus status,
-            @Param("keyword") String keyword
+            @Param("keyword") String keyword,
+            @Param("displayStatus") MarketDisplayStatus displayStatus,
+            @Param("now") LocalDateTime now
     );
 
     Market selectMarketById(@Param("marketId") long marketId);

@@ -453,7 +453,7 @@ MVP에서는 빠른 참여 경험을 우선하여 가격 변동 허용 범위(sl
 ## 2. Market 목록 조회
 
 ```http
-GET /api/v1/markets?page=0&size=20&status=ACTIVE
+GET /api/v1/markets?displayStatus=ACTIVE&sort=popular&page=0&size=6
 ```
 
 ### Query Parameters
@@ -464,6 +464,36 @@ GET /api/v1/markets?page=0&size=20&status=ACTIVE
 | `size` | int | X | 페이지 크기. 기본값 20 |
 | `status` | string | X | Market 상태 필터 |
 | `keyword` | string | X | 제목 검색 |
+| `displayStatus` | string | X | 프론트 표시 상태 필터. `ACTIVE`, `CLOSED_BY_TIME` 및 `MarketDisplayStatus` 값 지원 |
+| `sort` | string | X | 정렬 방식. `popular`, `closingSoon`, `latest` 지원. 미지정 시 기존 최신 생성순 유지 |
+
+### 정렬 정책
+
+| 값 | 정렬 기준 |
+|---|---|
+| 미지정 | `createdAt DESC` 기존 기본 정렬 |
+| `popular` | 실제 사용자 참여 포인트인 `market.total_pool DESC`, 이후 `createdAt DESC`, `id DESC` |
+| `closingSoon` | `closeAt ASC`, 이후 `id DESC` |
+| `latest` | `createdAt DESC`, 이후 `id DESC` |
+
+`popular`은 실제 참여 볼륨을 사용하며 `virtualPoolAmount`가 포함된 `totalEffectivePoolAmount`를 사용하지 않는다. `closingSoon` 자체는 정렬만 담당하므로 이미 마감된 Market도 포함될 수 있다. 마감되지 않은 Market만 조회하려면 `displayStatus=ACTIVE`를 함께 사용한다.
+
+### 표시 상태 필터 정책
+
+```text
+displayStatus=ACTIVE
+  -> status=ACTIVE AND closeAt>현재 시각
+
+displayStatus=CLOSED_BY_TIME
+  -> status=ACTIVE AND closeAt<=현재 시각
+
+그 외 displayStatus
+  -> 동일한 DB status
+```
+
+`status=ACTIVE`는 DB 상태만 필터링하므로 마감 시각이 지난 ACTIVE Market도 포함한다. 반면 `displayStatus=ACTIVE`는 화면 표시 기준으로 아직 참여 가능한 Market만 반환한다. 두 파라미터를 함께 전달하면 AND 조건으로 적용한다.
+
+`CLOSED_BY_TIME`은 DB 상태가 아닌 프론트 표시용 파생 상태이며 `MarketStatus`에는 포함하지 않는다. 메인 화면의 인기 예측 마켓은 `displayStatus=ACTIVE&sort=popular&page=0&size=6` 사용을 권장한다.
 
 ### Response
 
