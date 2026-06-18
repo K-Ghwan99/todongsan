@@ -19,6 +19,7 @@ public class MarketPredictionPayoutEstimateCalculator {
             BigDecimal contractQuantity,
             BigDecimal feeRate,
             BigDecimal estimateBaseTotalPool,
+            BigDecimal estimateBaseOptionPointAmount,
             BigDecimal estimateBaseOptionContractQuantity
     ) {
         if (predictionStatus != PredictionStatus.CONFIRMED
@@ -27,28 +28,34 @@ public class MarketPredictionPayoutEstimateCalculator {
                 || contractQuantity == null
                 || feeRate == null
                 || estimateBaseTotalPool == null
+                || estimateBaseOptionPointAmount == null
                 || estimateBaseOptionContractQuantity == null
                 || estimateBaseOptionContractQuantity.compareTo(BigDecimal.ZERO) <= 0) {
             return PredictionPayoutEstimate.empty();
         }
 
         BigDecimal totalPool = floorAmount(estimateBaseTotalPool);
+        BigDecimal optionPrincipalPool = floorAmount(estimateBaseOptionPointAmount);
+        BigDecimal losingPool = floorAmount(totalPool.subtract(optionPrincipalPool));
+        if (losingPool.compareTo(BigDecimal.ZERO) < 0) {
+            return PredictionPayoutEstimate.empty();
+        }
         BigDecimal feeAmount = floorAmount(
-                totalPool.multiply(feeRate).divide(HUNDRED, AMOUNT_SCALE, RoundingMode.DOWN)
+                losingPool.multiply(feeRate).divide(HUNDRED, AMOUNT_SCALE, RoundingMode.DOWN)
         );
-        BigDecimal settlementPool = floorAmount(totalPool.subtract(feeAmount));
-        if (settlementPool.compareTo(BigDecimal.ZERO) < 0) {
+        BigDecimal rewardPool = floorAmount(losingPool.subtract(feeAmount));
+        if (rewardPool.compareTo(BigDecimal.ZERO) < 0) {
             return PredictionPayoutEstimate.empty();
         }
 
         BigDecimal optionContractQuantity = estimateBaseOptionContractQuantity
                 .setScale(QUANTITY_SCALE, RoundingMode.DOWN);
-        BigDecimal payoutPerContract = settlementPool.divide(
+        BigDecimal rewardPerContract = rewardPool.divide(
                 optionContractQuantity,
                 QUANTITY_SCALE,
                 RoundingMode.DOWN
         );
-        BigDecimal estimatedPayout = floorAmount(contractQuantity.multiply(payoutPerContract));
+        BigDecimal estimatedPayout = floorAmount(pointAmount.add(contractQuantity.multiply(rewardPerContract)));
         BigDecimal estimatedProfit = floorAmount(estimatedPayout.subtract(pointAmount));
         BigDecimal estimatedProfitRate = estimatedProfit.multiply(HUNDRED)
                 .divide(pointAmount, RATE_SCALE, RoundingMode.DOWN);
@@ -57,9 +64,9 @@ public class MarketPredictionPayoutEstimateCalculator {
                 estimatedPayout,
                 estimatedProfit,
                 estimatedProfitRate,
-                payoutPerContract,
+                rewardPerContract,
                 totalPool,
-                settlementPool,
+                rewardPool,
                 optionContractQuantity
         );
     }

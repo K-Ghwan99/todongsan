@@ -66,14 +66,21 @@ public class MarketSettlementTransactionService {
         BigDecimal totalPool = floorAmount(predictions.stream()
                 .map(MarketPrediction::getPointAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add));
-        BigDecimal feeAmount = floorAmount(totalPool.multiply(market.getFeeRate()).divide(HUNDRED, AMOUNT_SCALE, RoundingMode.DOWN));
-        BigDecimal settlementPool = floorAmount(totalPool.subtract(feeAmount));
+        BigDecimal winningPrincipalPool = floorAmount(winners.stream()
+                .map(MarketPrediction::getPointAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
+        BigDecimal losingPool = floorAmount(totalPool.subtract(winningPrincipalPool));
+        BigDecimal feeAmount = floorAmount(
+                losingPool.multiply(market.getFeeRate()).divide(HUNDRED, AMOUNT_SCALE, RoundingMode.DOWN)
+        );
+        BigDecimal rewardPool = floorAmount(losingPool.subtract(feeAmount));
+        BigDecimal settlementPool = floorAmount(winningPrincipalPool.add(rewardPool));
         BigDecimal winningContractQuantity = winners.stream()
                 .map(this::contractQuantity)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(QUANTITY_SCALE, RoundingMode.DOWN);
-        BigDecimal payoutPerContract = winningContractQuantity.compareTo(BigDecimal.ZERO) > 0
-                ? settlementPool.divide(winningContractQuantity, QUANTITY_SCALE, RoundingMode.DOWN)
+        BigDecimal rewardPerContract = winningContractQuantity.compareTo(BigDecimal.ZERO) > 0
+                ? rewardPool.divide(winningContractQuantity, QUANTITY_SCALE, RoundingMode.DOWN)
                 : ZERO_QUANTITY;
 
         MarketSettlement settlement = createSettlement(
@@ -82,11 +89,11 @@ public class MarketSettlementTransactionService {
                 feeAmount,
                 settlementPool,
                 winningContractQuantity,
-                payoutPerContract,
+                rewardPerContract,
                 now
         );
         List<MarketSettlementDetail> details = winners.stream()
-                .map(prediction -> toPendingDetail(marketId, settlement.getId(), prediction, payoutPerContract, now))
+                .map(prediction -> toPendingDetail(marketId, settlement.getId(), prediction, rewardPerContract, now))
                 .toList();
 
         BigDecimal burnedPointAmount = floorAmount(settlementPool.subtract(details.stream()
@@ -119,7 +126,7 @@ public class MarketSettlementTransactionService {
                 feeAmount,
                 settlementPool,
                 winningContractQuantity,
-                payoutPerContract,
+                rewardPerContract,
                 burnedPointAmount,
                 winners.size(),
                 loserCount,
@@ -352,7 +359,7 @@ public class MarketSettlementTransactionService {
             BigDecimal feeAmount,
             BigDecimal settlementPool,
             BigDecimal winningContractQuantity,
-            BigDecimal payoutPerContract,
+            BigDecimal rewardPerContract,
             LocalDateTime now
     ) {
         MarketSettlement settlement = new MarketSettlement();
@@ -363,7 +370,7 @@ public class MarketSettlementTransactionService {
         settlement.setFeeAmount(feeAmount);
         settlement.setSettlementPool(settlementPool);
         settlement.setWinningContractQuantity(winningContractQuantity);
-        settlement.setPayoutPerContract(payoutPerContract);
+        settlement.setPayoutPerContract(rewardPerContract);
         settlement.setBurnedPointAmount(ZERO_AMOUNT);
         settlement.setStatus(SettlementStatus.IN_PROGRESS);
         settlement.setCreatedAt(now);
@@ -375,17 +382,19 @@ public class MarketSettlementTransactionService {
             long marketId,
             Long settlementId,
             MarketPrediction prediction,
-            BigDecimal payoutPerContract,
+            BigDecimal rewardPerContract,
             LocalDateTime now
     ) {
-        BigDecimal settledAmount = floorAmount(contractQuantity(prediction).multiply(payoutPerContract));
+        BigDecimal settledAmount = floorAmount(
+                prediction.getPointAmount().add(contractQuantity(prediction).multiply(rewardPerContract))
+        );
         MarketSettlementDetail detail = new MarketSettlementDetail();
         detail.setSettlementId(settlementId);
         detail.setPredictionId(prediction.getId());
         detail.setMemberId(prediction.getMemberId());
         detail.setOriginalPointAmount(prediction.getPointAmount());
         detail.setContractQuantity(contractQuantity(prediction));
-        detail.setPayoutPerContract(payoutPerContract);
+        detail.setPayoutPerContract(rewardPerContract);
         detail.setSettledAmount(settledAmount);
         detail.setProfitAmount(floorAmount(settledAmount.subtract(prediction.getPointAmount())));
         detail.setStatus(TransactionItemStatus.PENDING);

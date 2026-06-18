@@ -741,6 +741,8 @@
     <sql id="predictionEstimateColumns">
         m.fee_rate,
         COALESCE(estimate_total.estimate_base_total_pool, 0.00) AS estimate_base_total_pool,
+        COALESCE(estimate_option.estimate_base_option_point_amount, 0.00)
+            AS estimate_base_option_point_amount,
         COALESCE(estimate_option.estimate_base_option_contract_quantity, 0.00000000)
             AS estimate_base_option_contract_quantity
     </sql>
@@ -755,6 +757,7 @@
           ON estimate_total.market_id = p.market_id
         LEFT JOIN (
             SELECT market_id, option_id,
+                   SUM(point_amount) AS estimate_base_option_point_amount,
                    SUM(contract_quantity) AS estimate_base_option_contract_quantity
             FROM market_prediction
             WHERE status = 'CONFIRMED'

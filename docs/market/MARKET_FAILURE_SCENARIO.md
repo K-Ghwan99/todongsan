@@ -1139,6 +1139,8 @@ Header Idempotency-Key는 새로운 batch 요청 추적용 키를 사용할 수 
 
 ### 8-7. 정산 batch 부분 실패
 
+정산 금액은 정산 시작 시점의 동일한 CONFIRMED Prediction snapshot으로 확정한다. `feeAmount = floor2(losingPool * feeRate / 100)`, `rewardPool = losingPool - feeAmount`, 승자 지급액은 `floor2(pointAmount + rewardPool * contractQuantity / totalWinningContractQuantity)`이다. 부분 실패 재시도에서는 이 금액을 다시 계산하지 않고 기존 settlement detail의 금액과 item idempotencyKey를 그대로 사용한다.
+
 | 항목 | 내용 |
 |---|---|
 | 발생 시점 | Member-Point 정산 batch API 응답 수신 |
@@ -1215,11 +1217,21 @@ MARKET_SETTLEMENT_BATCH:market:{marketId}:settlement:{settlementId}:retry:{uuid}
 | Member-Point 호출 | 정산 batch API 호출 없음 |
 | 정산 detail | market_settlement_detail 생성 0건 |
 | 상태 변화 | 모든 CONFIRMED Prediction SETTLED, settledAmount = 0.00, MarketStatus = SETTLED |
-| burnedPointAmount | settlementPool 전체 |
+| winningPredictions | 없음 |
+| losingPredictions | 모든 CONFIRMED Prediction |
+| winningPrincipalPool | `0.00` |
+| losingPool | `totalPool` |
+| feeAmount | `floor2(losingPool * feeRate / 100)` |
+| rewardPool | `losingPool - feeAmount` |
+| settlementPool | `winningPrincipalPool + rewardPool = rewardPool` |
+| paidAmount | `0.00` |
+| burnedPointAmount | 정답자가 없어 분배되지 않은 `settlementPool` 전체 |
 | 재시도 | 필요 없음 |
 | 관련 ErrorCode | 없음 |
 
-승자 없음은 정산 실패가 아니다.
+정답 option이 유효하다면 정답자 없음은 정산 실패가 아니다. Member-Point 지급 없이 모든 Prediction을 `SETTLED`, `settledAmount = 0.00`으로 처리하고 모든 Prediction에 대한 Insight outbox를 생성한다.
+
+이 경우에도 수수료 기준은 별도의 `totalPool` 기준이 아니라 `losingPool`이다. 모든 참여자가 패자이므로 이 시나리오에서만 `losingPool = totalPool`이 성립한다.
 
 ---
 
@@ -1228,7 +1240,7 @@ MARKET_SETTLEMENT_BATCH:market:{marketId}:settlement:{settlementId}:retry:{uuid}
 | 항목 | 내용 |
 |---|---|
 | 발생 시점 | 정산 금액 계산 |
-| 상황 | 정산 금액을 소수점 둘째 자리까지 버림 처리하면서 settlementPool 일부가 남음 |
+| 상황 | 원금과 reward share를 합산한 정산 금액을 소수점 둘째 자리까지 버림 처리하면서 availablePayoutPool 일부가 남음 |
 | 처리 | 남은 금액은 burnedPointAmount에 기록 |
 | Member-Point 지급 | 지급 대상 아님 |
 | 관련 ErrorCode | 없음 |

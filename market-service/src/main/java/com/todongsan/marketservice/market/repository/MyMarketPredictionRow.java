@@ -31,5 +31,6 @@ public class MyMarketPredictionRow {
     private BigDecimal refundAmount;
     private BigDecimal feeRate;
     private BigDecimal estimateBaseTotalPool;
+    private BigDecimal estimateBaseOptionPointAmount;
     private BigDecimal estimateBaseOptionContractQuantity;
 }
