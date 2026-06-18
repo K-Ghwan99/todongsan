@@ -23,6 +23,9 @@ public interface BattleRepository extends JpaRepository<Battle, Long> {
     // 목록 조회
     Page<Battle> findByStatusAndDeletedAtIsNull(BattleStatus status, Pageable pageable);
 
+    // 마이페이지: 내가 만든 배틀 목록 (본인은 모든 상태 노출, soft delete 제외)
+    Page<Battle> findByCreatedByAndStatusInAndDeletedAtIsNull(Long createdBy, List<BattleStatus> statuses, Pageable pageable);
+
     // 마감 배치: end_at 도달한 ACTIVE Battle
     @Query("SELECT b FROM Battle b WHERE b.status = 'ACTIVE' AND b.endAt <= :now AND b.deletedAt IS NULL")
     List<Battle> findExpiredActiveBattles(LocalDateTime now);

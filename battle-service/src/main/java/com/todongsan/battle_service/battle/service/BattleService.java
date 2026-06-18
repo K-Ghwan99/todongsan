@@ -12,6 +12,9 @@ public interface BattleService {
 
     Page<BattleListResponse> getBattles(String status, int page, int size);
 
+    // 마이페이지: 내가 만든 배틀 목록 (본인은 모든 상태 노출)
+    Page<MyCreatedBattleResponse> getMyCreatedBattles(Long memberId, String status, int page, int size);
+
     BattleDetailResponse getBattle(Long battleId);
 
     BattleStatusResponse approveBattle(Long battleId);
