@@ -12,5 +12,6 @@ public class LoginResponse {
     private String refreshToken;
     private Long memberId;
     private String nickname;
+    private String role;
     private boolean isNewMember;
 }
