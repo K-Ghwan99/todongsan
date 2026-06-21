@@ -107,6 +107,7 @@ public class MemberAuthServiceImpl implements MemberAuthService {
                 .refreshToken(jwtProvider.generateRefreshToken(member.getId()))
                 .memberId(member.getId())
                 .nickname(member.getNickname())
+                .role(member.getRole().name())
                 .isNewMember(isNewMember)
                 .build();
     }
