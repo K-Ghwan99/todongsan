@@ -552,18 +552,13 @@ public class InsightReportService {
         }
         
         InsightReport report = reportOpt.get();
-        
-        // Market 리포트 조회는 완료된 리포트만 반환
-        if (report.getStatus() != InsightReportStatus.DONE) {
-            throw new CustomException(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
-        }
-        
+
         return InsightReportResponse.builder()
                 .reportId(report.getId())
                 .status(report.getStatus().name())
                 .reportContent(report.getReportContent())
                 .generatedAt(report.getGeneratedAt())
-                .pointCharged(0)  // 조회 시에는 차감 없음
+                .pointCharged(0)
                 .build();
     }
     
