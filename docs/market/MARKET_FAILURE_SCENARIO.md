@@ -1859,6 +1859,8 @@ history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
 
 ## 16. Retry 정책 요약
 
+관리자 페이지는 문제 상태와 정산·환불 detail을 조회하는 관찰 기능을 제공한다. 이번 관리자 조회 API는 신규 수동 복구 endpoint를 만들지 않는다. 정산 `FAILED/UNKNOWN`, 환불 `FAILED/UNKNOWN/stale PENDING`, 예측 `POINT_UNKNOWN/stale POINT_PENDING`, 평판 `PENDING/UNKNOWN`은 기존 Scheduler 정책으로 처리한다. 평판 `FAILED`는 자동 재시도 대상이 아니므로 관리자 수동 확인 대상으로 표시한다.
+
 ### 16-1. 재시도 대상
 
 | 상황 | Retry | 이유 |

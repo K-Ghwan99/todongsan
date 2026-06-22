@@ -3068,3 +3068,60 @@ market.status = ACTIVE && closeAt <= now  -> CLOSED_BY_TIME
 ## 부록. 프론트 연동 가이드
 
 Market 필드 표시명, 상태별 UI 처리, timeout polling, Decimal String 처리와 금지 문구는 [`MARKET_FRONTEND_INTEGRATION_GUIDE.md`](./MARKET_FRONTEND_INTEGRATION_GUIDE.md)를 따른다.
+
+---
+
+## 부록. 관리자 Market 조회 API
+
+모든 API는 `X-Member-Role: ADMIN`이 필요하며 공통 `ApiResponse<T>` 형식을 사용한다. 조회 API는 command용 `FOR UPDATE` 쿼리를 사용하지 않는다.
+
+### 관리자 상세 조회
+
+```http
+GET /api/v1/admin/markets/{marketId}
+```
+
+생성·판정 정보, option 구간과 가격, 실제/가상/유효 풀, 결과 정보, 정산·환불 요약을 반환한다. `displayStatus`와 `canPredict`는 public 조회와 동일한 현재 시각 기준으로 계산한다. 정산 또는 환불 row가 없으면 각 summary의 ID와 상태는 `null`, count는 0이다.
+
+### 문제 Market 조회
+
+```http
+GET /api/v1/admin/markets/problem-markets?page=0&size=20&type=ALL
+```
+
+`type`은 `ALL`, `PREDICTION_RECONCILE`, `SETTLEMENT`, `REFUND`, `REPUTATION`을 지원한다. 동일 Market이 여러 문제 유형에 해당하면 유형별 행으로 반환한다.
+
+- `SETTLEMENT`: 진행 중 정산의 `FAILED`, `UNKNOWN` detail
+- `REFUND`: 진행 중 환불의 `FAILED`, `UNKNOWN`, 3분 이상 지난 `PENDING` detail
+- `PREDICTION_RECONCILE`: `POINT_UNKNOWN`, 3분 이상 지난 `POINT_PENDING`
+- `REPUTATION`: `FAILED`, `UNKNOWN` outbox
+
+정산·환불·예측 대사 문제와 평판 `UNKNOWN`은 자동 복구 대상이다. 평판 `FAILED`는 Scheduler 재시도 대상이 아니므로 `manualCheckRequired=true`다.
+
+### 정산 조회
+
+```http
+GET /api/v1/admin/markets/{marketId}/settlements
+GET /api/v1/admin/markets/{marketId}/settlements/{settlementId}/details?page=0&size=50&status=FAILED
+```
+
+정산 row가 없으면 성공 상태의 빈 요약을 반환한다. detail의 `status`는 `PENDING`, `SUCCESS`, `FAILED`, `UNKNOWN`을 지원한다. `settlementId`가 Market에 속하지 않으면 `MARKET_INVALID_SETTLEMENT_DATA`를 반환한다. Decimal 값은 JSON String이다.
+
+### 환불 조회
+
+```http
+GET /api/v1/admin/markets/{marketId}/refunds
+GET /api/v1/admin/markets/{marketId}/refunds/{voidId}/details?page=0&size=50&status=UNKNOWN
+```
+
+void row가 없으면 성공 상태의 빈 요약을 반환한다. `refundRequired`는 VOIDED Market에서 미완료 detail이 있거나, detail 생성 전 CONFIRMED 환불 대상이 남아 있을 때 `true`다. detail status와 Decimal 정책은 정산 조회와 같다.
+
+### 상태별 카운트
+
+```http
+GET /api/v1/admin/markets/status-counts
+```
+
+`ACTIVE`는 `closeAt > now`, `closedByTime`은 DB status가 ACTIVE이면서 `closeAt <= now`인 Market을 센다. `problemMarketCount`는 문제 조회 대상의 distinct Market 수다.
+
+관리자 조회 1차·2차는 관찰 기능만 제공한다. 신규 `retry-now` API는 추가하지 않으며, 정산·환불·예측 대사·평판 UNKNOWN 복구는 기존 Scheduler가 수행한다.

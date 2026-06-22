@@ -6,25 +6,39 @@ import com.todongsan.marketservice.market.dto.request.ConfirmMarketResultRequest
 import com.todongsan.marketservice.market.dto.request.CreateMarketRequest;
 import com.todongsan.marketservice.market.dto.request.VoidMarketRequest;
 import com.todongsan.marketservice.market.dto.response.ActivateMarketResponse;
+import com.todongsan.marketservice.market.dto.response.AdminMarketDetailResponse;
+import com.todongsan.marketservice.market.dto.response.AdminMarketProblemPageResponse;
+import com.todongsan.marketservice.market.dto.response.AdminMarketRefundDetailPageResponse;
+import com.todongsan.marketservice.market.dto.response.AdminMarketRefundResponse;
+import com.todongsan.marketservice.market.dto.response.AdminMarketSettlementDetailPageResponse;
+import com.todongsan.marketservice.market.dto.response.AdminMarketSettlementResponse;
+import com.todongsan.marketservice.market.dto.response.AdminMarketStatusCountsResponse;
 import com.todongsan.marketservice.market.dto.response.ConfirmMarketResultResponse;
 import com.todongsan.marketservice.market.dto.response.CreateMarketResponse;
 import com.todongsan.marketservice.market.dto.response.RefundMarketResponse;
 import com.todongsan.marketservice.market.dto.response.SettleMarketResponse;
 import com.todongsan.marketservice.market.dto.response.VoidMarketResponse;
 import com.todongsan.marketservice.market.service.AdminMarketService;
+import com.todongsan.marketservice.market.service.AdminMarketQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
 
+@Validated
 @RestController
 @RequiredArgsConstructor
 @AdminOnly
@@ -42,6 +56,102 @@ public class AdminMarketController {
             "Member role injected by Gateway. Admin APIs require ADMIN. Market Service does not parse JWT.";
 
     private final AdminMarketService adminMarketService;
+    private final AdminMarketQueryService adminMarketQueryService;
+
+    @GetMapping("/problem-markets")
+    @Operation(
+            summary = "Get problem Markets",
+            description = "Lists scheduler recovery targets and problems that require administrator observation.",
+            parameters = @Parameter(name = "X-Member-Role", description = ADMIN_ROLE_HEADER_DESCRIPTION,
+                    required = true, in = ParameterIn.HEADER, example = "ADMIN")
+    )
+    public ApiResponse<AdminMarketProblemPageResponse> getProblemMarkets(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+            @RequestParam(defaultValue = "ALL") String type
+    ) {
+        return ApiResponse.ok(adminMarketQueryService.getProblemMarkets(page, size, type));
+    }
+
+    @GetMapping("/status-counts")
+    @Operation(
+            summary = "Get admin Market status counts",
+            parameters = @Parameter(name = "X-Member-Role", description = ADMIN_ROLE_HEADER_DESCRIPTION,
+                    required = true, in = ParameterIn.HEADER, example = "ADMIN")
+    )
+    public ApiResponse<AdminMarketStatusCountsResponse> getStatusCounts() {
+        return ApiResponse.ok(adminMarketQueryService.getStatusCounts());
+    }
+
+    @GetMapping("/{marketId}")
+    @Operation(
+            summary = "Get admin Market detail",
+            parameters = @Parameter(name = "X-Member-Role", description = ADMIN_ROLE_HEADER_DESCRIPTION,
+                    required = true, in = ParameterIn.HEADER, example = "ADMIN")
+    )
+    public ApiResponse<AdminMarketDetailResponse> getMarket(
+            @PathVariable @Min(1) long marketId
+    ) {
+        return ApiResponse.ok(adminMarketQueryService.getMarket(marketId));
+    }
+
+    @GetMapping("/{marketId}/settlements")
+    @Operation(
+            summary = "Get Market settlement summary",
+            parameters = @Parameter(name = "X-Member-Role", description = ADMIN_ROLE_HEADER_DESCRIPTION,
+                    required = true, in = ParameterIn.HEADER, example = "ADMIN")
+    )
+    public ApiResponse<AdminMarketSettlementResponse> getSettlement(
+            @PathVariable @Min(1) long marketId
+    ) {
+        return ApiResponse.ok(adminMarketQueryService.getSettlement(marketId));
+    }
+
+    @GetMapping("/{marketId}/settlements/{settlementId}/details")
+    @Operation(
+            summary = "Get Market settlement details",
+            parameters = @Parameter(name = "X-Member-Role", description = ADMIN_ROLE_HEADER_DESCRIPTION,
+                    required = true, in = ParameterIn.HEADER, example = "ADMIN")
+    )
+    public ApiResponse<AdminMarketSettlementDetailPageResponse> getSettlementDetails(
+            @PathVariable @Min(1) long marketId,
+            @PathVariable @Min(1) long settlementId,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "50") @Min(1) @Max(100) int size,
+            @RequestParam(required = false) String status
+    ) {
+        return ApiResponse.ok(adminMarketQueryService.getSettlementDetails(
+                marketId, settlementId, page, size, status
+        ));
+    }
+
+    @GetMapping("/{marketId}/refunds")
+    @Operation(
+            summary = "Get Market refund summary",
+            parameters = @Parameter(name = "X-Member-Role", description = ADMIN_ROLE_HEADER_DESCRIPTION,
+                    required = true, in = ParameterIn.HEADER, example = "ADMIN")
+    )
+    public ApiResponse<AdminMarketRefundResponse> getRefund(
+            @PathVariable @Min(1) long marketId
+    ) {
+        return ApiResponse.ok(adminMarketQueryService.getRefund(marketId));
+    }
+
+    @GetMapping("/{marketId}/refunds/{voidId}/details")
+    @Operation(
+            summary = "Get Market refund details",
+            parameters = @Parameter(name = "X-Member-Role", description = ADMIN_ROLE_HEADER_DESCRIPTION,
+                    required = true, in = ParameterIn.HEADER, example = "ADMIN")
+    )
+    public ApiResponse<AdminMarketRefundDetailPageResponse> getRefundDetails(
+            @PathVariable @Min(1) long marketId,
+            @PathVariable @Min(1) long voidId,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "50") @Min(1) @Max(100) int size,
+            @RequestParam(required = false) String status
+    ) {
+        return ApiResponse.ok(adminMarketQueryService.getRefundDetails(marketId, voidId, page, size, status));
+    }
 
     @PostMapping
     @Operation(
