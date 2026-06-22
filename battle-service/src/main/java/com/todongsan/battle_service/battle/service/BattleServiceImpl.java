@@ -67,6 +67,14 @@ public class BattleServiceImpl implements BattleService {
 
     @Override
     @Transactional(readOnly = true)
+    public Page<BattleDetailResponse> getPendingBattles(int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return battleRepository.findByStatusAndDeletedAtIsNull(BattleStatus.PENDING, pageable)
+                .map(BattleDetailResponse::from);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Page<MyCreatedBattleResponse> getMyCreatedBattles(Long memberId, String status, int page, int size) {
         List<BattleStatus> statuses = parseAllStatuses(status);
         PageRequest pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());

@@ -144,14 +144,14 @@ GET /api/v1/battles/{battleId}
 |---|---:|---|
 | `BATTLE_NOT_FOUND` | 404 | 존재하지 않거나 soft delete됨. **`PENDING`/`CANCELLED` 상태도 일반 사용자에게는 이 에러로 응답** |
 
-> 관리자 전용 조회는 별도 API로 분리 (MVP 이후).
+> 관리자 전용 조회(PENDING 포함)는 2-8/2-9 참조.
 
 ---
 
 ### 2-4. Battle 승인 (관리자)
 
 ```
-PATCH /api/v1/battles/{battleId}/approve
+PATCH /api/v1/battles/admin/{battleId}/approve
 ```
 
 **인증**: 필요 (관리자)
@@ -185,7 +185,7 @@ PATCH /api/v1/battles/{battleId}/approve
 ### 2-5. Battle 거절 (관리자)
 
 ```
-PATCH /api/v1/battles/{battleId}/reject
+PATCH /api/v1/battles/admin/{battleId}/reject
 ```
 
 **인증**: 필요 (관리자)
@@ -199,7 +199,7 @@ PATCH /api/v1/battles/{battleId}/reject
 ### 2-6. Battle 강제 취소 (관리자)
 
 ```
-PATCH /api/v1/battles/{battleId}/cancel
+PATCH /api/v1/battles/admin/{battleId}/cancel
 ```
 
 **인증**: 필요 (관리자)
@@ -217,7 +217,9 @@ PATCH /api/v1/battles/{battleId}/cancel
 
 ---
 
-### 2-7. 내가 만든 배틀 목록 조회
+### 2-7. 내가 만든 배틀 목록 조회 (본인)
+
+
 
 ```
 GET /api/v1/battles/created/me?status={status}&page={page}&size={size}
@@ -298,6 +300,139 @@ GET /api/v1/battles/created/me?status={status}&page={page}&size={size}
 |---|---:|---|
 | `UNAUTHORIZED` | 401 | JWT 없음/만료 |
 | `VALIDATION_FAILED` | 400 | 잘못된 status 값 |
+
+---
+
+### 2-8. PENDING 배틀 목록 조회 (관리자)
+
+```
+GET /api/v1/battles/admin/pending?page={page}&size={size}
+```
+
+**인증**: 필요 (관리자, `X-Member-Role: ADMIN`)
+
+**Query Parameters**
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| page | Integer | N | 페이지 번호 (기본: 0) |
+| size | Integer | N | 페이지 크기 (기본: 10) |
+
+**Response**: Spring `Page<T>` 직렬화 형태(`content`, `number`, `size`, `totalElements`, `totalPages`, `first`, `last`).
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "content": [
+      {
+        "battleId": 42,
+        "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
+        "optionA": "성수",
+        "optionB": "연남",
+        "sido": "서울",
+        "sigu": "성동구",
+        "status": "PENDING",
+        "isClosed": false,
+        "optionACount": 0,
+        "optionBCount": 0,
+        "voteCount": 0,
+        "winningOption": null,
+        "rewardAmount": null,
+        "settledAt": null,
+        "createdBy": 7,
+        "startAt": "2026-05-29T00:00:00",
+        "endAt": "2026-06-05T00:00:00",
+        "createdAt": "2026-05-28T10:00:00"
+      }
+    ],
+    "number": 0,
+    "size": 10,
+    "totalElements": 1,
+    "totalPages": 1,
+    "first": true,
+    "last": true
+  },
+  "timestamp": "2026-06-22T10:00:00"
+}
+```
+
+**응답 item 필드**
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| battleId | Long | 배틀 ID |
+| title / optionA / optionB | String | 배틀 제목·선택지 |
+| sido / sigu | String\|null | 지역 |
+| status | String | 항상 `PENDING` |
+| isClosed | Boolean | 항상 `false` |
+| optionACount / optionBCount / voteCount | Integer | PENDING이므로 모두 0 |
+| winningOption / rewardAmount / settledAt | null | PENDING이므로 모두 null |
+| createdBy | Long | 배틀 등록자 memberId |
+| startAt / endAt | String | 배틀 기간 |
+| createdAt | String | 등록 시각. 최신 등록순 정렬 |
+
+**Error Codes**
+
+| ErrorCode | HTTP | 상황 |
+|---|---:|---|
+| `UNAUTHORIZED` | 401 | JWT 없음/만료 |
+| `FORBIDDEN` | 403 | 관리자 권한 없음 |
+
+---
+
+### 2-9. Battle 상세 조회 (관리자)
+
+```
+GET /api/v1/battles/admin/{battleId}
+```
+
+**인증**: 필요 (관리자, `X-Member-Role: ADMIN`)
+
+**용도**: 관리자가 승인/거절 전 배틀 내용 전체를 확인하는 단건 조회. `PENDING` 포함 모든 상태를 반환한다.
+
+**Response**
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "battleId": 42,
+    "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
+    "optionA": "성수",
+    "optionB": "연남",
+    "sido": "서울",
+    "sigu": "성동구",
+    "status": "PENDING",
+    "isClosed": false,
+    "optionACount": 0,
+    "optionBCount": 0,
+    "voteCount": 0,
+    "winningOption": null,
+    "rewardAmount": null,
+    "settledAt": null,
+    "createdBy": 7,
+    "startAt": "2026-05-29T00:00:00",
+    "endAt": "2026-06-05T00:00:00",
+    "createdAt": "2026-05-28T10:00:00"
+  },
+  "timestamp": "2026-06-22T10:00:00"
+}
+```
+
+> 일반 사용자용 2-3은 `ACTIVE`/`CLOSED`만 노출하지만, 이 API는 `PENDING`/`CANCELLED`도 그대로 반환한다.
+
+**Error Codes**
+
+| ErrorCode | HTTP | 상황 |
+|---|---:|---|
+| `UNAUTHORIZED` | 401 | JWT 없음/만료 |
+| `FORBIDDEN` | 403 | 관리자 권한 없음 |
+| `BATTLE_NOT_FOUND` | 404 | 존재하지 않거나 soft delete됨 |
 
 ---
 
@@ -751,3 +886,5 @@ GET /api/v1/battles/{battleId}/info
 | 2026-06-11 | 2-1 요청/응답에 `sido`, `sigu` 추가. 5-1 `totalVoteCount` → `totalVotes` 변경, votes 항목에 `votedAt` 추가. 5-2 sido/sigu 정책 설명 수정. 5-3 응답에 `sido`, `sigu`, `isClosed` 추가 |
 | 2026-06-18 | 3-5 내 참여 배틀 목록 조회(`GET /api/v1/battles/votes/me`) 신설. 마이페이지 "내가 참여한 배틀" 용도, Market `/markets/predictions/me` 대응 |
 | 2026-06-18 | 2-7 내가 만든 배틀 목록 조회(`GET /api/v1/battles/created/me`) 신설. 생성자 본인에게는 PENDING/CANCELLED 포함 전체 상태 노출 |
+| 2026-06-22 | 2-8 관리자 PENDING 목록 조회(`GET /api/v1/battles/admin/pending`) 신설. 2-9 관리자 상세 조회(`GET /api/v1/battles/admin/{battleId}`) 신설. 2-3 관리자 전용 조회 안내 문구 수정 |
+| 2026-06-22 | 2-4/2-5/2-6 관리자 액션 경로를 `/admin/` 하위로 이동. (`/{battleId}/approve|reject|cancel` → `/admin/{battleId}/approve|reject|cancel`) |
