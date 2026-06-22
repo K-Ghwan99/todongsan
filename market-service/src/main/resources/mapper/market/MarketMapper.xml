@@ -738,6 +738,13 @@
           AND member_id = #{memberId}
     </select>
 
+    <select id="selectAdminMarketById" resultType="com.todongsan.marketservice.market.entity.Market">
+        SELECT *
+        FROM market
+        WHERE id = #{marketId}
+          AND deleted_at IS NULL
+    </select>
+
     <sql id="predictionEstimateColumns">
         m.fee_rate,
         COALESCE(estimate_total.estimate_base_total_pool, 0.00) AS estimate_base_total_pool,
@@ -1285,5 +1292,244 @@
           AND status = 'SETTLEMENT_IN_PROGRESS'
           AND deleted_at IS NULL
     </update>
+
+    <!-- Admin read queries intentionally avoid FOR UPDATE. -->
+    <select id="selectLatestMarketSettlementByMarketIdForRead"
+            resultType="com.todongsan.marketservice.market.entity.MarketSettlement">
+        SELECT *
+        FROM market_settlement
+        WHERE market_id = #{marketId}
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectMarketSettlementByIdForRead"
+            resultType="com.todongsan.marketservice.market.entity.MarketSettlement">
+        SELECT *
+        FROM market_settlement
+        WHERE id = #{settlementId}
+    </select>
+
+    <select id="selectSettlementDetailStatusCounts"
+            resultType="com.todongsan.marketservice.market.repository.AdminTransactionStatusCountsRow">
+        SELECT
+            COUNT(*) AS total_count,
+            COALESCE(SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END), 0) AS success_count,
+            COALESCE(SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END), 0) AS failed_count,
+            COALESCE(SUM(CASE WHEN status = 'UNKNOWN' THEN 1 ELSE 0 END), 0) AS unknown_count,
+            COALESCE(SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pending_count,
+            0.00 AS total_amount
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+    </select>
+
+    <select id="selectSettlementDetailsForAdmin"
+            resultType="com.todongsan.marketservice.market.entity.MarketSettlementDetail">
+        SELECT *
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        ORDER BY id ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countSettlementDetailsForAdmin" resultType="long">
+        SELECT COUNT(*)
+        FROM market_settlement_detail
+        WHERE settlement_id = #{settlementId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <select id="selectMarketVoidByMarketIdForRead"
+            resultType="com.todongsan.marketservice.market.entity.MarketVoid">
+        SELECT *
+        FROM market_void
+        WHERE market_id = #{marketId}
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectMarketVoidByIdForRead"
+            resultType="com.todongsan.marketservice.market.entity.MarketVoid">
+        SELECT *
+        FROM market_void
+        WHERE id = #{voidId}
+    </select>
+
+    <select id="selectRefundDetailStatusCounts"
+            resultType="com.todongsan.marketservice.market.repository.AdminTransactionStatusCountsRow">
+        SELECT
+            COUNT(*) AS total_count,
+            COALESCE(SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END), 0) AS success_count,
+            COALESCE(SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END), 0) AS failed_count,
+            COALESCE(SUM(CASE WHEN status = 'UNKNOWN' THEN 1 ELSE 0 END), 0) AS unknown_count,
+            COALESCE(SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pending_count,
+            COALESCE(SUM(refund_amount), 0.00) AS total_amount
+        FROM market_refund_detail
+        WHERE market_void_id = #{voidId}
+    </select>
+
+    <select id="selectRefundDetailsForAdmin"
+            resultType="com.todongsan.marketservice.market.entity.MarketRefundDetail">
+        SELECT *
+        FROM market_refund_detail
+        WHERE market_void_id = #{voidId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        ORDER BY id ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countRefundDetailsForAdmin" resultType="long">
+        SELECT COUNT(*)
+        FROM market_refund_detail
+        WHERE market_void_id = #{voidId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <sql id="adminProblemUnion">
+        SELECT
+            m.id AS market_id,
+            m.title,
+            m.status AS market_status,
+            'SETTLEMENT' AS problem_type,
+            SUM(CASE WHEN msd.status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count,
+            SUM(CASE WHEN msd.status = 'UNKNOWN' THEN 1 ELSE 0 END) AS unknown_count,
+            0 AS pending_stale_count,
+            NULL AS last_error_code,
+            MAX(msd.fail_reason) AS last_error_message,
+            MAX(msd.updated_at) AS last_attempt_at
+        FROM market m
+        JOIN market_settlement ms ON ms.market_id = m.id
+        JOIN market_settlement_detail msd ON msd.settlement_id = ms.id
+        WHERE m.deleted_at IS NULL
+          AND m.status = 'SETTLEMENT_IN_PROGRESS'
+          AND ms.status = 'IN_PROGRESS'
+          AND msd.status IN ('FAILED', 'UNKNOWN')
+        GROUP BY m.id, m.title, m.status
+
+        UNION ALL
+
+        SELECT
+            m.id AS market_id,
+            m.title,
+            m.status AS market_status,
+            'REFUND' AS problem_type,
+            SUM(CASE WHEN mrd.status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count,
+            SUM(CASE WHEN mrd.status = 'UNKNOWN' THEN 1 ELSE 0 END) AS unknown_count,
+            SUM(CASE WHEN mrd.status = 'PENDING' AND mrd.updated_at &lt;= #{pendingThreshold} THEN 1 ELSE 0 END)
+                AS pending_stale_count,
+            NULL AS last_error_code,
+            MAX(mrd.fail_reason) AS last_error_message,
+            MAX(mrd.updated_at) AS last_attempt_at
+        FROM market m
+        JOIN market_void mv ON mv.market_id = m.id
+        JOIN market_refund_detail mrd ON mrd.market_void_id = mv.id
+        WHERE m.deleted_at IS NULL
+          AND m.status = 'VOIDED'
+          AND mv.refund_status = 'IN_PROGRESS'
+          AND (
+                mrd.status IN ('FAILED', 'UNKNOWN')
+                OR (mrd.status = 'PENDING' AND mrd.updated_at &lt;= #{pendingThreshold})
+          )
+        GROUP BY m.id, m.title, m.status
+
+        UNION ALL
+
+        SELECT
+            m.id AS market_id,
+            m.title,
+            m.status AS market_status,
+            'PREDICTION_RECONCILE' AS problem_type,
+            0 AS failed_count,
+            SUM(CASE WHEN p.status = 'POINT_UNKNOWN' THEN 1 ELSE 0 END) AS unknown_count,
+            SUM(CASE WHEN p.status = 'POINT_PENDING' AND p.updated_at &lt;= #{pendingThreshold} THEN 1 ELSE 0 END)
+                AS pending_stale_count,
+            NULL AS last_error_code,
+            MAX(p.fail_reason) AS last_error_message,
+            MAX(p.updated_at) AS last_attempt_at
+        FROM market m
+        JOIN market_prediction p ON p.market_id = m.id
+        WHERE m.deleted_at IS NULL
+          AND (
+                p.status = 'POINT_UNKNOWN'
+                OR (p.status = 'POINT_PENDING' AND p.updated_at &lt;= #{pendingThreshold})
+          )
+        GROUP BY m.id, m.title, m.status
+
+        UNION ALL
+
+        SELECT
+            m.id AS market_id,
+            m.title,
+            m.status AS market_status,
+            'REPUTATION' AS problem_type,
+            SUM(CASE WHEN mru.status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count,
+            SUM(CASE WHEN mru.status = 'UNKNOWN' THEN 1 ELSE 0 END) AS unknown_count,
+            0 AS pending_stale_count,
+            MAX(mru.last_error_code) AS last_error_code,
+            MAX(mru.last_error_message) AS last_error_message,
+            MAX(mru.updated_at) AS last_attempt_at
+        FROM market m
+        JOIN market_reputation_update mru ON mru.market_id = m.id
+        WHERE m.deleted_at IS NULL
+          AND mru.status IN ('FAILED', 'UNKNOWN')
+        GROUP BY m.id, m.title, m.status
+    </sql>
+
+    <select id="selectProblemMarketsForAdmin"
+            resultType="com.todongsan.marketservice.market.repository.AdminMarketProblemRow">
+        SELECT *
+        FROM (
+            <include refid="adminProblemUnion"/>
+        ) problems
+        <if test="type.name() != 'ALL'">
+            WHERE problem_type = #{type}
+        </if>
+        ORDER BY last_attempt_at DESC, market_id DESC, problem_type ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countProblemMarketsForAdmin" resultType="long">
+        SELECT COUNT(*)
+        FROM (
+            <include refid="adminProblemUnion"/>
+        ) problems
+        <if test="type.name() != 'ALL'">
+            WHERE problem_type = #{type}
+        </if>
+    </select>
+
+    <select id="countDistinctProblemMarketsForAdmin" resultType="long">
+        SELECT COUNT(DISTINCT market_id)
+        FROM (
+            <include refid="adminProblemUnion"/>
+        ) problems
+    </select>
+
+    <select id="selectAdminMarketStatusCounts"
+            resultType="com.todongsan.marketservice.market.repository.AdminMarketStatusCountsRow">
+        SELECT
+            COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pending,
+            COALESCE(SUM(CASE WHEN status = 'ACTIVE' AND close_at &gt; #{now} THEN 1 ELSE 0 END), 0) AS active,
+            COALESCE(SUM(CASE WHEN status = 'ACTIVE' AND close_at &lt;= #{now} THEN 1 ELSE 0 END), 0)
+                AS closed_by_time,
+            COALESCE(SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END), 0) AS closed,
+            COALESCE(SUM(CASE WHEN status = 'DATA_PENDING' THEN 1 ELSE 0 END), 0) AS data_pending,
+            COALESCE(SUM(CASE WHEN status = 'SETTLEMENT_IN_PROGRESS' THEN 1 ELSE 0 END), 0)
+                AS settlement_in_progress,
+            COALESCE(SUM(CASE WHEN status = 'SETTLED' THEN 1 ELSE 0 END), 0) AS settled,
+            COALESCE(SUM(CASE WHEN status = 'VOIDED' THEN 1 ELSE 0 END), 0) AS voided
+        FROM market
+        WHERE deleted_at IS NULL
+    </select>
 
 </mapper>
