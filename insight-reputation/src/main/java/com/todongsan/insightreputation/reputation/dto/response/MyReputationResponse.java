@@ -25,7 +25,8 @@ public class MyReputationResponse {
     private Integer activityCount;
     private LocalDateTime activityConfirmedAt;
     private List<VisitCertificationSummary> visitCertifications;
-    
+    private Integer visitCertificationCount;
+
     public static MyReputationResponse from(Reputation reputation, List<VisitCertificationSummary> visitCertifications) {
         return MyReputationResponse.builder()
                 .memberId(reputation.getMemberId())
@@ -40,6 +41,7 @@ public class MyReputationResponse {
                 .activityCount(reputation.getActivityCount())
                 .activityConfirmedAt(reputation.getActivityConfirmedAt())
                 .visitCertifications(visitCertifications)
+                .visitCertificationCount(visitCertifications != null ? visitCertifications.size() : 0)
                 .build();
     }
 }

@@ -65,18 +65,37 @@ public class MarketClient {
                     (java.util.List<java.util.Map<String, Object>>) dataMap.get("optionStatistics");
                 
                 // Market 정보 매핑
+                // Market 상태를 파싱 전에 먼저 확인 — SETTLED가 아니면 null 필드 파싱 시도 불필요
+                String marketStatus = (String) marketMap.get("status");
+                if (!"SETTLED".equals(marketStatus)) {
+                    log.warn("Market이 아직 SETTLED 상태가 아님: marketId={}, status={}", marketId, marketStatus);
+                    throw new CustomException(ErrorCode.INSIGHT_REPORT_SOURCE_DATA_NOT_READY);
+                }
+
+                // judgeDate: DATE 컬럼이므로 "2026-06-30" 형태로 올 수 있음 — LocalDate로 파싱 후 변환
+                String judgeDateStr = (String) marketMap.get("judgeDate");
+                LocalDateTime judgeDate = null;
+                if (judgeDateStr != null) {
+                    try {
+                        judgeDate = LocalDateTime.parse(judgeDateStr);
+                    } catch (Exception e) {
+                        judgeDate = java.time.LocalDate.parse(judgeDateStr).atStartOfDay();
+                    }
+                }
+
+                Number resultOptionIdRaw = (Number) marketMap.get("resultOptionId");
                 MarketInsightSummaryResponse.MarketInfo marketInfo = MarketInsightSummaryResponse.MarketInfo.builder()
                     .marketId(((Number) marketMap.get("marketId")).longValue())
                     .title((String) marketMap.get("title"))
                     .category((String) marketMap.get("category"))
-                    .status((String) marketMap.get("status"))
+                    .status(marketStatus)
                     .closeAt(LocalDateTime.parse((String) marketMap.get("closeAt")))
-                    .judgeDate(LocalDateTime.parse((String) marketMap.get("judgeDate")))
-                    .resultOptionId(((Number) marketMap.get("resultOptionId")).longValue())
+                    .judgeDate(judgeDate)
+                    .resultOptionId(resultOptionIdRaw != null ? resultOptionIdRaw.longValue() : null)
                     .totalPredictionCount(((Number) marketMap.get("totalPredictionCount")).intValue())
                     .totalPoolAmount(new BigDecimal((String) marketMap.get("totalPoolAmount")))
                     .build();
-                
+
                 // 옵션 통계 매핑
                 List<MarketInsightSummaryResponse.OptionStatistics> optionStatistics = new ArrayList<>();
                 for (java.util.Map<String, Object> optionMap : optionsList) {
@@ -88,19 +107,13 @@ public class MarketClient {
                         .isResult((Boolean) optionMap.get("isResult"))
                         .build());
                 }
-                
+
                 MarketInsightSummaryResponse result = MarketInsightSummaryResponse.builder()
                     .market(marketInfo)
                     .optionStatistics(optionStatistics)
                     .build();
-                
-                // Market 상태 확인
-                if (!"SETTLED".equals(marketInfo.getStatus())) {
-                    log.warn("Market이 아직 SETTLED 상태가 아님: marketId={}, status={}", marketId, marketInfo.getStatus());
-                    throw new CustomException(ErrorCode.INSIGHT_REPORT_SOURCE_DATA_NOT_READY);
-                }
-                
-                log.info("Market 요약 정보 조회 성공: marketId={}, status={}", marketId, marketInfo.getStatus());
+
+                log.info("Market 요약 정보 조회 성공: marketId={}, status={}", marketId, marketStatus);
                 return result;
             }
             
@@ -111,8 +124,12 @@ public class MarketClient {
             if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
                 log.warn("Market 없음: marketId={}", marketId);
                 throw new CustomException(ErrorCode.RESOURCE_NOT_FOUND);
+            } else if (e.getStatusCode() == HttpStatus.CONFLICT) {
+                // MARKET_INVALID_STATUS (SETTLED 아님) 또는 MARKET_NO_PREDICTIONS
+                log.warn("Market이 분석 가능한 상태가 아님: marketId={}, httpStatus={}", marketId, e.getStatusCode());
+                throw new CustomException(ErrorCode.INSIGHT_REPORT_SOURCE_DATA_NOT_READY);
             } else {
-                log.error("Market Service HTTP 오류: marketId={}, status={}, message={}", 
+                log.error("Market Service HTTP 오류: marketId={}, status={}, message={}",
                          marketId, e.getStatusCode(), e.getMessage());
                 throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
             }
@@ -120,7 +137,6 @@ public class MarketClient {
             log.error("Market Service 연결 오류: marketId={}, message={}", marketId, e.getMessage());
             throw new CustomException(ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE);
         } catch (CustomException e) {
-            // CustomException은 그대로 재전파
             throw e;
         } catch (Exception e) {
             log.error("Market Service 호출 중 예상치 못한 오류: marketId={}", marketId, e);

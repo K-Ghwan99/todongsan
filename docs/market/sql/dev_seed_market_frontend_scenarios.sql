@@ -16,6 +16,13 @@
 --
 -- Windows PowerShell:
 --   Get-Content .\docs\market\sql\dev_seed_market_frontend_scenarios.sql | docker exec -i todongsan-mysql mysql -uroot -p1234 market
+--
+-- ADD-ONLY POLICY:
+-- - This seed never deletes or updates existing Market data.
+-- - INSERT IGNORE preserves existing rows, including real local experiment Predictions.
+-- - This file is for adding test Markets, not cleanup or database initialization.
+-- - Do not partially delete Market data. Use the documented full MySQL volume
+--   reset procedure when a clean local database is required.
 
 USE market;
 
@@ -23,47 +30,7 @@ START TRANSACTION;
 
 SET @dev_member_id := 1;
 
--- Re-runnable cleanup for DEV seed ranges.
-DELETE FROM market_reputation_update
-WHERE id BETWEEN 960001 AND 960099
-   OR market_id BETWEEN 900001 AND 900099
-   OR prediction_id BETWEEN 920001 AND 920399;
-
-DELETE FROM market_refund_detail
-WHERE id BETWEEN 950001 AND 950199
-   OR prediction_id BETWEEN 920001 AND 920399
-   OR market_void_id BETWEEN 970001 AND 970099;
-
-DELETE FROM market_settlement_detail
-WHERE id BETWEEN 940001 AND 940199
-   OR prediction_id BETWEEN 920001 AND 920399
-   OR settlement_id BETWEEN 930001 AND 930099;
-
-DELETE FROM market_settlement
-WHERE id BETWEEN 930001 AND 930099
-   OR market_id BETWEEN 900001 AND 900099;
-
-DELETE FROM market_price_history
-WHERE id BETWEEN 925001 AND 925399
-   OR market_id BETWEEN 900001 AND 900099
-   OR prediction_id BETWEEN 920001 AND 920399;
-
-DELETE FROM market_void
-WHERE id BETWEEN 970001 AND 970099
-   OR market_id BETWEEN 900001 AND 900099;
-
-DELETE FROM market_prediction
-WHERE id BETWEEN 920001 AND 920399
-   OR market_id BETWEEN 900001 AND 900099;
-
-DELETE FROM market_option
-WHERE id BETWEEN 910001 AND 910299
-   OR market_id BETWEEN 900001 AND 900099;
-
-DELETE FROM market
-WHERE id BETWEEN 900001 AND 900099;
-
-INSERT INTO market (
+INSERT IGNORE INTO market (
     id, title, description, category, answer_type, metric_unit,
     judge_data_source, judge_criteria, judge_date, status,
     close_at, settle_due_at, settled_at, result_option_id, result_value, result_text,
@@ -127,7 +94,7 @@ INSERT INTO market (
      DATE_ADD(NOW(), INTERVAL 8 DAY), DATE_ADD(NOW(), INTERVAL 9 DAY), NULL, NULL, NULL, NULL,
      0.00, 5.00, 0.00, 0.00, 300.00, 'POOL_SHARE', 1, NULL, DATE_SUB(NOW(), INTERVAL 1 DAY), NOW());
 
-INSERT INTO market_option (
+INSERT IGNORE INTO market_option (
     id, market_id, option_code, option_text, display_order,
     range_min, range_max, min_inclusive, max_inclusive,
     virtual_pool_amount, real_pool_amount, total_contract_quantity,
@@ -164,7 +131,7 @@ INSERT INTO market_option (
     (910029, 900014, 'GTE_0_LT_0_3', '0.0% 이상 ~ 0.3% 미만', 2, 0.0000, 0.3000, TRUE, FALSE, 400.00, 0.00, 0.00000000, 0.40000000, 0, FALSE, DATE_SUB(NOW(), INTERVAL 1 DAY), NOW()),
     (910030, 900014, 'GTE_0_3', '0.3% 이상', 3, 0.3000, NULL, TRUE, FALSE, 300.00, 0.00, 0.00000000, 0.30000000, 0, FALSE, DATE_SUB(NOW(), INTERVAL 1 DAY), NOW());
 
-INSERT INTO market_prediction (
+INSERT IGNORE INTO market_prediction (
     id, market_id, option_id, member_id, point_amount,
     price_snapshot, contract_quantity, expected_payout_per_contract_snapshot, expected_multiplier_snapshot,
     status, point_spend_idempotency_key, attempt_no,
@@ -186,7 +153,7 @@ INSERT INTO market_prediction (
     (920014, 900011, 910021, @dev_member_id, 100.00, NULL, NULL, NULL, NULL, 'POINT_UNKNOWN', 'DEV_SEED_SPEND:market:900011:member:1:attempt:1', 1, NULL, NULL, 'MEMBER_POINT_TIMEOUT', DATE_SUB(NOW(), INTERVAL 3 DAY), NOW()),
     (920015, 900012, 910023, @dev_member_id, 100.00, NULL, NULL, NULL, NULL, 'FAILED', 'DEV_SEED_SPEND:market:900012:member:1:attempt:1', 1, NULL, NULL, 'POINT_INSUFFICIENT', DATE_SUB(NOW(), INTERVAL 2 DAY), NOW());
 
-INSERT INTO market_price_history (
+INSERT IGNORE INTO market_price_history (
     id, market_id, option_id, prediction_id, event_type,
     price_before, price_after, real_pool_before, real_pool_after,
     contract_quantity_before, contract_quantity_after, created_at, updated_at
@@ -196,14 +163,14 @@ INSERT INTO market_price_history (
     (925003, 900004, 910007, 920005, 'PREDICTION_CONFIRMED', 0.50000000, 0.66666667, 0.00, 100.00, 0.00000000, 200.00000000, DATE_SUB(NOW(), INTERVAL 10 DAY), DATE_SUB(NOW(), INTERVAL 10 DAY)),
     (925004, 900004, 910008, 920005, 'PREDICTION_CONFIRMED', 0.50000000, 0.33333333, 0.00, 0.00, 0.00000000, 0.00000000, DATE_SUB(NOW(), INTERVAL 10 DAY), DATE_SUB(NOW(), INTERVAL 10 DAY));
 
-INSERT INTO market_settlement (
+INSERT IGNORE INTO market_settlement (
     id, market_id, result_option_id, total_pool, fee_rate, fee_amount,
     settlement_pool, winning_contract_quantity, payout_per_contract,
     burned_point_amount, status, settled_by, settled_at, created_at, updated_at
 ) VALUES
     (930001, 900006, 910011, 200.00, 10.00, 20.00, 180.00, 200.00000000, 0.90000000, 0.00, 'COMPLETED', 1, DATE_SUB(NOW(), INTERVAL 2 DAY), DATE_SUB(NOW(), INTERVAL 2 DAY), DATE_SUB(NOW(), INTERVAL 2 DAY));
 
-INSERT INTO market_settlement_detail (
+INSERT IGNORE INTO market_settlement_detail (
     id, settlement_id, prediction_id, member_id,
     original_point_amount, contract_quantity, payout_per_contract,
     settled_amount, profit_amount, status, idempotency_key, fail_reason,
@@ -211,7 +178,7 @@ INSERT INTO market_settlement_detail (
 ) VALUES
     (940001, 930001, 920008, @dev_member_id, 100.00, 200.00000000, 0.90000000, 180.00, 80.00, 'SUCCESS', 'MARKET_SETTLEMENT_REWARD:market:900006:prediction:920008:member:1', NULL, DATE_SUB(NOW(), INTERVAL 2 DAY), DATE_SUB(NOW(), INTERVAL 2 DAY));
 
-INSERT INTO market_void (
+INSERT IGNORE INTO market_void (
     id, market_id, reason_type, reason_detail, refund_status,
     voided_by, voided_at, created_at, updated_at
 ) VALUES
@@ -219,7 +186,7 @@ INSERT INTO market_void (
     (970002, 900008, 'DATA_UNAVAILABLE', 'DEV seed: 환불 처리 중', 'IN_PROGRESS', 1, NOW(), NOW(), NOW()),
     (970003, 900009, 'DATA_UNAVAILABLE', 'DEV seed: 환불 확인 중', 'IN_PROGRESS', 1, NOW(), NOW(), NOW());
 
-INSERT INTO market_refund_detail (
+INSERT IGNORE INTO market_refund_detail (
     id, market_void_id, prediction_id, member_id,
     refund_amount, status, idempotency_key, fail_reason, created_at, updated_at
 ) VALUES
@@ -227,7 +194,7 @@ INSERT INTO market_refund_detail (
     (950002, 970002, 920011, @dev_member_id, 100.00, 'PENDING', 'MARKET_REFUND:market:900008:prediction:920011:member:1', NULL, NOW(), NOW()),
     (950003, 970003, 920012, @dev_member_id, 100.00, 'UNKNOWN', 'MARKET_REFUND:market:900009:prediction:920012:member:1', 'MEMBER_POINT_TIMEOUT', NOW(), NOW());
 
-INSERT INTO market_reputation_update (
+INSERT IGNORE INTO market_reputation_update (
     id, market_id, prediction_id, member_id, is_correct,
     status, attempt_no, last_error_code, last_error_message, created_at, updated_at
 ) VALUES

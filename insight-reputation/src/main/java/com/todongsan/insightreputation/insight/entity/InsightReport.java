@@ -99,12 +99,13 @@ public class InsightReport extends BaseEntity {
         this.processingStartedAt = LocalDateTime.now();
     }
 
-    public void complete(String summary) {
+    public void complete(String analysisResult) {
         if (this.status != InsightReportStatus.PROCESSING) {
             throw new IllegalStateException("PROCESSING 상태에서만 완료 가능: current=" + this.status);
         }
         this.status = InsightReportStatus.DONE;
-        this.summary = summary;
+        this.summary = analysisResult;
+        this.reportContent = analysisResult;
         this.generatedAt = LocalDateTime.now();
     }
 

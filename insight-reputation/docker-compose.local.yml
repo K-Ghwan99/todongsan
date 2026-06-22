@@ -9,7 +9,7 @@ services:
     ports:
       - "8083:8083"
     env_file:
-      - path: ..env.local
+      - path: .env.local
         required: false
     environment:
       SPRING_PROFILES_ACTIVE: docker

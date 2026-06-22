@@ -1,5 +1,9 @@
 package com.todongsan.insightreputation.insight.service;
 
+import com.todongsan.insightreputation.enums.InsightReportStatus;
+import com.todongsan.insightreputation.enums.InsightReportType;
+import com.todongsan.insightreputation.enums.PublicDataSource;
+import com.todongsan.insightreputation.enums.PublicDataType;
 import com.todongsan.insightreputation.global.client.BattleClient;
 import com.todongsan.insightreputation.global.client.BattleResponse;
 import com.todongsan.insightreputation.global.client.BattleVote;
@@ -15,19 +19,20 @@ import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
 import com.todongsan.insightreputation.insight.dto.InsightReportResponse;
 import com.todongsan.insightreputation.insight.dto.InsightReportStatusResponse;
 import com.todongsan.insightreputation.insight.entity.InsightReport;
-import com.todongsan.insightreputation.enums.InsightReportStatus;
-import com.todongsan.insightreputation.enums.InsightReportType;
 import com.todongsan.insightreputation.insight.repository.InsightReportRepository;
+import com.todongsan.insightreputation.publicdata.entity.PublicDataSnapshot;
+import com.todongsan.insightreputation.publicdata.repository.PublicDataSnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -36,11 +41,12 @@ import java.util.stream.Collectors;
 public class InsightReportService {
 
     private final InsightReportRepository insightReportRepository;
+    private final PublicDataSnapshotRepository publicDataSnapshotRepository;
     private final BattleClient battleClient;
     private final MarketClient marketClient;
     private final MemberPointClient memberPointClient;
     private final ClaudeApiClient claudeApiClient;
-    
+
     private static final int REPORT_COST = 80;
 
     /**
@@ -552,18 +558,13 @@ public class InsightReportService {
         }
         
         InsightReport report = reportOpt.get();
-        
-        // Market 리포트 조회는 완료된 리포트만 반환
-        if (report.getStatus() != InsightReportStatus.DONE) {
-            throw new CustomException(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
-        }
-        
+
         return InsightReportResponse.builder()
                 .reportId(report.getId())
                 .status(report.getStatus().name())
                 .reportContent(report.getReportContent())
                 .generatedAt(report.getGeneratedAt())
-                .pointCharged(0)  // 조회 시에는 차감 없음
+                .pointCharged(0)
                 .build();
     }
     
@@ -648,21 +649,39 @@ public class InsightReportService {
                     .map(MarketPredictionResponse::getMemberId)
                     .distinct()
                     .collect(Collectors.toList());
-            
+
             List<MemberInfoResponse> memberInfo = memberPointClient.getBatchMemberInfo(memberIds);
-            
-            // 4. AI 분석 프롬프트 생성
+
+            // 4. 공공데이터 조회 (최근 8주 주간 매매가격지수, 없으면 최근 3개월 월간)
+            List<PublicDataSnapshot> recentPriceData = Collections.emptyList();
+            try {
+                LocalDate today = LocalDate.now();
+                recentPriceData = publicDataSnapshotRepository.findRecentPriceData(
+                        PublicDataSource.REB, PublicDataType.WEEKLY_PRICE_INDEX,
+                        today.minusWeeks(8), today);
+                if (recentPriceData.isEmpty()) {
+                    recentPriceData = publicDataSnapshotRepository.findRecentPriceData(
+                            PublicDataSource.REB, PublicDataType.MONTHLY_PRICE_INDEX,
+                            today.minusMonths(3), today);
+                }
+                log.info("공공데이터 조회 완료: marketId={}, dataCount={}", marketId, recentPriceData.size());
+            } catch (Exception e) {
+                log.warn("공공데이터 조회 실패 (분석은 계속 진행): marketId={}", marketId, e);
+            }
+
+            // 5. AI 분석 프롬프트 생성
             String prompt = claudeApiClient.createMarketAnalysisPrompt(
                     marketInfo.getMarket().getTitle(),
                     marketInfo.getOptionStatistics(),
                     predictions,
-                    memberInfo
+                    memberInfo,
+                    recentPriceData
             );
-            
-            // 5. Claude API를 통한 분석 수행
+
+            // 6. Claude API를 통한 분석 수행
             String analysisResult = claudeApiClient.analyze(prompt);
-            
-            // 6. 분석 완료 처리
+
+            // 7. 분석 완료 처리
             completeAnalysis(reportId, analysisResult);
             
         } catch (Exception e) {
