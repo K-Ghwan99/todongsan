@@ -238,7 +238,7 @@ public interface MarketMapper {
 
     AdminTransactionStatusCountsRow selectSettlementDetailStatusCounts(@Param("settlementId") long settlementId);
 
-    List<MarketSettlementDetail> selectSettlementDetailsForAdmin(
+    List<AdminSettlementDetailRow> selectSettlementDetailsForAdmin(
             @Param("settlementId") long settlementId,
             @Param("status") TransactionItemStatus status,
             @Param("offset") int offset,
@@ -334,7 +334,7 @@ public interface MarketMapper {
 
     AdminTransactionStatusCountsRow selectRefundDetailStatusCounts(@Param("voidId") long voidId);
 
-    List<MarketRefundDetail> selectRefundDetailsForAdmin(
+    List<AdminRefundDetailRow> selectRefundDetailsForAdmin(
             @Param("voidId") long voidId,
             @Param("status") TransactionItemStatus status,
             @Param("offset") int offset,

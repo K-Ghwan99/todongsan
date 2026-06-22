@@ -10,14 +10,16 @@ import com.todongsan.marketservice.market.dto.response.AdminMarketRefundResponse
 import com.todongsan.marketservice.market.dto.response.AdminMarketSettlementDetailPageResponse;
 import com.todongsan.marketservice.market.dto.response.AdminMarketSettlementResponse;
 import com.todongsan.marketservice.market.dto.response.AdminMarketStatusCountsResponse;
+import com.todongsan.marketservice.market.dto.response.AdminRefundDetailResponse;
+import com.todongsan.marketservice.market.dto.response.AdminSettlementDetailResponse;
 import com.todongsan.marketservice.market.entity.Market;
 import com.todongsan.marketservice.market.entity.MarketOption;
-import com.todongsan.marketservice.market.entity.MarketRefundDetail;
 import com.todongsan.marketservice.market.entity.MarketSettlement;
-import com.todongsan.marketservice.market.entity.MarketSettlementDetail;
 import com.todongsan.marketservice.market.entity.MarketVoid;
 import com.todongsan.marketservice.market.repository.AdminMarketProblemRow;
 import com.todongsan.marketservice.market.repository.AdminMarketStatusCountsRow;
+import com.todongsan.marketservice.market.repository.AdminRefundDetailRow;
+import com.todongsan.marketservice.market.repository.AdminSettlementDetailRow;
 import com.todongsan.marketservice.market.repository.AdminTransactionStatusCountsRow;
 import com.todongsan.marketservice.market.repository.MarketMapper;
 import com.todongsan.marketservice.market.type.AdminMarketProblemStatus;
@@ -168,7 +170,7 @@ public class AdminMarketQueryService {
         }
         TransactionItemStatus status = transactionStatus(statusValue);
         long totalElements = marketMapper.countSettlementDetailsForAdmin(settlementId, status);
-        List<AdminMarketSettlementDetailPageResponse.Detail> content = marketMapper.selectSettlementDetailsForAdmin(
+        List<AdminSettlementDetailResponse> content = marketMapper.selectSettlementDetailsForAdmin(
                         settlementId,
                         status,
                         page * size,
@@ -230,7 +232,7 @@ public class AdminMarketQueryService {
         }
         TransactionItemStatus status = transactionStatus(statusValue);
         long totalElements = marketMapper.countRefundDetailsForAdmin(voidId, status);
-        List<AdminMarketRefundDetailPageResponse.Detail> content = marketMapper.selectRefundDetailsForAdmin(
+        List<AdminRefundDetailResponse> content = marketMapper.selectRefundDetailsForAdmin(
                         voidId,
                         status,
                         page * size,
@@ -385,35 +387,36 @@ public class AdminMarketQueryService {
         return AdminMarketProblemStatus.NEEDS_CHECK;
     }
 
-    private AdminMarketSettlementDetailPageResponse.Detail toSettlementDetail(MarketSettlementDetail detail) {
-        return new AdminMarketSettlementDetailPageResponse.Detail(
-                detail.getId(),
+    private AdminSettlementDetailResponse toSettlementDetail(AdminSettlementDetailRow detail) {
+        return new AdminSettlementDetailResponse(
+                detail.getSettlementDetailId(),
                 detail.getSettlementId(),
                 detail.getPredictionId(),
                 detail.getMemberId(),
-                detail.getStatus(),
-                detail.getOriginalPointAmount(),
+                detail.getSelectedOptionId(),
+                detail.getPointAmount(),
                 detail.getContractQuantity(),
-                detail.getPayoutPerContract(),
                 detail.getSettledAmount(),
                 detail.getProfitAmount(),
+                detail.getStatus(),
+                detail.getFailureReason(),
                 detail.getIdempotencyKey(),
-                detail.getFailReason(),
                 detail.getCreatedAt(),
                 detail.getUpdatedAt()
         );
     }
 
-    private AdminMarketRefundDetailPageResponse.Detail toRefundDetail(MarketRefundDetail detail) {
-        return new AdminMarketRefundDetailPageResponse.Detail(
-                detail.getId(),
-                detail.getMarketVoidId(),
+    private AdminRefundDetailResponse toRefundDetail(AdminRefundDetailRow detail) {
+        return new AdminRefundDetailResponse(
+                detail.getRefundDetailId(),
+                detail.getVoidId(),
                 detail.getPredictionId(),
                 detail.getMemberId(),
-                detail.getStatus(),
+                detail.getPointAmount(),
                 detail.getRefundAmount(),
+                detail.getStatus(),
+                detail.getFailureReason(),
                 detail.getIdempotencyKey(),
-                detail.getFailReason(),
                 detail.getCreatedAt(),
                 detail.getUpdatedAt()
         );

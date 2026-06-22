@@ -1324,14 +1324,29 @@
     </select>
 
     <select id="selectSettlementDetailsForAdmin"
-            resultType="com.todongsan.marketservice.market.entity.MarketSettlementDetail">
-        SELECT *
-        FROM market_settlement_detail
-        WHERE settlement_id = #{settlementId}
+            resultType="com.todongsan.marketservice.market.repository.AdminSettlementDetailRow">
+        SELECT
+            msd.id AS settlement_detail_id,
+            msd.settlement_id,
+            msd.prediction_id,
+            msd.member_id,
+            mp.option_id AS selected_option_id,
+            msd.original_point_amount AS point_amount,
+            msd.contract_quantity,
+            msd.settled_amount,
+            msd.profit_amount,
+            msd.status,
+            msd.fail_reason AS failure_reason,
+            msd.idempotency_key,
+            msd.created_at,
+            msd.updated_at
+        FROM market_settlement_detail msd
+        JOIN market_prediction mp ON mp.id = msd.prediction_id
+        WHERE msd.settlement_id = #{settlementId}
         <if test="status != null">
-            AND status = #{status}
+            AND msd.status = #{status}
         </if>
-        ORDER BY id ASC
+        ORDER BY msd.id ASC
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
@@ -1374,14 +1389,26 @@
     </select>
 
     <select id="selectRefundDetailsForAdmin"
-            resultType="com.todongsan.marketservice.market.entity.MarketRefundDetail">
-        SELECT *
-        FROM market_refund_detail
-        WHERE market_void_id = #{voidId}
+            resultType="com.todongsan.marketservice.market.repository.AdminRefundDetailRow">
+        SELECT
+            mrd.id AS refund_detail_id,
+            mrd.market_void_id AS void_id,
+            mrd.prediction_id,
+            mrd.member_id,
+            mp.point_amount,
+            mrd.refund_amount,
+            mrd.status,
+            mrd.fail_reason AS failure_reason,
+            mrd.idempotency_key,
+            mrd.created_at,
+            mrd.updated_at
+        FROM market_refund_detail mrd
+        JOIN market_prediction mp ON mp.id = mrd.prediction_id
+        WHERE mrd.market_void_id = #{voidId}
         <if test="status != null">
-            AND status = #{status}
+            AND mrd.status = #{status}
         </if>
-        ORDER BY id ASC
+        ORDER BY mrd.id ASC
         LIMIT #{limit} OFFSET #{offset}
     </select>
 

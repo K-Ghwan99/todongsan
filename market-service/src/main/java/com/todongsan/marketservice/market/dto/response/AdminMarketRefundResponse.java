@@ -5,6 +5,7 @@ import com.todongsan.marketservice.global.serializer.BigDecimalPlainStringSerial
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.MarketVoidReasonType;
 import com.todongsan.marketservice.market.type.RefundStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -17,6 +18,7 @@ public record AdminMarketRefundResponse(
         String reasonDetail,
         RefundStatus refundStatus,
         boolean refundRequired,
+        @Schema(type = "string", example = "200.00")
         @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal totalRefundAmount,
         long totalDetailCount,
         long successCount,

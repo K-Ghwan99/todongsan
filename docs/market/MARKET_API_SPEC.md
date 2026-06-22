@@ -3107,6 +3107,24 @@ GET /api/v1/admin/markets/{marketId}/settlements/{settlementId}/details?page=0&s
 
 정산 row가 없으면 성공 상태의 빈 요약을 반환한다. detail의 `status`는 `PENDING`, `SUCCESS`, `FAILED`, `UNKNOWN`을 지원한다. `settlementId`가 Market에 속하지 않으면 `MARKET_INVALID_SETTLEMENT_DATA`를 반환한다. Decimal 값은 JSON String이다.
 
+정산 detail은 `AdminSettlementDetailResponse`로 반환한다.
+
+| 필드 | 설명 |
+|---|---|
+| `settlementDetailId` | 정산 detail ID |
+| `settlementId` | 정산 ID |
+| `predictionId` | 예측 참여 ID |
+| `memberId` | 회원 ID |
+| `selectedOptionId` | 참여자가 선택한 option ID |
+| `pointAmount` | 정산 당시 Prediction 원금 스냅샷. `market_settlement_detail.original_point_amount` 기준 Decimal String |
+| `contractQuantity` | 확정 계약 수량. Decimal String |
+| `settledAmount` | 실제 정산 지급액. Decimal String |
+| `profitAmount` | 실제 손익. Decimal String |
+| `status` | `PENDING`, `SUCCESS`, `FAILED`, `UNKNOWN` |
+| `failureReason` | 실패 또는 불명확 사유 |
+| `idempotencyKey` | 정산 item 멱등성 키 |
+| `createdAt`, `updatedAt` | 생성·수정 시각 |
+
 ### 환불 조회
 
 ```http
@@ -3115,6 +3133,21 @@ GET /api/v1/admin/markets/{marketId}/refunds/{voidId}/details?page=0&size=50&sta
 ```
 
 void row가 없으면 성공 상태의 빈 요약을 반환한다. `refundRequired`는 VOIDED Market에서 미완료 detail이 있거나, detail 생성 전 CONFIRMED 환불 대상이 남아 있을 때 `true`다. detail status와 Decimal 정책은 정산 조회와 같다.
+
+환불 detail은 `AdminRefundDetailResponse`로 반환하며 정산 전용 필드를 포함하지 않는다.
+
+| 필드 | 설명 |
+|---|---|
+| `refundDetailId` | 환불 detail ID |
+| `voidId` | 무효 처리 ID |
+| `predictionId` | 예측 참여 ID |
+| `memberId` | 회원 ID |
+| `pointAmount` | 참여 포인트. Decimal String |
+| `refundAmount` | 환불 금액. Decimal String |
+| `status` | `PENDING`, `SUCCESS`, `FAILED`, `UNKNOWN` |
+| `failureReason` | 실패 또는 불명확 사유 |
+| `idempotencyKey` | 환불 item 멱등성 키 |
+| `createdAt`, `updatedAt` | 생성·수정 시각 |
 
 ### 상태별 카운트
 
