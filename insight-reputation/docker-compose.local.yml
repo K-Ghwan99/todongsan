@@ -16,11 +16,8 @@ services:
       DB_URL: jdbc:mysql://todongsan-mysql:3306/insight?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
       DB_USERNAME: root
       DB_PASSWORD: 1234
-      REB_API_KEY: replace-me
-      REB_API_BASE_URL: replace-me
-      CLAUDE_API_KEY: replace-me
-      CLAUDE_API_URL: replace-me
-      CLAUDE_MODEL: replace-me
+      # REB_API_KEY, REB_API_BASE_URL — .env.local 에서 주입
+      # CLAUDE_API_KEY, CLAUDE_API_URL, CLAUDE_MODEL — .env.local 에서 주입
       BATTLE_SERVICE_BASE_URL: http://battle-service:8081
       MEMBER_POINT_SERVICE_BASE_URL: http://member-point-service:8080
       MARKET_SERVICE_BASE_URL: http://market-service:8082

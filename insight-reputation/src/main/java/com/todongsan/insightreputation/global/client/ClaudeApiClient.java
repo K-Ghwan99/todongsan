@@ -3,8 +3,8 @@ package com.todongsan.insightreputation.global.client;
 import com.todongsan.insightreputation.global.exception.CustomException;
 import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
 import com.todongsan.insightreputation.publicdata.entity.PublicDataSnapshot;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -27,10 +27,13 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class ClaudeApiClient {
 
     private final RestTemplate restTemplate;
+
+    public ClaudeApiClient(@Qualifier("claudeRestTemplate") RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     @Value("${claude.api.key:}")
     private String apiKey;
@@ -41,18 +44,45 @@ public class ClaudeApiClient {
     @Value("${claude.api.model:claude-sonnet-4-20250514}")
     private String model;
 
-    public String analyze(String prompt) {
+    /**
+     * 참여 인원 수에 따라 max_tokens를 동적으로 결정한다.
+     * 인원이 많을수록 분석할 분포 데이터가 풍부하므로 더 상세한 리포트를 허용한다.
+     */
+    public int calculateMaxTokens(int participantCount) {
+        if (participantCount < 20)  return 1500;
+        if (participantCount < 100) return 2500;
+        if (participantCount < 500) return 4000;
+        return 6000;
+    }
+
+    /**
+     * max_tokens 기준으로 프롬프트에 삽입할 [분량 지침] 문자열을 생성한다.
+     * 한국어 혼합 텍스트는 1토큰 ≈ 1.5~2자이므로 0.55 계수로 목표 글자수를 역산한다.
+     * 목표치를 max_tokens의 55% 이내로 설정해 항상 여유 버퍼를 유지, 중간 절단을 방지한다.
+     */
+    private String buildLengthGuide(int maxTokens) {
+        int maxChars = (int) (maxTokens * 0.55);
+        int minChars = (int) (maxChars * 0.85);
+        return String.format(
+            "[분량 지침 — 반드시 준수]\n" +
+            "- content 섹션 전체를 최소 %d자, 최대 %d자로 작성하세요.\n" +
+            "- 모든 ## 섹션을 빠짐없이 작성하고 각 섹션을 충분히 상세하게 서술하여 분량을 채우세요.\n" +
+            "- 반드시 '## 종합 결론' 섹션으로 마무리하세요. 문장 중간에 절대 끊기지 마세요.\n",
+            minChars, maxChars);
+    }
+
+    public String analyze(String prompt, int maxTokens) {
         if (apiKey == null || apiKey.trim().isEmpty()) {
             log.warn("Claude API key가 설정되지 않음. 목업 응답 반환");
             return generateMockAnalysis();
         }
 
         try {
-            log.info("Claude API 호출 시작: promptLength={}", prompt.length());
+            log.info("Claude API 호출 시작: promptLength={}, maxTokens={}", prompt.length(), maxTokens);
 
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("model", model);
-            requestBody.put("max_tokens", 4000);
+            requestBody.put("max_tokens", maxTokens);
             requestBody.put("temperature", 0.1);
 
             List<Map<String, Object>> messages = new ArrayList<>();
@@ -156,9 +186,11 @@ public class ClaudeApiClient {
      * Battle 분석용 프롬프트 생성
      * - memberInfo를 Java에서 집계하여 Claude에게 완성된 수치 데이터 전달
      * - few-shot 예시 포함으로 출력 형식 및 분량 유도
+     * - maxTokens 기반 [분량 지침]을 삽입하여 Claude가 토큰을 꽉 채우도록 유도
      */
     public String createBattleAnalysisPrompt(String battleTitle, String optionA, String optionB,
-                                           List<BattleVote> votes, List<MemberInfoResponse> memberInfo) {
+                                           List<BattleVote> votes, List<MemberInfoResponse> memberInfo,
+                                           int maxTokens) {
         long totalVotes = votes.size();
         long optionACount = votes.stream().filter(v -> "A".equals(v.getSelectedOption())).count();
         long optionBCount = votes.stream().filter(v -> "B".equals(v.getSelectedOption())).count();
@@ -219,6 +251,7 @@ public class ClaudeApiClient {
         prompt.append("  ## 종합 결론\n");
         prompt.append("  강남·마포 선호는 연령·거주지에 따라 뚜렷하게 갈립니다. 운영팀 제안: 연령대별 세분화 배틀 기획, '교육·교통·상권' 세부 요인별 배틀로 콘텐츠를 확장하면 더 정밀한 수요 분석이 가능합니다.\n");
         prompt.append("---\n\n");
+        prompt.append(buildLengthGuide(maxTokens)).append("\n");
         prompt.append("이제 아래 실제 데이터를 분석하세요.\n\n");
 
         prompt.append("입력:\n");
@@ -299,13 +332,14 @@ public class ClaudeApiClient {
     /**
      * Market 분석용 프롬프트 생성
      * - memberInfo를 Java에서 집계하여 Claude에게 완성된 수치 데이터 전달
-     * - recentPublicData: 한국부동산원 최근 매매가격지수 (없으면 빈 리스트)
+     * - maxTokens 기반 [분량 지침]을 삽입하여 Claude가 토큰을 꽉 채우도록 유도
      * - few-shot 예시 포함으로 출력 형식 및 분량 유도
      */
     public String createMarketAnalysisPrompt(String marketTitle,
                                            List<MarketInsightSummaryResponse.OptionStatistics> options,
                                            List<MarketPredictionResponse> predictions,
                                            List<MemberInfoResponse> memberInfo,
+                                           int maxTokens,
                                            List<PublicDataSnapshot> recentPublicData) {
         int totalPredictions = predictions.size();
 
@@ -369,6 +403,7 @@ public class ClaudeApiClient {
         prompt.append("  참여자 다수(65.7%)의 판단과 일치하는 완만한 상승(0~5%)이 기준 시나리오입니다. ");
         prompt.append("금리 정책 변화는 단기 변동성을 유발할 수 있으므로 6개월 단위 재평가가 권장됩니다.\n");
         prompt.append("---\n\n");
+        prompt.append(buildLengthGuide(maxTokens)).append("\n");
         prompt.append("이제 아래 실제 데이터를 분석하세요.\n\n");
 
         prompt.append("입력:\n");
@@ -439,40 +474,6 @@ public class ClaudeApiClient {
             }
         }
 
-        if (recentPublicData != null && !recentPublicData.isEmpty()) {
-            appendPublicDataSection(prompt, recentPublicData);
-        }
-
         return prompt.toString();
-    }
-
-    private void appendPublicDataSection(StringBuilder prompt, List<PublicDataSnapshot> snapshots) {
-        DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-
-        // 날짜별 → 지역별 지수 정리
-        Map<String, Map<String, String>> byDate = new TreeMap<>(Collections.reverseOrder());
-        for (PublicDataSnapshot s : snapshots) {
-            if (s.getNumericValue() == null) continue;
-            String date = s.getReferenceDate().format(dateFmt);
-            String region = s.getRegionSido() != null ? s.getRegionSido() : "전국";
-            byDate.computeIfAbsent(date, k -> new LinkedHashMap<>())
-                  .put(region, s.getNumericValue().toPlainString());
-        }
-
-        if (byDate.isEmpty()) return;
-
-        String dataTypeName = snapshots.get(0).getDataType().name().contains("WEEKLY") ? "주간" : "월간";
-        prompt.append("- 한국부동산원 아파트 매매가격지수 (").append(dataTypeName).append(", 최근 수집분):\n");
-
-        int dateCount = 0;
-        for (Map.Entry<String, Map<String, String>> dateEntry : byDate.entrySet()) {
-            if (dateCount++ >= 4) break;
-            prompt.append("  [").append(dateEntry.getKey()).append("] ");
-            String regionLine = dateEntry.getValue().entrySet().stream()
-                    .limit(6)
-                    .map(e -> e.getKey() + " " + e.getValue())
-                    .collect(Collectors.joining(", "));
-            prompt.append(regionLine).append("\n");
-        }
     }
 }

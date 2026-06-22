@@ -2,8 +2,6 @@ package com.todongsan.insightreputation.insight.service;
 
 import com.todongsan.insightreputation.enums.InsightReportStatus;
 import com.todongsan.insightreputation.enums.InsightReportType;
-import com.todongsan.insightreputation.enums.PublicDataSource;
-import com.todongsan.insightreputation.enums.PublicDataType;
 import com.todongsan.insightreputation.global.client.BattleClient;
 import com.todongsan.insightreputation.global.client.BattleResponse;
 import com.todongsan.insightreputation.global.client.BattleVote;
@@ -20,6 +18,8 @@ import com.todongsan.insightreputation.insight.dto.InsightReportResponse;
 import com.todongsan.insightreputation.insight.dto.InsightReportStatusResponse;
 import com.todongsan.insightreputation.insight.entity.InsightReport;
 import com.todongsan.insightreputation.insight.repository.InsightReportRepository;
+import com.todongsan.insightreputation.enums.PublicDataSource;
+import com.todongsan.insightreputation.enums.PublicDataType;
 import com.todongsan.insightreputation.publicdata.entity.PublicDataSnapshot;
 import com.todongsan.insightreputation.publicdata.repository.PublicDataSnapshotRepository;
 import lombok.RequiredArgsConstructor;
@@ -361,17 +361,22 @@ public class InsightReportService {
             
             List<MemberInfoResponse> memberInfo = memberPointClient.getBatchMemberInfo(memberIds);
             
-            // 4. AI 분석 프롬프트 생성
+            // 4. 참여 인원 기반 max_tokens 계산 후 프롬프트 생성
+            int totalVotes = votesData.getVotes().size();
+            int maxTokens = claudeApiClient.calculateMaxTokens(totalVotes);
+            log.info("Battle AI 분석 토큰 할당: battleId={}, totalVotes={}, maxTokens={}", battleId, totalVotes, maxTokens);
+
             String prompt = claudeApiClient.createBattleAnalysisPrompt(
                     battleInfo.getTitle(),
                     battleInfo.getOptionA(),
                     battleInfo.getOptionB(),
                     votesData.getVotes(),
-                    memberInfo
+                    memberInfo,
+                    maxTokens
             );
-            
+
             // 5. Claude API를 통한 분석 수행
-            String analysisResult = claudeApiClient.analyze(prompt);
+            String analysisResult = claudeApiClient.analyze(prompt, maxTokens);
             
             // 6. 분석 완료 처리
             completeAnalysis(reportId, analysisResult);
@@ -669,17 +674,22 @@ public class InsightReportService {
                 log.warn("공공데이터 조회 실패 (분석은 계속 진행): marketId={}", marketId, e);
             }
 
-            // 5. AI 분석 프롬프트 생성
+            // 5. 참여 인원 기반 max_tokens 계산 후 프롬프트 생성
+            int totalPredictions = predictions.size();
+            int maxTokens = claudeApiClient.calculateMaxTokens(totalPredictions);
+            log.info("Market AI 분석 토큰 할당: marketId={}, totalPredictions={}, maxTokens={}", marketId, totalPredictions, maxTokens);
+
             String prompt = claudeApiClient.createMarketAnalysisPrompt(
                     marketInfo.getMarket().getTitle(),
                     marketInfo.getOptionStatistics(),
                     predictions,
                     memberInfo,
+                    maxTokens,
                     recentPriceData
             );
 
             // 6. Claude API를 통한 분석 수행
-            String analysisResult = claudeApiClient.analyze(prompt);
+            String analysisResult = claudeApiClient.analyze(prompt, maxTokens);
 
             // 7. 분석 완료 처리
             completeAnalysis(reportId, analysisResult);
