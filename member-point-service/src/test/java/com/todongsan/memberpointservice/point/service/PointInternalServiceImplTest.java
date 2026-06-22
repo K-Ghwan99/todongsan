@@ -156,6 +156,37 @@ class PointInternalServiceImplTest {
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.POINT_INVALID_REFERENCE_TYPE);
     }
 
+    @Test
+    void earn_referenceType_null이면_허용() {
+        Member member = createMember();
+        EarnRequest request = mock(EarnRequest.class);
+        when(request.getMemberId()).thenReturn(MEMBER_ID);
+        when(request.getType()).thenReturn(TYPE);
+        when(request.getAmount()).thenReturn(AMOUNT);
+        when(request.getReferenceType()).thenReturn(null);
+        when(pointHistoryRepository.findByIdempotencyKey(KEY)).thenReturn(Optional.empty());
+        when(memberRepository.findByIdAndDeletedAtIsNull(MEMBER_ID)).thenReturn(Optional.of(member));
+        when(memberRepository.earnPoint(eq(MEMBER_ID), any())).thenReturn(1);
+
+        PointResult<EarnResponse> result = pointInternalServiceImpl.earn(KEY, request);
+
+        assertThat(result.alreadyProcessed()).isFalse();
+        assertThat(result.data().getMemberId()).isEqualTo(MEMBER_ID);
+    }
+
+    @Test
+    void earn_type_null이면_VALIDATION_FAILED() {
+        EarnRequest request = mock(EarnRequest.class);
+        when(request.getAmount()).thenReturn(AMOUNT);
+        when(request.getReferenceType()).thenReturn(REF_TYPE);
+        when(request.getType()).thenReturn(null);
+        when(pointHistoryRepository.findByIdempotencyKey(KEY)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> pointInternalServiceImpl.earn(KEY, request))
+                .isInstanceOf(CustomException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.VALIDATION_FAILED);
+    }
+
     // ─── spend ────────────────────────────────────────────────
 
     private SpendRequest createSpendRequest() {
@@ -273,6 +304,37 @@ class PointInternalServiceImplTest {
         assertThatThrownBy(() -> pointInternalServiceImpl.spend(KEY, request))
                 .isInstanceOf(CustomException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.POINT_INVALID_AMOUNT);
+    }
+
+    @Test
+    void spend_referenceType_null이면_허용() {
+        Member member = createMember();
+        SpendRequest request = mock(SpendRequest.class);
+        when(request.getMemberId()).thenReturn(MEMBER_ID);
+        when(request.getType()).thenReturn("SPEND_MARKET");
+        when(request.getAmount()).thenReturn(AMOUNT);
+        when(request.getReferenceType()).thenReturn(null);
+        when(pointHistoryRepository.findByIdempotencyKey(KEY)).thenReturn(Optional.empty());
+        when(memberRepository.findByIdAndDeletedAtIsNull(MEMBER_ID)).thenReturn(Optional.of(member));
+        when(memberRepository.spendPoint(eq(MEMBER_ID), any())).thenReturn(1);
+
+        PointResult<SpendResponse> result = pointInternalServiceImpl.spend(KEY, request);
+
+        assertThat(result.alreadyProcessed()).isFalse();
+        assertThat(result.data().getMemberId()).isEqualTo(MEMBER_ID);
+    }
+
+    @Test
+    void spend_type_null이면_VALIDATION_FAILED() {
+        SpendRequest request = mock(SpendRequest.class);
+        when(request.getAmount()).thenReturn(AMOUNT);
+        when(request.getReferenceType()).thenReturn(REF_TYPE);
+        when(request.getType()).thenReturn(null);
+        when(pointHistoryRepository.findByIdempotencyKey(KEY)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> pointInternalServiceImpl.spend(KEY, request))
+                .isInstanceOf(CustomException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.VALIDATION_FAILED);
     }
 
     @Test

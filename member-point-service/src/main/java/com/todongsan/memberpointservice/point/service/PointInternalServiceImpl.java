@@ -163,6 +163,9 @@ public class PointInternalServiceImpl implements PointInternalService {
     }
 
     private PointReferenceType parseReferenceType(String referenceType) {
+        if (referenceType == null || referenceType.isBlank()) {
+            return null;
+        }
         try {
             return PointReferenceType.valueOf(referenceType);
         } catch (IllegalArgumentException e) {
@@ -171,6 +174,9 @@ public class PointInternalServiceImpl implements PointInternalService {
     }
 
     private PointHistoryType parseHistoryType(String type) {
+        if (type == null || type.isBlank()) {
+            throw new CustomException(ErrorCode.VALIDATION_FAILED);
+        }
         try {
             return PointHistoryType.valueOf(type);
         } catch (IllegalArgumentException e) {
@@ -311,17 +317,19 @@ public class PointInternalServiceImpl implements PointInternalService {
                     .build();
         }
 
-        PointReferenceType refType;
-        try {
-            refType = PointReferenceType.valueOf(referenceType);
-        } catch (IllegalArgumentException e) {
-            return BatchItemResult.builder()
-                    .predictionId(predictionId)
-                    .memberId(memberId)
-                    .status("FAILED")
-                    .errorCode(ErrorCode.POINT_INVALID_REFERENCE_TYPE.getCode())
-                    .amount(amount.toPlainString())
-                    .build();
+        PointReferenceType refType = null;
+        if (referenceType != null && !referenceType.isBlank()) {
+            try {
+                refType = PointReferenceType.valueOf(referenceType);
+            } catch (IllegalArgumentException e) {
+                return BatchItemResult.builder()
+                        .predictionId(predictionId)
+                        .memberId(memberId)
+                        .status("FAILED")
+                        .errorCode(ErrorCode.POINT_INVALID_REFERENCE_TYPE.getCode())
+                        .amount(amount.toPlainString())
+                        .build();
+            }
         }
 
         Optional<Member> memberOpt = memberRepository.findById(memberId);

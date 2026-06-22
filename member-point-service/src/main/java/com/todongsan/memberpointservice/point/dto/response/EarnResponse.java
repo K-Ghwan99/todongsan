@@ -17,7 +17,7 @@ public class EarnResponse {
         this.memberId = history.getMemberId();
         this.type = history.getType().name();
         this.amount = history.getAmount().toPlainString();
-        this.referenceType = history.getReferenceType().name();
+        this.referenceType = history.getReferenceType() != null ? history.getReferenceType().name() : null;
         this.referenceId = history.getReferenceId();
         this.balanceSnapshot = history.getBalanceSnapshot().toPlainString();
     }
