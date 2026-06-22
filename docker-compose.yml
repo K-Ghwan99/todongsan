@@ -12,6 +12,7 @@ services:
       - path: ./.env
         required: false
     environment:
+      TZ: Asia/Seoul
       JWT_SECRET: ${JWT_SECRET:-local-jwt-secret-change-me-32chars}
       MEMBER_POINT_SERVICE_URL: http://member-point-service:8080
       BATTLE_SERVICE_URL: http://battle-service:8081
@@ -38,6 +39,7 @@ services:
       - path: ./.env
         required: false
     environment:
+      TZ: Asia/Seoul
       DB_URL: jdbc:mysql://todongsan-mysql:3306/${DB_MEMBERPOINT:-memberpoint}?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
       DB_USERNAME: ${DB_USERNAME:-root}
       DB_PASSWORD: ${DB_PASSWORD:-1234}
@@ -60,6 +62,7 @@ services:
       - path: ./.env
         required: false
     environment:
+      TZ: Asia/Seoul
       SERVER_PORT: 8081
       SPRING_PROFILES_ACTIVE: default
       DB_HOST: todongsan-mysql
@@ -118,6 +121,7 @@ services:
       - path: ./.env
         required: false
     environment:
+      TZ: Asia/Seoul
       SPRING_PROFILES_ACTIVE: docker
       DB_URL: jdbc:mysql://todongsan-mysql:3306/${DB_INSIGHT:-insight}?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
       DB_USERNAME: ${DB_USERNAME:-root}

@@ -7,6 +7,7 @@ services:
     container_name: member-point-service
     restart: unless-stopped
     environment:
+      TZ: Asia/Seoul
       DB_URL: jdbc:mysql://todongsan-mysql:3306/memberpoint?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
       DB_USERNAME: root
       DB_PASSWORD: 1234
