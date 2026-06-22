@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS market_price_history;
+DROP TABLE IF EXISTS market_comment;
 DROP TABLE IF EXISTS market_reputation_update;
 DROP TABLE IF EXISTS market_refund_detail;
 DROP TABLE IF EXISTS market_void;
@@ -37,6 +38,23 @@ CREATE TABLE market (
     updated_at DATETIME NOT NULL,
     PRIMARY KEY (id)
 );
+
+CREATE TABLE market_comment (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    market_id BIGINT NOT NULL,
+    member_id BIGINT NOT NULL,
+    content TEXT NOT NULL,
+    deleted_at DATETIME,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT fk_market_comment_market
+        FOREIGN KEY (market_id)
+        REFERENCES market(id)
+);
+
+CREATE INDEX idx_market_comment_list
+    ON market_comment (market_id, deleted_at, created_at, id);
 
 CREATE TABLE market_option (
     id BIGINT NOT NULL AUTO_INCREMENT,

@@ -1841,7 +1841,133 @@ history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
 ---
 
 
-## 15. 관리자 확인 대상
+## 15. Market 댓글 실패 시나리오
+
+댓글 작성/삭제 실패는 Market 생명주기, Prediction, MarketSettlement, MarketRefund, MarketReputationUpdate 상태에 영향을 주지 않는다. 댓글 처리에는 Member-Point 호출, 포인트 처리, retry queue, Idempotency-Key가 없으므로 `POINT_UNKNOWN` 같은 상태도 사용하지 않는다.
+
+### 15-1. 본문 null 또는 blank
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 댓글 작성 요청 validation |
+| 실패 원인 | `content`가 null이거나 trim 후 빈 문자열 |
+| 상태 변화 | 댓글 row 생성 없음. 다른 상태 변화 없음 |
+| 재시도 | 입력을 수정한 새 요청만 가능 |
+| 복구 | 클라이언트에서 공백이 아닌 본문을 입력 |
+| 관련 ErrorCode | `VALIDATION_FAILED` |
+| HTTP Status | 400 |
+
+### 15-2. 본문 500자 초과
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 댓글 작성 요청 validation |
+| 실패 원인 | `content`가 500자를 초과함 |
+| 상태 변화 | 댓글 row 생성 없음. 다른 상태 변화 없음 |
+| 재시도 | 본문을 줄인 새 요청만 가능 |
+| 복구 | 500자 이하로 수정 |
+| 관련 ErrorCode | `MARKET_COMMENT_TOO_LONG` |
+| HTTP Status | 400 |
+
+### 15-3. PENDING Market 댓글 작성
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Market 조회와 상태 검증 |
+| 실패 원인 | 아직 공개 전인 `PENDING` Market |
+| 상태 변화 | 댓글 row 생성 없음. Market 상태 변화 없음 |
+| 재시도 | Market 활성화 후 가능 |
+| 복구 | 상태가 허용 상태로 변경될 때까지 작성 UI 비활성화 |
+| 관련 ErrorCode | `MARKET_COMMENT_NOT_ALLOWED` |
+| HTTP Status | 409 |
+
+### 15-4. VOIDED Market 댓글 작성
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Market 조회와 상태 검증 |
+| 실패 원인 | 무효 처리된 `VOIDED` Market |
+| 상태 변화 | 댓글 row 생성 없음. Market/환불 상태 변화 없음 |
+| 재시도 | X |
+| 복구 | 읽기 전용 안내를 표시하고 작성 UI 숨김 |
+| 관련 ErrorCode | `MARKET_COMMENT_NOT_ALLOWED` |
+| HTTP Status | 409 |
+
+### 15-5. 존재하지 않거나 삭제된 Market의 댓글 작성·조회
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 댓글 작성 또는 목록 조회 전 Market 검증 |
+| 실패 원인 | `marketId`가 없거나 Market이 soft delete됨 |
+| 상태 변화 | 없음 |
+| 재시도 | X |
+| 복구 | 유효한 Market 상세로 이동 |
+| 관련 ErrorCode | `MARKET_NOT_FOUND` |
+| HTTP Status | 404 |
+
+### 15-6. 없거나 삭제되었거나 Market이 불일치하는 댓글 삭제
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 댓글 삭제 대상 조회 |
+| 실패 원인 | `commentId` 없음, `deleted_at` 존재, 또는 path의 `marketId`와 댓글 소속 불일치 |
+| 상태 변화 | 없음 |
+| 재시도 | X |
+| 복구 | 현재 댓글 목록을 다시 조회 |
+| 관련 ErrorCode | `MARKET_COMMENT_NOT_FOUND` |
+| HTTP Status | 404 |
+
+### 15-7. 다른 회원의 댓글 삭제
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 댓글 소유자 검증 |
+| 실패 원인 | `X-Member-Id`와 `market_comment.member_id`가 다름 |
+| 상태 변화 | `deleted_at` 변경 없음 |
+| 재시도 | X |
+| 복구 | 삭제 버튼을 본인 댓글에만 노출 |
+| 관련 ErrorCode | `MARKET_COMMENT_FORBIDDEN` |
+| HTTP Status | 403 |
+
+### 15-8. 동일 댓글 중복 삭제
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | 동일한 댓글에 삭제 요청이 두 번 이상 도착 |
+| 실패 원인 | 첫 요청이 이미 `deleted_at`을 기록함 |
+| 상태 변화 | 첫 요청만 `deleted_at` 기록. 후속 요청은 상태 변화 및 물리 삭제 없음 |
+| 재시도 | 첫 요청 성공 후 X |
+| 복구 | 후속 요청은 목록을 다시 조회하여 삭제 상태 반영 |
+| 관련 ErrorCode | 첫 요청 없음, 후속 요청 `MARKET_COMMENT_NOT_FOUND` |
+| HTTP Status | 첫 요청 200, 후속 요청 404 |
+
+### 15-9. 댓글 작성/삭제 요청에 X-Member-Id 없음
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | `POST /api/v1/markets/{marketId}/comments` 또는 `DELETE /api/v1/markets/{marketId}/comments/{commentId}` |
+| 실패 원인 | Gateway/JWT가 주입해야 하는 `X-Member-Id` 헤더가 없음 |
+| 상태 변화 | `market_comment` 생성 없음, `deleted_at` 변경 없음, Market/Prediction 상태 변경 없음, Member-Point 호출 없음 |
+| 재시도 | 인증된 요청으로 재시도 가능 |
+| 복구 | 로그인 후 또는 Gateway 인증 통과 후 재요청 |
+| 관련 ErrorCode | `UNAUTHORIZED` |
+| HTTP Status | 401 |
+
+### 15-10. 댓글 목록 조회 page/size validation 실패
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | `GET /api/v1/markets/{marketId}/comments?page={page}&size={size}` |
+| 실패 원인 | page가 음수이거나 size가 허용 범위를 벗어나거나 page/size 타입이 잘못됨 |
+| 상태 변화 | 없음 |
+| 재시도 | 올바른 page/size로 재요청 가능 |
+| 복구 | 프론트 기본값 `page=0`, `size=10`을 사용하고 임의 URL의 잘못된 값은 기본 목록으로 복귀 |
+| 관련 ErrorCode | `VALIDATION_FAILED` |
+| HTTP Status | 400 |
+
+---
+
+## 16. 관리자 확인 대상
 
 | 상황 | 상태 |
 |---|---|
@@ -1857,11 +1983,11 @@ history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
 
 ---
 
-## 16. Retry 정책 요약
+## 17. Retry 정책 요약
 
 관리자 페이지는 문제 상태와 정산·환불 detail을 조회하는 관찰 기능을 제공한다. 이번 관리자 조회 API는 신규 수동 복구 endpoint를 만들지 않는다. 정산 `FAILED/UNKNOWN`, 환불 `FAILED/UNKNOWN/stale PENDING`, 예측 `POINT_UNKNOWN/stale POINT_PENDING`, 평판 `PENDING/UNKNOWN`은 기존 Scheduler 정책으로 처리한다. 평판 `FAILED`는 자동 재시도 대상이 아니므로 관리자 수동 확인 대상으로 표시한다.
 
-### 16-1. 재시도 대상
+### 17-1. 재시도 대상
 
 | 상황 | Retry | 이유 |
 |---|---:|---|
@@ -1878,7 +2004,7 @@ history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
 
 ---
 
-### 16-2. 재시도 금지 대상
+### 17-2. 재시도 금지 대상
 
 | 상황 | Retry | 이유 |
 |---|---:|---|
@@ -1896,7 +2022,7 @@ history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
 
 ---
 
-## 17. 최종 완료 기준
+## 18. 최종 완료 기준
 
 - [ ] Quote API는 예상 계약 수량, 참여 후 예상 가격, 가격 영향도를 제공한다.
 - [ ] Quote API는 Prediction 생성, 포인트 차감, 잔액 조회, price_history 저장을 수행하지 않는다.
@@ -1930,3 +2056,6 @@ history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
 - [ ] Insight-Reputation 내부 조회 API는 summary와 prediction page를 분리한다.
 - [ ] Insight-Reputation 내부 조회 API는 memberId까지만 제공한다.
 - [ ] Insight-Reputation 내부 조회 API 실패는 Market 상태를 변경하지 않는다.
+- [ ] 댓글 validation·권한·상태 실패 시 댓글 외 상태는 변경하지 않는다.
+- [ ] 댓글 삭제는 soft delete하고 중복 삭제의 후속 요청은 `MARKET_COMMENT_NOT_FOUND`를 반환한다.
+- [ ] 댓글 실패는 Member-Point 호출, retry queue, Idempotency-Key를 사용하지 않는다.

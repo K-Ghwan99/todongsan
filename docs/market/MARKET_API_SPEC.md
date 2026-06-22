@@ -641,6 +641,133 @@ status = ACTIVE, closeAt <= now  → canPredict = false, displayStatus = CLOSED_
 
 ---
 
+## 3-1. Market 댓글 API
+
+Market 상세 하단의 댓글은 단일 depth만 지원한다. 대댓글, 좋아요, 신고, 수정은 이번 범위에서 제외한다. 댓글은 예측·정산·환불·Insight 흐름 및 Member-Point와 독립적이며 포인트, retry queue, Idempotency-Key를 사용하지 않는다.
+
+### 공통 정책
+
+| 항목 | 정책 |
+|---|---|
+| 조회 인증 | 불필요. 공개 조회 |
+| 작성/삭제 인증 | Gateway가 주입한 `X-Member-Id` 필수 |
+| 본문 | 공백이 아닌 문자열, 최대 500자 |
+| 허용 Market 상태 | `ACTIVE`, `CLOSED`, `DATA_PENDING`, `SETTLEMENT_IN_PROGRESS`, `SETTLED` |
+| 차단 Market 상태 | `PENDING`, `VOIDED` |
+| 삭제 | soft delete. `deleted_at`이 있는 댓글은 조회 결과에서 제외 |
+| 정렬 | `created_at ASC, id ASC` 고정 |
+| 페이징 | `page=0`, `size=10` 기본. `page >= 0`, `1 <= size <= 100` |
+
+`MARKET_CLOSED`는 예측 참여 차단용 ErrorCode이므로 댓글 작성 차단에 사용하지 않는다. 삭제된 Market에는 조회와 작성을 모두 허용하지 않는다.
+
+### 댓글 작성
+
+```http
+POST /api/v1/markets/{marketId}/comments
+X-Member-Id: 2
+Content-Type: application/json
+```
+
+```json
+{
+  "content": "이 Market 결과가 궁금합니다."
+}
+```
+
+#### Response: 201 Created
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "commentId": 101,
+    "marketId": 1,
+    "memberId": 2,
+    "content": "이 Market 결과가 궁금합니다.",
+    "createdAt": "2026-06-22T14:30:00",
+    "updatedAt": "2026-06-22T14:30:00"
+  },
+  "timestamp": "2026-06-22T14:30:00"
+}
+```
+
+### 댓글 목록 조회
+
+```http
+GET /api/v1/markets/{marketId}/comments?page=0&size=10
+```
+
+#### Response: 200 OK
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "content": [
+      {
+        "commentId": 101,
+        "marketId": 1,
+        "memberId": 2,
+        "content": "이 Market 결과가 궁금합니다.",
+        "createdAt": "2026-06-22T14:30:00",
+        "updatedAt": "2026-06-22T14:30:00"
+      }
+    ],
+    "number": 0,
+    "size": 10,
+    "totalElements": 1,
+    "totalPages": 1,
+    "first": true,
+    "last": true
+  },
+  "timestamp": "2026-06-22T14:31:00"
+}
+```
+
+댓글이 없으면 실패가 아니라 `200 OK`와 `content: []`인 page를 반환한다. 정렬 파라미터는 받지 않으며 서버가 `created_at ASC, id ASC`를 고정 적용한다.
+
+### 댓글 삭제
+
+```http
+DELETE /api/v1/markets/{marketId}/comments/{commentId}
+X-Member-Id: 2
+```
+
+#### Response: 200 OK
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "commentId": 101,
+    "deleted": true
+  },
+  "timestamp": "2026-06-22T14:32:00"
+}
+```
+
+본인 댓글만 삭제할 수 있다. 관리자에 의한 댓글 삭제는 이번 MVP 범위에서 제외한다. `commentId`가 없거나 이미 삭제되었거나 `marketId`와 일치하지 않으면 모두 `MARKET_COMMENT_NOT_FOUND`로 처리한다. 다른 회원의 댓글이면 `MARKET_COMMENT_FORBIDDEN`을 반환한다. 물리 삭제는 하지 않고 `deleted_at`을 기록한다.
+
+### 발생 가능한 ErrorCode
+
+| 상황 | ErrorCode | HTTP Status | 상태 변화 |
+|---|---|---:|---|
+| `X-Member-Id` 없이 작성/삭제 | `UNAUTHORIZED` | 401 | 없음 |
+| 본문 null/blank, page/size 타입 또는 범위 오류 | `VALIDATION_FAILED` | 400 | 없음 |
+| 본문 500자 초과 | `MARKET_COMMENT_TOO_LONG` | 400 | 없음 |
+| Market이 없거나 삭제됨 | `MARKET_NOT_FOUND` | 404 | 없음 |
+| 댓글 없음, 이미 삭제됨, Market 불일치 | `MARKET_COMMENT_NOT_FOUND` | 404 | 없음 |
+| 다른 회원의 댓글 삭제 | `MARKET_COMMENT_FORBIDDEN` | 403 | 없음 |
+| `PENDING` 또는 `VOIDED` Market에 작성 | `MARKET_COMMENT_NOT_ALLOWED` | 409 | 없음 |
+
+---
+
 
 ## 4. 가격 이력 조회
 
@@ -2932,6 +3059,11 @@ limit 건만 조회
 - [ ] Insight-Reputation 내부 API는 요약/선택지 집계와 Prediction 페이지 조회를 분리한다.
 - [ ] Insight-Reputation 내부 API는 memberId까지만 제공하고 회원 프로필 정보는 제공하지 않는다.
 - [ ] `SETTLEMENT_IN_PROGRESS`, `SETTLED` 상태는 VOIDED 처리할 수 없다.
+- [ ] 댓글 목록은 공개하고 작성/삭제는 Gateway 주입 `X-Member-Id`를 요구한다.
+- [ ] 댓글 작성은 `ACTIVE`, `CLOSED`, `DATA_PENDING`, `SETTLEMENT_IN_PROGRESS`, `SETTLED`에서만 허용한다.
+- [ ] 댓글 목록은 `created_at ASC, id ASC` 고정 정렬과 기본 size 10 페이징을 사용한다.
+- [ ] 댓글 삭제는 본인 댓글에 한해 soft delete하며 이미 삭제된 댓글은 `MARKET_COMMENT_NOT_FOUND`로 처리한다.
+- [ ] 댓글은 Member-Point, Prediction, 정산, 환불, Insight, retry, Idempotency-Key와 독립적으로 처리한다.
 
 ---
 
