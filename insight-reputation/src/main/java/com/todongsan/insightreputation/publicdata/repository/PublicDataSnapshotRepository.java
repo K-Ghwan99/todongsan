@@ -42,6 +42,13 @@ public interface PublicDataSnapshotRepository extends JpaRepository<PublicDataSn
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
 
+    @Query("SELECT pds FROM PublicDataSnapshot pds WHERE pds.source = :source AND pds.dataType = :dataType AND pds.referenceDate BETWEEN :startDate AND :endDate ORDER BY pds.referenceDate DESC, pds.regionSido ASC")
+    List<PublicDataSnapshot> findRecentPriceData(
+            @Param("source") PublicDataSource source,
+            @Param("dataType") PublicDataType dataType,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
+
     /**
      * 공공 데이터 배치 적재 (ON DUPLICATE KEY UPDATE)
      * 멱등성 보장을 위해 UNIQUE KEY 중복 시 UPDATE 처리

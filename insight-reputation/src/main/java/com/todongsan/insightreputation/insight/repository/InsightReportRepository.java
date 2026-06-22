@@ -24,4 +24,8 @@ public interface InsightReportRepository extends JpaRepository<InsightReport, Lo
                                                       @Param("timeout") LocalDateTime timeout);
     
     List<InsightReport> findByStatusAndRetryCountLessThan(InsightReportStatus status, Byte maxRetryCount);
+
+    @Query("SELECT ir FROM InsightReport ir WHERE ir.status = :status AND ir.createdAt < :cutoff")
+    List<InsightReport> findOrphanedPendingReports(@Param("status") InsightReportStatus status,
+                                                    @Param("cutoff") LocalDateTime cutoff);
 }
