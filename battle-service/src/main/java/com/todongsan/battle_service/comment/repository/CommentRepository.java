@@ -12,4 +12,6 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
     Page<Comment> findByBattleIdAndDeletedAtIsNull(Long battleId, Pageable pageable);
 
     Optional<Comment> findByIdAndDeletedAtIsNull(Long id);
+
+    long countByBattleIdAndDeletedAtIsNull(Long battleId);
 }

@@ -104,7 +104,7 @@
 | 상황 | 패턴 |
 |---|---|
 | 투표 보상 | `battle:vote:{battleId}:member:{memberId}` |
-| 댓글 보상 | `battle:comment:{commentId}:member:{memberId}` |
+| 댓글 보상 | `battle:comment:battle:{battleId}:member:{memberId}` |
 | 승인 보상 | `battle:approved:{battleId}:member:{memberId}` |
 | 승리 보상 | `battle:settle:{battleId}:member:{memberId}` |
 

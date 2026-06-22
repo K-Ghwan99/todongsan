@@ -26,7 +26,7 @@
 | 상황 | 패턴 |
 |---|---|
 | 투표 보상 | `battle:vote:{battleId}:member:{memberId}` |
-| 댓글 보상 | `battle:comment:{commentId}:member:{memberId}` |
+| 댓글 보상 | `battle:comment:battle:{battleId}:member:{memberId}` |
 | 승인 보상 | `battle:approved:{battleId}:member:{memberId}` |
 | 승리 보상 | `battle:settle:{battleId}:member:{memberId}` |
 | 주제 생성권 차감 | 미사용 (포인트 차감 없음) |
@@ -141,3 +141,4 @@ ACTIVE → CANCELLED: 관리자 강제 취소 (cancel)
 |---|---|
 | 2026-06-02 | 초안 작성 |
 | 2026-06-04 | 교차분석/인증자 필터 조회를 관리자 전용으로 변경. 리포트 원문 미노출, 집계 통계만 응답. 내부 서비스 접근도 불가 |
+| 2026-06-22 | 댓글 보상 idempotency_key를 commentId → battleId+memberId 기반으로 변경. 같은 배틀에 댓글 여러 개 작성 시 중복 지급 방지 |

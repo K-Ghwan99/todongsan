@@ -63,7 +63,7 @@ public class CommentServiceImpl implements CommentService {
     }
 
     private void earnCommentReward(Long battleId, Long memberId, Long commentId) {
-        String idempotencyKey = "battle:comment:" + commentId + ":member:" + memberId;
+        String idempotencyKey = "battle:comment:battle:" + battleId + ":member:" + memberId;
         try {
             memberPointClient.earnPoint(PointEarnRequest.builder()
                     .memberId(memberId)

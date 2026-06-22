@@ -7,6 +7,7 @@ import com.todongsan.battle_service.battle.entity.BattleStatus;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
 import com.todongsan.battle_service.client.MemberPointClient;
 import com.todongsan.battle_service.client.dto.PointEarnRequest;
+import com.todongsan.battle_service.comment.repository.CommentRepository;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
 import com.todongsan.battle_service.retry.entity.PointRewardRetryQueue;
@@ -33,6 +34,7 @@ public class BattleServiceImpl implements BattleService {
     private static final BigDecimal APPROVED_REWARD = BigDecimal.valueOf(20);
 
     private final BattleRepository battleRepository;
+    private final CommentRepository commentRepository;
     private final MemberPointClient memberPointClient;
     private final PointRewardRetryQueueRepository retryQueueRepository;
     private final TransactionTemplate txTemplate;
@@ -62,7 +64,7 @@ public class BattleServiceImpl implements BattleService {
         BattleStatus battleStatus = parsePublicStatus(status);
         PageRequest pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         return battleRepository.findByStatusAndDeletedAtIsNull(battleStatus, pageable)
-                .map(BattleListResponse::from);
+                .map(b -> BattleListResponse.from(b, commentRepository.countByBattleIdAndDeletedAtIsNull(b.getId())));
     }
 
     @Override
