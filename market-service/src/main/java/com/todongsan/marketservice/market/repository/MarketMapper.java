@@ -8,6 +8,7 @@ import com.todongsan.marketservice.market.entity.MarketRefundDetail;
 import com.todongsan.marketservice.market.entity.MarketSettlement;
 import com.todongsan.marketservice.market.entity.MarketSettlementDetail;
 import com.todongsan.marketservice.market.entity.MarketVoid;
+import com.todongsan.marketservice.market.type.AdminMarketProblemType;
 import com.todongsan.marketservice.market.type.MarketDisplayStatus;
 import com.todongsan.marketservice.market.type.MarketSort;
 import com.todongsan.marketservice.market.type.MarketStatus;
@@ -39,6 +40,8 @@ public interface MarketMapper {
     );
 
     Market selectMarketById(@Param("marketId") long marketId);
+
+    Market selectAdminMarketById(@Param("marketId") long marketId);
 
     List<MarketOption> selectOptionsByMarketId(@Param("marketId") long marketId);
 
@@ -229,6 +232,24 @@ public interface MarketMapper {
 
     MarketSettlement selectMarketSettlementByMarketId(@Param("marketId") long marketId);
 
+    MarketSettlement selectLatestMarketSettlementByMarketIdForRead(@Param("marketId") long marketId);
+
+    MarketSettlement selectMarketSettlementByIdForRead(@Param("settlementId") long settlementId);
+
+    AdminTransactionStatusCountsRow selectSettlementDetailStatusCounts(@Param("settlementId") long settlementId);
+
+    List<MarketSettlementDetail> selectSettlementDetailsForAdmin(
+            @Param("settlementId") long settlementId,
+            @Param("status") TransactionItemStatus status,
+            @Param("offset") int offset,
+            @Param("limit") int limit
+    );
+
+    long countSettlementDetailsForAdmin(
+            @Param("settlementId") long settlementId,
+            @Param("status") TransactionItemStatus status
+    );
+
     List<MarketSettlementDetail> selectSettlementDetailsBySettlementId(@Param("settlementId") long settlementId);
 
     List<MarketSettlementDetail> selectRetryableSettlementDetails(@Param("settlementId") long settlementId);
@@ -307,6 +328,24 @@ public interface MarketMapper {
 
     MarketVoid selectMarketVoidByMarketId(@Param("marketId") long marketId);
 
+    MarketVoid selectMarketVoidByMarketIdForRead(@Param("marketId") long marketId);
+
+    MarketVoid selectMarketVoidByIdForRead(@Param("voidId") long voidId);
+
+    AdminTransactionStatusCountsRow selectRefundDetailStatusCounts(@Param("voidId") long voidId);
+
+    List<MarketRefundDetail> selectRefundDetailsForAdmin(
+            @Param("voidId") long voidId,
+            @Param("status") TransactionItemStatus status,
+            @Param("offset") int offset,
+            @Param("limit") int limit
+    );
+
+    long countRefundDetailsForAdmin(
+            @Param("voidId") long voidId,
+            @Param("status") TransactionItemStatus status
+    );
+
     void insertMarketVoid(MarketVoid marketVoid);
 
     int updateMarketStatusToVoided(
@@ -374,4 +413,20 @@ public interface MarketMapper {
             @Param("refundStatus") RefundStatus refundStatus,
             @Param("updatedAt") LocalDateTime updatedAt
     );
+
+    List<AdminMarketProblemRow> selectProblemMarketsForAdmin(
+            @Param("type") AdminMarketProblemType type,
+            @Param("pendingThreshold") LocalDateTime pendingThreshold,
+            @Param("offset") int offset,
+            @Param("limit") int limit
+    );
+
+    long countProblemMarketsForAdmin(
+            @Param("type") AdminMarketProblemType type,
+            @Param("pendingThreshold") LocalDateTime pendingThreshold
+    );
+
+    long countDistinctProblemMarketsForAdmin(@Param("pendingThreshold") LocalDateTime pendingThreshold);
+
+    AdminMarketStatusCountsRow selectAdminMarketStatusCounts(@Param("now") LocalDateTime now);
 }
