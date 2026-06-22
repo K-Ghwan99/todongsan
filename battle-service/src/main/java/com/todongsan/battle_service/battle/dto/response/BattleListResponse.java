@@ -16,11 +16,12 @@ public class BattleListResponse {
     private String optionB;
     private String status;
     private int voteCount;
+    private long commentCount;
     private LocalDateTime startAt;
     private LocalDateTime endAt;
     private LocalDateTime createdAt;
 
-    public static BattleListResponse from(Battle battle) {
+    public static BattleListResponse from(Battle battle, long commentCount) {
         return BattleListResponse.builder()
                 .battleId(battle.getId())
                 .title(battle.getTitle())
@@ -28,6 +29,7 @@ public class BattleListResponse {
                 .optionB(battle.getOptionB())
                 .status(battle.getStatus().name())
                 .voteCount(battle.getVoteCount())
+                .commentCount(commentCount)
                 .startAt(battle.getStartAt())
                 .endAt(battle.getEndAt())
                 .createdAt(battle.getCreatedAt())
