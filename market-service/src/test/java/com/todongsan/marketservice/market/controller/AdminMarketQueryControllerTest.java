@@ -95,6 +95,7 @@ class AdminMarketQueryControllerTest {
                 "100.00", "100.00", "0.50000000", 1);
         insertPrediction(101L, 1L, 11L, 1L, "CONFIRMED", LocalDateTime.now());
         insertPrediction(102L, 1L, 11L, 2L, "CONFIRMED", LocalDateTime.now());
+        jdbcTemplate.update("UPDATE market_prediction SET point_amount = 499.00 WHERE id = ?", 102L);
         insertSettlement(501L, 1L, 11L, "IN_PROGRESS");
         insertSettlementDetail(601L, 501L, 101L, 1L, "SUCCESS", null);
         insertSettlementDetail(602L, 501L, 102L, 2L, "FAILED", "MEMBER_POINT_FAILED");
@@ -120,8 +121,14 @@ class AdminMarketQueryControllerTest {
                         .param("size", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].settlementId").value(501))
+                .andExpect(jsonPath("$.data.content[0].selectedOptionId").value(11))
+                .andExpect(jsonPath("$.data.content[0].pointAmount").value("100.00"))
+                .andExpect(jsonPath("$.data.content[0].contractQuantity").value("200.00000000"))
                 .andExpect(jsonPath("$.data.content[0].status").value("FAILED"))
                 .andExpect(jsonPath("$.data.content[0].settledAmount").value("195.00"))
+                .andExpect(jsonPath("$.data.content[0].profitAmount").value("95.00"))
+                .andExpect(jsonPath("$.data.content[0].failureReason").value("MEMBER_POINT_FAILED"))
                 .andExpect(jsonPath("$.data.totalElements").value(1));
     }
 
@@ -165,8 +172,14 @@ class AdminMarketQueryControllerTest {
                         .param("status", "UNKNOWN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].voidId").value(701))
+                .andExpect(jsonPath("$.data.content[0].pointAmount").value("100.00"))
                 .andExpect(jsonPath("$.data.content[0].refundAmount").value("100.00"))
-                .andExpect(jsonPath("$.data.content[0].status").value("UNKNOWN"));
+                .andExpect(jsonPath("$.data.content[0].status").value("UNKNOWN"))
+                .andExpect(jsonPath("$.data.content[0].failureReason").value("UNKNOWN_RESULT"))
+                .andExpect(jsonPath("$.data.content[0].settlementId").doesNotExist())
+                .andExpect(jsonPath("$.data.content[0].settledAmount").doesNotExist())
+                .andExpect(jsonPath("$.data.content[0].profitAmount").doesNotExist());
     }
 
     @Test

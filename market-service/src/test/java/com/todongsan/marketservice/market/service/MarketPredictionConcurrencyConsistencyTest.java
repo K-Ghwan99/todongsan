@@ -51,12 +51,8 @@ class MarketPredictionConcurrencyConsistencyTest {
 
     @BeforeEach
     void setUp() {
+        assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("market_test");
         // FK 안전 순서로 정리
-        jdbc.update("DELETE FROM market_price_history");
-        jdbc.update("DELETE FROM market_prediction");
-        jdbc.update("DELETE FROM market_option");
-        jdbc.update("DELETE FROM market");
-
         seedActiveMarketWithTwoOptions();
         seedPendingPredictions(CONCURRENCY);
     }

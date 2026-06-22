@@ -44,7 +44,7 @@ class MarketTransactionBoundaryExperimentTest {
 
     @BeforeEach
     void setUp() {
-        deleteAll();
+        assertThat(jdbc.queryForObject("SELECT DATABASE()", String.class)).isEqualTo("market_test");
         seedMarket(MARKET_A, OPTION_A_YES, OPTION_A_NO, PREDICTION_A);
         seedMarket(MARKET_B, OPTION_B_YES, OPTION_B_NO, PREDICTION_B);
     }
@@ -159,15 +159,4 @@ class MarketTransactionBoundaryExperimentTest {
         }
     }
 
-    private void deleteAll() {
-        jdbc.update("DELETE FROM market_price_history");
-        jdbc.update("DELETE FROM market_reputation_update");
-        jdbc.update("DELETE FROM market_refund_detail");
-        jdbc.update("DELETE FROM market_settlement_detail");
-        jdbc.update("DELETE FROM market_settlement");
-        jdbc.update("DELETE FROM market_void");
-        jdbc.update("DELETE FROM market_prediction");
-        jdbc.update("DELETE FROM market_option");
-        jdbc.update("DELETE FROM market");
-    }
 }

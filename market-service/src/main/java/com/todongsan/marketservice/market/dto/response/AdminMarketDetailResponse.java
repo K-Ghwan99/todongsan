@@ -11,6 +11,7 @@ import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.MarketVoidReasonType;
 import com.todongsan.marketservice.market.type.RefundStatus;
 import com.todongsan.marketservice.market.type.SettlementStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -31,16 +32,23 @@ public record AdminMarketDetailResponse(
         LocalDate judgeDate,
         LocalDateTime settleDueAt,
         LocalDateTime settledAt,
+        @Schema(type = "string", example = "5.00")
         @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal feeRate,
+        @Schema(type = "string", example = "5.00")
         @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal feeAmount,
+        @Schema(type = "string", example = "195.00")
         @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal settlementPool,
         String judgeDataSource,
         String judgeCriteria,
         Long resultOptionId,
+        @Schema(type = "string", example = "0.7500")
         @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal resultValue,
         String resultText,
+        @Schema(type = "string", example = "200.00")
         @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal totalRealPoolAmount,
+        @Schema(type = "string", example = "200.00")
         @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal totalVirtualPoolAmount,
+        @Schema(type = "string", example = "400.00")
         @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal totalEffectivePoolAmount,
         long totalPredictionCount,
         List<AdminMarketOption> options,
@@ -52,16 +60,25 @@ public record AdminMarketDetailResponse(
             String optionCode,
             String content,
             Integer displayOrder,
+            @Schema(type = "string", example = "0.0000")
             @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal rangeMin,
+            @Schema(type = "string", example = "0.5000")
             @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal rangeMax,
             Boolean minInclusive,
             Boolean maxInclusive,
+            @Schema(type = "string", example = "0.50000000")
             @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal initialPrice,
+            @Schema(type = "string", example = "0.50000000")
             @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal currentPrice,
+            @Schema(type = "string", example = "0.00000000")
             @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal priceChangeRate,
+            @Schema(type = "string", example = "100.00")
             @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal realPoolAmount,
+            @Schema(type = "string", example = "100.00")
             @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal virtualPoolAmount,
+            @Schema(type = "string", example = "200.00")
             @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal effectivePoolAmount,
+            @Schema(type = "string", example = "200.00000000")
             @JsonSerialize(using = BigDecimalPlainStringSerializer.class) BigDecimal totalContractQuantity,
             Integer predictionCount,
             Boolean isResult
