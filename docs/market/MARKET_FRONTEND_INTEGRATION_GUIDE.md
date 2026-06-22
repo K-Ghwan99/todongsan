@@ -134,6 +134,66 @@ Quote는 확정 견적이 아니다. 권장 안내 문구:
 2. 3~5초 간격으로 `GET /api/v1/markets/{marketId}/predictions/me`를 polling한다.
 3. 조회된 PredictionStatus에 따라 화면을 갱신한다.
 
+### Market 상세 댓글 영역
+
+댓글 영역은 Market 상세 페이지 하단에 배치한다. 목록은 비로그인 사용자도 조회할 수 있고, 작성 폼과 삭제 기능만 로그인 여부를 사용한다. 댓글은 단일 depth이며 답글, 좋아요, 신고, 수정 UI를 제공하지 않는다.
+
+#### 상태별 UI
+
+| Market 상태 | 목록 조회 | 댓글 작성 | 권장 UI |
+|---|---:|---:|---|
+| `ACTIVE` | O | O | 목록과 작성 폼 표시 |
+| `CLOSED` | O | O | 목록과 작성 폼 표시 |
+| `DATA_PENDING` | O | O | 목록과 작성 폼 표시 |
+| `SETTLEMENT_IN_PROGRESS` | O | O | 목록과 작성 폼 표시 |
+| `SETTLED` | O | O | 목록과 작성 폼 표시 |
+| `PENDING` | O | X | 목록만 표시하고 공개 전 안내 |
+| `VOIDED` | O | X | 목록만 표시하고 무효 Market 안내 |
+| 존재하지 않거나 삭제된 Market | X | X | Market 404 화면 |
+
+비로그인 상태에서는 목록을 그대로 보여주고 입력 폼 대신 `로그인 후 댓글을 작성할 수 있습니다` CTA를 표시한다. 로그인 상태에서도 `PENDING`, `VOIDED`이면 작성 폼을 숨기거나 비활성화한다. 서버의 `MARKET_COMMENT_NOT_ALLOWED` 응답을 최종 기준으로 삼는다.
+
+#### 목록과 페이징
+
+```text
+GET /api/v1/markets/{marketId}/comments?page={page}&size=10
+정렬: created_at ASC, id ASC (서버 고정)
+```
+
+- 댓글 목록 응답의 `data.content`가 빈 배열이면 정상적인 빈 목록으로 렌더링하고 `아직 댓글이 없습니다.`를 표시한다. 이 경우 응답은 `200 OK`다.
+- 댓글 본문 `content`가 blank인 작성 요청은 `VALIDATION_FAILED`, `400 Bad Request`로 처리하므로 입력 오류를 표시한다.
+- 댓글의 `memberId`와 현재 로그인 회원 id가 같을 때만 삭제 버튼을 노출한다.
+- soft delete된 댓글은 서버 목록에 포함되지 않으므로 `삭제된 댓글입니다` placeholder를 만들지 않는다.
+- 동일 시각 댓글의 순서는 `id ASC`로 안정화되므로 클라이언트에서 재정렬하지 않는다.
+
+#### 작성 성공 후 갱신
+
+오름차순 정렬에서는 새 댓글이 마지막에 추가된다. 작성 성공 시 댓글 목록 query 전체를 invalidate하고 `totalElements`로 계산한 마지막 page를 조회해 그 page로 이동하는 방식을 권장한다. 현재 page에 응답 데이터를 임의 append하면 새 댓글이 다른 page에 속하거나 동시 작성 댓글을 놓칠 수 있다.
+
+```text
+1. POST 성공
+2. 해당 marketId의 comment-list query root invalidate
+3. 최신 totalElements 확인
+4. lastPage = max(0, ceil(totalElements / size) - 1)
+5. lastPage refetch 및 이동
+```
+
+삭제 성공 시 응답의 `data.commentId`와 `data.deleted == true`를 확인하고 현재 page를 invalidate/refetch한다. 삭제 후 현재 page가 비었고 `page > 0`이면 이전 page로 이동해 다시 조회한다. 중복 삭제가 `MARKET_COMMENT_NOT_FOUND`이면 이미 삭제된 상태로 보고 목록을 refetch하되 성공 toast를 중복 표시하지 않는다. 관리자 삭제 UI는 이번 MVP 범위에 포함하지 않는다.
+
+#### 오류 표시
+
+| ErrorCode | 권장 처리 |
+|---|---|
+| `UNAUTHORIZED` | 로그인 CTA 표시. Gateway 인증 상태 재확인 |
+| `VALIDATION_FAILED` | 공백 입력 또는 잘못된 페이징 값 수정 안내 |
+| `MARKET_COMMENT_TOO_LONG` | `댓글은 500자까지 입력할 수 있습니다` 표시 |
+| `MARKET_COMMENT_NOT_FOUND` | 목록 refetch 후 대상 제거 |
+| `MARKET_COMMENT_FORBIDDEN` | 삭제 권한 없음 안내 후 로그인 회원 정보 재확인 |
+| `MARKET_COMMENT_NOT_ALLOWED` | 작성 폼 비활성화 및 Market 상태 안내 |
+| `MARKET_NOT_FOUND` | Market 404 화면으로 전환 |
+
+댓글 요청은 포인트나 Prediction 상태와 무관하다. 댓글 실패 시 포인트 잔액 polling, Prediction polling, 정산/환불 retry UI를 시작하지 않는다.
+
 ## 4. Decimal String 처리
 
 Market API의 금액·가격·계약 수량은 JSON Number가 아니라 String이다.
@@ -203,3 +263,12 @@ B settlementAmount = 43.92
 - `totalEffectivePoolAmount = 실제 참여금`
 - `virtualPoolAmount = 정산 재원`
 
+댓글 수동 확인 체크리스트:
+
+- [ ] 비로그인 상태에서 댓글 목록이 조회되고 작성 대신 로그인 CTA가 보인다.
+- [ ] 로그인 상태에서 작성 성공 후 comment-list query가 invalidated되고 마지막 page가 refetch된다.
+- [ ] 새 댓글이 `createdAt ASC, commentId ASC` 순서의 마지막 위치에 보인다.
+- [ ] 본인 댓글에만 삭제 버튼이 보인다.
+- [ ] 삭제 성공 후 현재 page가 refetch되고 빈 page라면 이전 page로 이동한다.
+- [ ] `PENDING`, `VOIDED`에서는 작성할 수 없고 나머지 허용 상태에서는 작성할 수 있다.
+- [ ] 댓글 동작이 point/member/prediction/settlement query를 invalidate하거나 polling하지 않는다.

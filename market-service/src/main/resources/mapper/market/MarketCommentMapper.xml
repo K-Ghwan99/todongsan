@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.todongsan.marketservice.market.repository.MarketCommentMapper">
+
+    <insert id="insertMarketComment"
+            parameterType="com.todongsan.marketservice.market.entity.MarketComment"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO market_comment (
+            market_id,
+            member_id,
+            content,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{marketId},
+            #{memberId},
+            #{content},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <select id="selectMarketCommentByIdAndMarketId"
+            resultType="com.todongsan.marketservice.market.entity.MarketComment">
+        SELECT
+            id,
+            market_id,
+            member_id,
+            content,
+            deleted_at,
+            created_at,
+            updated_at
+        FROM market_comment
+        WHERE id = #{commentId}
+          AND market_id = #{marketId}
+          AND deleted_at IS NULL
+    </select>
+
+    <select id="countMarketComments" resultType="long">
+        SELECT COUNT(*)
+        FROM market_comment
+        WHERE market_id = #{marketId}
+          AND deleted_at IS NULL
+    </select>
+
+    <select id="selectMarketCommentsPage"
+            resultType="com.todongsan.marketservice.market.entity.MarketComment">
+        SELECT
+            id,
+            market_id,
+            member_id,
+            content,
+            deleted_at,
+            created_at,
+            updated_at
+        FROM market_comment
+        WHERE market_id = #{marketId}
+          AND deleted_at IS NULL
+        ORDER BY created_at ASC, id ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <update id="softDeleteMarketComment">
+        UPDATE market_comment
+        SET deleted_at = #{now},
+            updated_at = #{now}
+        WHERE id = #{commentId}
+          AND market_id = #{marketId}
+          AND deleted_at IS NULL
+    </update>
+</mapper>
