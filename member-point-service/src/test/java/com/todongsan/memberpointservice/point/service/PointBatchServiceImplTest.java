@@ -187,6 +187,30 @@ class PointBatchServiceImplTest {
     }
 
     @Test
+    void settle_referenceType_null이면_허용() {
+        Member member = createMember();
+        SettlementItem item = mock(SettlementItem.class);
+        lenient().when(item.getPredictionId()).thenReturn(PREDICTION_ID);
+        lenient().when(item.getMemberId()).thenReturn(MEMBER_ID);
+        lenient().when(item.getAmount()).thenReturn(AMOUNT);
+        lenient().when(item.getReferenceType()).thenReturn(null);
+        lenient().when(item.getReferenceId()).thenReturn(null);
+        lenient().when(item.getReason()).thenReturn("Market 정산 보상");
+        lenient().when(item.getIdempotencyKey()).thenReturn(ITEM_KEY);
+
+        SettlementRequest request = createSettlementRequest(List.of(item));
+
+        when(pointHistoryRepository.findByIdempotencyKey(ITEM_KEY)).thenReturn(Optional.empty());
+        when(memberRepository.findById(MEMBER_ID)).thenReturn(Optional.of(member));
+        when(memberRepository.earnPoint(eq(MEMBER_ID), any())).thenReturn(1);
+
+        SettlementResponse response = service.settle(SETTLEMENT_ID, request);
+
+        assertThat(response.getResults()).hasSize(1);
+        assertThat(response.getResults().get(0).getStatus()).isEqualTo("PROCESSED");
+    }
+
+    @Test
     void settle_item_키_없으면_예외() {
         SettlementItem item = mock(SettlementItem.class);
         when(item.getIdempotencyKey()).thenReturn(null);
@@ -252,6 +276,21 @@ class PointBatchServiceImplTest {
 
         assertThat(response.getResults().get(0).getStatus()).isEqualTo("PROCESSED");
         assertThat(response.getResults().get(0).getMemberId()).isEqualTo(MEMBER_ID);
+    }
+
+    @Test
+    void refund_referenceType_null이면_허용() {
+        Member member = createMember();
+        RefundItem item = createRefundItem(null, "refund-key-null-ref");
+        RefundRequest request = createRefundRequest(List.of(item));
+
+        when(pointHistoryRepository.findByIdempotencyKey("refund-key-null-ref")).thenReturn(Optional.empty());
+        when(memberRepository.findById(MEMBER_ID)).thenReturn(Optional.of(member));
+        when(memberRepository.earnPoint(eq(MEMBER_ID), any())).thenReturn(1);
+
+        RefundResponse response = service.refund(REFUND_ID, request);
+
+        assertThat(response.getResults().get(0).getStatus()).isEqualTo("PROCESSED");
     }
 
     @Test
