@@ -10,6 +10,7 @@ services:
       - path: ..env.local
         required: false
     environment:
+      TZ: Asia/Seoul
       SERVER_PORT: 8081
       SPRING_PROFILES_ACTIVE: default
       DB_HOST: todongsan-mysql
