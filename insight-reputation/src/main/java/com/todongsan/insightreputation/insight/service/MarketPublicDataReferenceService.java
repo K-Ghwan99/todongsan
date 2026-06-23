@@ -86,19 +86,30 @@ public class MarketPublicDataReferenceService {
                     .build();
         }
 
-        // 4. 프롬프트 생성
-        String prompt = claudeApiClient.createMarketPublicDataReferencePrompt(
-                marketTitle, optionLabels, publicData);
-
-        // 5. Claude extended thinking 호출
-        String rawResult = claudeApiClient.analyzeWithThinking(prompt, 2000, 1500);
-
-        // 6. 응답 파싱 후 DTO 반환
         LocalDateTime dataAsOf = publicData.stream()
                 .map(snap -> snap.getReferenceDate().atStartOfDay())
                 .max(LocalDateTime::compareTo)
                 .orElse(null);
 
+        // 4. 프롬프트 생성
+        String prompt = claudeApiClient.createMarketPublicDataReferencePrompt(
+                marketTitle, optionLabels, publicData);
+
+        // 5. Claude extended thinking 호출 — 실패 시 원시 공공 데이터 표로 폴백 (200 유지)
+        String rawResult;
+        try {
+            rawResult = claudeApiClient.analyzeWithThinking(prompt, 2000, 1500);
+        } catch (Exception e) {
+            log.warn("Claude API 호출 실패, 공공 데이터 원문 표로 폴백: marketId={}, error={}", marketId, e.getMessage());
+            return MarketPublicDataReferenceResponse.builder()
+                    .title(marketTitle + " — 공공 데이터 참고 자료")
+                    .summary("AI 분석을 일시적으로 이용할 수 없습니다. 아래 공공 데이터를 직접 참고해 주세요.")
+                    .content(buildRawDataContent(publicData))
+                    .dataAsOf(dataAsOf)
+                    .build();
+        }
+
+        // 6. 응답 파싱 후 DTO 반환
         return parseAndBuild(rawResult, dataAsOf);
     }
 
@@ -146,6 +157,23 @@ public class MarketPublicDataReferenceService {
                 .content(content)
                 .dataAsOf(dataAsOf)
                 .build();
+    }
+
+    private String buildRawDataContent(List<PublicDataSnapshot> publicData) {
+        StringBuilder sb = new StringBuilder("## 최근 시장 지표\n\n");
+        sb.append("| 기준일 | 지역 | 지표명 | 수치 |\n");
+        sb.append("|--------|------|--------|------|\n");
+        for (PublicDataSnapshot snap : publicData) {
+            String region = snap.getRegionFullpath() != null ? snap.getRegionFullpath()
+                    : (snap.getRegionSido() != null ? snap.getRegionSido() : "-");
+            String value = snap.getNumericValue() != null
+                    ? snap.getNumericValue().stripTrailingZeros().toPlainString() : "-";
+            sb.append("| ").append(snap.getReferenceDate())
+              .append(" | ").append(region)
+              .append(" | ").append(snap.getItmNm() != null ? snap.getItmNm() : "-")
+              .append(" | ").append(value).append(" |\n");
+        }
+        return sb.toString();
     }
 
     /**
