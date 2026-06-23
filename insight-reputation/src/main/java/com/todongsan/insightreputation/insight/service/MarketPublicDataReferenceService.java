@@ -11,6 +11,8 @@ import com.todongsan.insightreputation.publicdata.entity.PublicDataSnapshot;
 import com.todongsan.insightreputation.publicdata.repository.PublicDataSnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -26,6 +28,9 @@ public class MarketPublicDataReferenceService {
     private final MarketClient marketClient;
     private final PublicDataSnapshotRepository publicDataSnapshotRepository;
     private final ClaudeApiClient claudeApiClient;
+    private final CacheManager cacheManager;
+
+    private static final String CACHE_NAME = "publicDataReference";
 
     public MarketPublicDataReferenceResponse getReference(long marketId) {
         // 1. Market 기본 정보 조회 — Market Service 미구현 시 fallback
@@ -92,11 +97,24 @@ public class MarketPublicDataReferenceService {
                 .max(LocalDateTime::compareTo)
                 .orElse(null);
 
-        // 4. 프롬프트 생성
+        // 4. 캐시 조회 — 키: {marketId}_{dataAsOf date}
+        // 공공 데이터 갱신(dataAsOf 변경) 시 자연스럽게 캐시 미스 → 새 Claude 호출
+        LocalDate dataAsOfDate = dataAsOf != null ? dataAsOf.toLocalDate() : null;
+        String cacheKey = marketId + "_" + dataAsOfDate;
+        Cache cache = cacheManager.getCache(CACHE_NAME);
+        if (cache != null) {
+            MarketPublicDataReferenceResponse cached = cache.get(cacheKey, MarketPublicDataReferenceResponse.class);
+            if (cached != null) {
+                log.info("캐시 히트: marketId={}, dataAsOf={}", marketId, dataAsOfDate);
+                return cached;
+            }
+        }
+
+        // 5. 프롬프트 생성
         String prompt = claudeApiClient.createMarketPublicDataReferencePrompt(
                 marketTitle, optionLabels, publicData);
 
-        // 5. Claude 호출 — 실패 시 원시 공공 데이터 표로 폴백 (200 유지)
+        // 6. Claude 호출 — 실패 시 원시 공공 데이터 표로 폴백 (200 유지, 캐시 저장 안 함)
         String rawResult;
         try {
             rawResult = claudeApiClient.analyze(prompt, 2000);
@@ -111,8 +129,13 @@ public class MarketPublicDataReferenceService {
                     .build();
         }
 
-        // 6. 응답 파싱 후 DTO 반환 (aiAnalyzed = true)
-        return parseAndBuild(rawResult, dataAsOf);
+        // 7. 응답 파싱 후 캐시 저장 → DTO 반환 (aiAnalyzed = true)
+        MarketPublicDataReferenceResponse result = parseAndBuild(rawResult, dataAsOf);
+        if (cache != null) {
+            cache.put(cacheKey, result);
+            log.info("캐시 저장: marketId={}, dataAsOf={}", marketId, dataAsOfDate);
+        }
+        return result;
     }
 
     private MarketPublicDataReferenceResponse parseAndBuild(String rawResult, LocalDateTime dataAsOf) {

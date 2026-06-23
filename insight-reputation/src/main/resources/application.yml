@@ -10,6 +10,11 @@ spring:
       force: true
       enabled: true
 
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=7d
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
