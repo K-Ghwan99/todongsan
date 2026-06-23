@@ -23,6 +23,7 @@ import com.todongsan.marketservice.market.type.MarketAnswerType;
 import com.todongsan.marketservice.market.type.MarketPriceModel;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.MarketVoidReasonType;
+import com.todongsan.marketservice.market.type.RegionScope;
 import com.todongsan.marketservice.market.type.RefundStatus;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -44,6 +45,7 @@ public class AdminMarketService {
     private static final BigDecimal ZERO_AMOUNT = new BigDecimal("0.00");
     private static final BigDecimal ZERO_QUANTITY = new BigDecimal("0.00000000");
     private static final int PRICE_SCALE = 8;
+    private static final String NATIONAL_REGION_SIDO = "\uC804\uAD6D";
     private static final Set<MarketStatus> VOIDABLE_STATUSES = Set.of(
             MarketStatus.PENDING,
             MarketStatus.ACTIVE,
@@ -71,6 +73,9 @@ public class AdminMarketService {
                 .category(request.getCategory())
                 .answerType(request.getAnswerType())
                 .metricUnit(request.getMetricUnit())
+                .regionScope(request.getRegionScope())
+                .regionSido(request.getRegionSido())
+                .regionSigu(request.getRegionSigu())
                 .judgeDataSource(request.getJudgeDataSource())
                 .judgeCriteria(request.getJudgeCriteria())
                 .judgeDate(request.getJudgeDate())
@@ -94,7 +99,12 @@ public class AdminMarketService {
                 .toList();
         marketMapper.insertMarketOptions(optionRows);
 
-        return new CreateMarketResponse(market.getId());
+        return new CreateMarketResponse(
+                market.getId(),
+                market.getRegionScope(),
+                market.getRegionSido(),
+                market.getRegionSigu()
+        );
     }
 
     @Transactional
@@ -320,6 +330,7 @@ public class AdminMarketService {
     }
 
     private void validateRequest(CreateMarketRequest request, LocalDateTime now) {
+        validateRegion(request);
         if (request.getFeeRate() != null
                 && (request.getFeeRate().compareTo(BigDecimal.ZERO) < 0
                 || request.getFeeRate().compareTo(new BigDecimal("100.00")) > 0)) {
@@ -366,6 +377,86 @@ public class AdminMarketService {
         if (request.getAnswerType() == MarketAnswerType.NUMERIC_RANGE) {
             validateNumericRanges(options);
         }
+    }
+
+    private void validateRegion(CreateMarketRequest request) {
+        if (request.getRegionScope() == null) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+
+        String normalizedRegionSido = normalizeNullableRegionSido(request.getRegionSido());
+        String normalizedRegionSigu = normalizeNullableRegionSigu(request.getRegionSigu());
+
+        if (request.getRegionScope() == RegionScope.NON_REGIONAL) {
+            validateNonRegional(normalizedRegionSido, normalizedRegionSigu, request);
+            return;
+        }
+        if (request.getRegionScope() == RegionScope.NATIONAL) {
+            validateNational(normalizedRegionSido, normalizedRegionSigu, request);
+            return;
+        }
+        validateRegional(normalizedRegionSido, normalizedRegionSigu, request);
+    }
+
+    private String normalizeNullableRegionSido(String regionSido) {
+        if (regionSido == null) {
+            return null;
+        }
+        String trimmed = regionSido.trim();
+        if (trimmed.isBlank()) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        return trimmed;
+    }
+
+    private String normalizeNullableRegionSigu(String regionSigu) {
+        if (regionSigu == null) {
+            return null;
+        }
+        String trimmed = regionSigu.trim();
+        if (trimmed.isBlank()) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        return trimmed;
+    }
+
+    private void validateNonRegional(
+            String normalizedRegionSido,
+            String normalizedRegionSigu,
+            CreateMarketRequest request
+    ) {
+        if (normalizedRegionSido != null || normalizedRegionSigu != null) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        request.setRegionSido(null);
+        request.setRegionSigu(null);
+    }
+
+    private void validateNational(
+            String normalizedRegionSido,
+            String normalizedRegionSigu,
+            CreateMarketRequest request
+    ) {
+        if (normalizedRegionSido != null && !NATIONAL_REGION_SIDO.equals(normalizedRegionSido)) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        if (normalizedRegionSigu != null) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        request.setRegionSido(NATIONAL_REGION_SIDO);
+        request.setRegionSigu(null);
+    }
+
+    private void validateRegional(
+            String normalizedRegionSido,
+            String normalizedRegionSigu,
+            CreateMarketRequest request
+    ) {
+        if (normalizedRegionSido == null || NATIONAL_REGION_SIDO.equals(normalizedRegionSido)) {
+            throw new CustomException(CommonErrorCode.VALIDATION_FAILED);
+        }
+        request.setRegionSido(normalizedRegionSido);
+        request.setRegionSigu(normalizedRegionSigu);
     }
 
     private void validateNumericRanges(List<CreateMarketOptionRequest> options) {

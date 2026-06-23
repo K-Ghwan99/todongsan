@@ -9,6 +9,9 @@
             m.id,
             m.title,
             m.status,
+            m.region_scope,
+            m.region_sido,
+            m.region_sigu,
             m.close_at,
             m.total_pool,
             m.created_at
@@ -71,10 +74,25 @@
             status,
             close_at,
             settle_due_at,
+            region_scope,
+            region_sido,
+            region_sigu,
             total_pool,
             initial_virtual_liquidity,
             created_at,
             updated_at
+        FROM market
+        WHERE id = #{marketId}
+          AND deleted_at IS NULL
+    </select>
+
+    <select id="selectMarketBasicInfo" resultType="com.todongsan.marketservice.market.entity.Market">
+        SELECT
+            id,
+            title,
+            region_scope,
+            region_sido,
+            region_sigu
         FROM market
         WHERE id = #{marketId}
           AND deleted_at IS NULL
@@ -393,6 +411,9 @@
             category,
             answer_type,
             metric_unit,
+            region_scope,
+            region_sido,
+            region_sigu,
             judge_data_source,
             judge_criteria,
             judge_date,
@@ -414,6 +435,9 @@
             #{category},
             #{answerType},
             #{metricUnit},
+            #{regionScope},
+            #{regionSido},
+            #{regionSigu},
             #{judgeDataSource},
             #{judgeCriteria},
             #{judgeDate},

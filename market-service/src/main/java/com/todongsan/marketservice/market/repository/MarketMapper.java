@@ -41,6 +41,8 @@ public interface MarketMapper {
 
     Market selectMarketById(@Param("marketId") long marketId);
 
+    Market selectMarketBasicInfo(@Param("marketId") long marketId);
+
     Market selectAdminMarketById(@Param("marketId") long marketId);
 
     List<MarketOption> selectOptionsByMarketId(@Param("marketId") long marketId);

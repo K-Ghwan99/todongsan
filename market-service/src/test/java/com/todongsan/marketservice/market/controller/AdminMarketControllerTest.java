@@ -64,10 +64,16 @@ class AdminMarketControllerTest {
                         .content(validRequest(defaultOptions())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.marketId").isNumber());
+                .andExpect(jsonPath("$.data.marketId").isNumber())
+                .andExpect(jsonPath("$.data.regionScope").value("REGIONAL"))
+                .andExpect(jsonPath("$.data.regionSido").value("\uC11C\uC6B8"))
+                .andExpect(jsonPath("$.data.regionSigu").value("\uAC15\uB0A8\uAD6C"));
 
         Long marketId = jdbcTemplate.queryForObject("SELECT id FROM market", Long.class);
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM market", String.class)).isEqualTo("PENDING");
+        assertThat(jdbcTemplate.queryForObject("SELECT region_scope FROM market", String.class)).isEqualTo("REGIONAL");
+        assertThat(jdbcTemplate.queryForObject("SELECT region_sido FROM market", String.class)).isEqualTo("\uC11C\uC6B8");
+        assertThat(jdbcTemplate.queryForObject("SELECT region_sigu FROM market", String.class)).isEqualTo("\uAC15\uB0A8\uAD6C");
         assertThat(jdbcTemplate.queryForObject("SELECT total_pool FROM market", String.class)).isEqualTo("0.00");
         assertThat(jdbcTemplate.queryForObject("SELECT initial_virtual_liquidity FROM market", String.class))
                 .isEqualTo("200.00");
@@ -86,6 +92,87 @@ class AdminMarketControllerTest {
                 .andExpect(jsonPath("$.data.options[0].currentPrice").value("0.50000000"))
                 .andExpect(jsonPath("$.data.options[0].realPoolAmount").value("0.00"))
                 .andExpect(jsonPath("$.data.options[0].virtualPoolAmount").value("100.00"));
+    }
+
+    @Test
+    void createMarketAllowsNonRegionalWithoutRegionValues() throws Exception {
+        expectCreatedRegion(validRequestWithRegionScope("NON_REGIONAL", null, null),
+                "NON_REGIONAL", null, null);
+    }
+
+    @Test
+    void createMarketAllowsNationalWithoutRegionValuesAndNormalizesSido() throws Exception {
+        expectCreatedRegion(validRequestWithRegionScope("NATIONAL", null, null),
+                "NATIONAL", "\uC804\uAD6D", null);
+    }
+
+    @Test
+    void createMarketAllowsNationalWithNationwideSido() throws Exception {
+        expectCreatedRegion(validRequestWithRegionScope("NATIONAL", "\uC804\uAD6D", null),
+                "NATIONAL", "\uC804\uAD6D", null);
+    }
+
+    @Test
+    void createMarketAllowsRegionalWithSidoOnly() throws Exception {
+        expectCreatedRegion(validRequestWithRegionScope("REGIONAL", "\uC11C\uC6B8", null),
+                "REGIONAL", "\uC11C\uC6B8", null);
+    }
+
+    @Test
+    void createMarketAllowsRegionalWithSidoAndSigu() throws Exception {
+        expectCreatedRegion(validRequestWithRegionScope("REGIONAL", "\uC11C\uC6B8", "\uAC15\uB0A8\uAD6C"),
+                "REGIONAL", "\uC11C\uC6B8", "\uAC15\uB0A8\uAD6C");
+    }
+
+    @Test
+    void createMarketTrimsRegionalSidoAndSiguBeforeSavingAndResponding() throws Exception {
+        expectCreatedRegion(validRequestWithRegionScope("REGIONAL", " \uC11C\uC6B8 ", " \uAC15\uB0A8\uAD6C "),
+                "REGIONAL", "\uC11C\uC6B8", "\uAC15\uB0A8\uAD6C");
+    }
+
+    @Test
+    void createMarketRejectsNullRegionScope() throws Exception {
+        expectValidationFailed(validRequestWithRegionScope(null, null, null));
+    }
+
+    @Test
+    void createMarketRejectsNonRegionalWithSido() throws Exception {
+        expectValidationFailed(validRequestWithRegionScope("NON_REGIONAL", "\uC804\uAD6D", null));
+    }
+
+    @Test
+    void createMarketRejectsNonRegionalWithSigu() throws Exception {
+        expectValidationFailed(validRequestWithRegionScope("NON_REGIONAL", null, "\uAC15\uB0A8\uAD6C"));
+    }
+
+    @Test
+    void createMarketRejectsNationalWithRegionalSido() throws Exception {
+        expectValidationFailed(validRequestWithRegionScope("NATIONAL", "\uC11C\uC6B8", null));
+    }
+
+    @Test
+    void createMarketRejectsNationalWithSigu() throws Exception {
+        expectValidationFailed(validRequestWithRegionScope("NATIONAL", null, "\uAC15\uB0A8\uAD6C"));
+    }
+
+    @Test
+    void createMarketRejectsRegionalWithoutSido() throws Exception {
+        expectValidationFailed(validRequestWithRegionScope("REGIONAL", null, null));
+    }
+
+    @Test
+    void createMarketRejectsRegionalWithNationwideSido() throws Exception {
+        expectValidationFailed(validRequestWithRegionScope("REGIONAL", "\uC804\uAD6D", null));
+    }
+
+    @Test
+    void createMarketRejectsBlankRegionSido() throws Exception {
+        expectValidationFailed(validRequestWithRegionScope("REGIONAL", " ", null));
+    }
+
+    @Test
+    void createMarketRejectsBlankRegionSigu() throws Exception {
+        expectValidationFailed(validRequestWithRegionScope("REGIONAL", "\uC11C\uC6B8", " "));
     }
 
     @Test
@@ -987,6 +1074,14 @@ class AdminMarketControllerTest {
                 .andExpect(jsonPath("$.errorCode").value("MARKET_INVALID_FEE_RATE"));
     }
 
+    private void expectValidationFailed(String request) throws Exception {
+        mockMvc.perform(post("/api/v1/admin/markets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_FAILED"));
+    }
+
     private void expectCreated(String request) throws Exception {
         mockMvc.perform(post("/api/v1/admin/markets")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -996,8 +1091,43 @@ class AdminMarketControllerTest {
                 .andExpect(jsonPath("$.data.marketId").isNumber());
     }
 
+    private void expectCreatedRegion(
+            String request,
+            String regionScope,
+            String regionSido,
+            String regionSigu
+    ) throws Exception {
+        mockMvc.perform(post("/api/v1/admin/markets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.marketId").isNumber())
+                .andExpect(jsonPath("$.data.regionScope").value(regionScope))
+                .andExpect(regionSido == null
+                        ? jsonPath("$.data.regionSido").isEmpty()
+                        : jsonPath("$.data.regionSido").value(regionSido))
+                .andExpect(regionSigu == null
+                        ? jsonPath("$.data.regionSigu").isEmpty()
+                        : jsonPath("$.data.regionSigu").value(regionSigu));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT region_scope FROM market", String.class))
+                .isEqualTo(regionScope);
+        assertThat(jdbcTemplate.queryForObject("SELECT region_sido FROM market", String.class))
+                .isEqualTo(regionSido);
+        assertThat(jdbcTemplate.queryForObject("SELECT region_sigu FROM market", String.class))
+                .isEqualTo(regionSigu);
+    }
+
     private String validRequest(String options) {
         return request(LocalDateTime.now().plusDays(2), options);
+    }
+
+    private String validRequestWithRegionScope(String regionScope, String regionSido, String regionSigu) {
+        return request(LocalDateTime.now().plusDays(2), defaultOptions())
+                .replace("\"regionScope\": \"REGIONAL\"", "\"regionScope\": " + jsonString(regionScope))
+                .replace("\"regionSido\": \"서울\"", "\"regionSido\": " + jsonString(regionSido))
+                .replace("\"regionSigu\": \"강남구\"", "\"regionSigu\": " + jsonString(regionSigu));
     }
 
     private String request(LocalDateTime closeAt, String options) {
@@ -1026,6 +1156,9 @@ class AdminMarketControllerTest {
                   "category": "PRICE_INDEX",
                   "answerType": "%s",
                   "metricUnit": "PERCENT",
+                  "regionScope": "REGIONAL",
+                  "regionSido": "서울",
+                  "regionSigu": "강남구",
                   "judgeDataSource": "공공데이터 API",
                   "judgeCriteria": "지정된 판정일의 변동률 기준",
                   "judgeDate": "%s",

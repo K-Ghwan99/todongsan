@@ -262,6 +262,13 @@ CREATE TABLE market (
     metric_unit                 VARCHAR(30),
     -- PERCENT, COUNT, KRW, INDEX_POINT 등
 
+    region_scope                VARCHAR(20)     NOT NULL DEFAULT 'NON_REGIONAL',
+    -- NON_REGIONAL, NATIONAL, REGIONAL
+    region_sido                 VARCHAR(50),
+    -- Insight public_data_snapshot.region_sido와 동일한 표준 지역명. 예: 서울, 경기, 전국
+    region_sigu                 VARCHAR(50),
+    -- 시군구 단위 지역명. REGIONAL에서만 선택 사용
+
     judge_data_source           VARCHAR(255)    NOT NULL,
     judge_criteria              TEXT            NOT NULL,
     judge_date                  DATE            NOT NULL,
@@ -311,6 +318,39 @@ CREATE TABLE market (
     INDEX idx_market_status_close_at (status, close_at)
 );
 ```
+### Market 지역 컬럼 정책
+
+Market은 Insight-Reputation Service가 Market 관련 공공데이터 참조 요약을 생성할 수 있도록 지역 범위를 명시적으로 저장한다. `region_scope`는 `region_sido`/`region_sigu` 조합을 해석하는 기준 필드다.
+
+| 컬럼 | 의미 | 예시 | 필수 여부 |
+|---|---|---|---|
+| `region_scope` | Market 지역 범위 | `NON_REGIONAL`, `NATIONAL`, `REGIONAL` | 필수 |
+| `region_sido` | Insight `public_data_snapshot.region_sido`와 동일한 표준 시도 값 | `서울`, `경기`, `전국` | `REGIONAL`이면 필수, `NATIONAL`이면 저장/응답 `전국`, `NON_REGIONAL`이면 null |
+| `region_sigu` | 시군구 단위 지역명 | `강남구`, `성남시` | `REGIONAL`에서만 선택 사용 |
+
+지역 단위 해석:
+
+| Market 단위 | `region_scope` | `region_sido` | `region_sigu` | 의미 |
+|---|---|---|---|---|
+| 지역 무관 | `NON_REGIONAL` | `NULL` | `NULL` | 금리, 정책, 거시경제처럼 지역과 직접 연결되지 않는 Market |
+| 전국 | `NATIONAL` | `전국` | `NULL` | 전국 단위 지역 Market |
+| 시도 전체 | `REGIONAL` | `서울`, `경기` 등 | `NULL` | 해당 시도 전체 Market |
+| 시군구 | `REGIONAL` | `서울`, `경기` 등 | `강남구`, `성남시` 등 | 해당 시군구 Market |
+
+검증 정책:
+
+```text
+regionScope null 금지
+regionScope는 NON_REGIONAL, NATIONAL, REGIONAL 중 하나
+regionSido/regionSigu는 null 가능하지만 값이 있으면 trim 후 blank 금지
+NON_REGIONAL이면 regionSido, regionSigu 모두 null
+NATIONAL이면 요청 regionSido는 null 또는 "전국"만 허용하고 저장/응답은 regionSido = "전국", regionSigu = null
+REGIONAL이면 regionSido 필수, regionSido = "전국" 금지, regionSigu는 선택
+```
+
+지역 검증 실패는 신규 Market ErrorCode를 만들지 않고 공통 `VALIDATION_FAILED`를 사용한다.
+
+Insight DB에는 `region_sigu` 컬럼이 없으므로, `regionSigu`가 있는 Market과 `public_data_snapshot`의 세부 지역 매칭은 Insight-Reputation Service가 `region_fullpath LIKE` 등으로 처리한다. Market Service는 표준 지역값을 저장하고 내부 API로 제공하는 책임만 가진다.
 
 ---
 
@@ -897,6 +937,9 @@ erDiagram
         varchar category
         varchar answer_type
         varchar metric_unit
+        varchar region_scope
+        varchar region_sido
+        varchar region_sigu
         varchar judge_data_source
         text judge_criteria
         date judge_date

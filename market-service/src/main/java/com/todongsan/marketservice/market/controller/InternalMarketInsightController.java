@@ -1,6 +1,7 @@
 package com.todongsan.marketservice.market.controller;
 
 import com.todongsan.marketservice.global.response.ApiResponse;
+import com.todongsan.marketservice.market.dto.response.MarketBasicInfoResponse;
 import com.todongsan.marketservice.market.dto.response.MarketInsightPredictionPageResponse;
 import com.todongsan.marketservice.market.dto.response.MarketInsightSummaryResponse;
 import com.todongsan.marketservice.market.service.MarketInsightService;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 @Validated
@@ -24,12 +26,31 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Market Insight Internal API", description = "Insight-Reputation Service가 직접 호출하는 Market 원본 데이터 조회 내부 API")
 @io.swagger.v3.oas.annotations.responses.ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "VALIDATION_FAILED"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "UNAUTHORIZED"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "MARKET_NOT_FOUND"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "MARKET_INVALID_STATUS / MARKET_NO_PREDICTIONS")
 })
 public class InternalMarketInsightController {
 
     private final MarketInsightService marketInsightService;
+
+    @GetMapping("/{marketId}/basic-info")
+    @Operation(
+            summary = "Insight용 Market 기본 정보 조회",
+            description = """
+                    Gateway를 통하지 않는 서비스 간 내부 API이다.
+                    Market 상태와 무관하게 기본 정보만 조회하며, SETTLED 검증과 Prediction 존재 여부 검증을 수행하지 않는다.
+                    X-Internal-Auth 헤더가 설정된 내부 인증 토큰과 일치해야 한다.
+                    """
+    )
+    public ApiResponse<MarketBasicInfoResponse> getBasicInfo(
+            @Parameter(description = "Market ID. 상태와 무관하게 조회 가능", example = "1")
+            @PathVariable @Min(1) long marketId,
+            @Parameter(description = "내부 호출 인증 토큰", required = true)
+            @RequestHeader(value = "X-Internal-Auth", required = false) String internalAuth
+    ) {
+        return ApiResponse.ok(marketInsightService.getBasicInfo(marketId, internalAuth));
+    }
 
     @GetMapping("/{marketId}/insight-summary")
     @Operation(
