@@ -124,6 +124,7 @@ Insight-Reputation Service가 다른 서비스를 호출하는 API 목록이다.
 | Battle Service | GET /internal/api/v1/battles/{battleId}/info | Battle 기본 정보 조회 (**⚠️ Battle 담당자 구현 필요 — COORDINATION_ISSUES.md 참조**) |
 | Battle Service | GET /internal/api/v1/battles/{battleId}/votes/raw | 투표 목록 조회 (member_id, selected_option) (**⚠️ Battle 담당자 경로 변경 필요 — COORDINATION_ISSUES.md 참조**) |
 | Battle Service | GET /internal/api/v1/battles/comments/{commentId} | 댓글 단건 조회 (방문 인증용) (**⚠️ Battle 담당자 경로 변경 필요 — COORDINATION_ISSUES.md 참조**) |
+| Market Service | GET /internal/api/v1/markets/{marketId}/basic-info | 마켓 기본 정보 조회 (상태 무관. regionSido/regionSigu 포함. MARKET_NOT_FOUND → RESOURCE_NOT_FOUND 변환) |
 | Market Service | GET /internal/api/v1/markets/{marketId}/insight-summary | Market 기본 정보 + 옵션별 통계 조회 (SETTLED 전용. Market spec 섹션 11-1) |
 | Market Service | GET /internal/api/v1/markets/{marketId}/insight-predictions | 예측 참여 목록 조회 (member_id, selected_option, 페이지네이션. Market spec 섹션 11-2) |
 | Member-Point Service | POST /internal/api/v1/members/batch | 회원 정보 배치 조회 (ageGroup, gender, residenceSido/Sigu) |
@@ -136,6 +137,13 @@ Insight-Reputation Service가 다른 서비스를 호출하는 API 목록이다.
 ## 3. 서비스 간 내부 연계 API (인바운드)
 
 다른 서비스가 Insight-Reputation Service를 호출하는 API 목록이다.
+
+| 호출 주체 | 엔드포인트 | 목적 |
+|---|---|---|
+| Battle Service | POST /internal/api/v1/reputations/activity | 투표/댓글/Battle 승인 시 activity_score 업데이트 |
+| Battle Service | POST /internal/api/v1/insights/battles/{battleId}/report | Battle 종료 시 AI 리포트 자동 트리거 |
+| Market Service | POST /internal/api/v1/reputations/prediction | 정산 완료 시 prediction_count/correct 업데이트 |
+| Market Service | POST /internal/api/v1/insights/markets/{marketId}/report | Market SETTLED 시 AI 리포트 자동 트리거 (v8 신규, 섹션 7-0-M 참조) |
 
 ### 3-1. Activity Score 업데이트
 
@@ -735,15 +743,17 @@ Idempotency-Key: {uuid}
   "errorCode": null,
   "message": null,
   "data": {
-    "marketId": 7,
     "reportId": 2,
     "status": "PENDING",
-    "statusUrl": "/api/v1/insights/markets/7/report/status",
+    "reportContent": null,
+    "generatedAt": null,
     "pointCharged": 80
   },
   "timestamp": "2026-05-28T10:00:00"
 }
 ```
+
+> 폴링: `GET /api/v1/insights/markets/{marketId}/report/status` (2초 간격, 30초 타임아웃)
 
 **Response - 기존 리포트 존재 (DONE, pointCharged=0)**
 
@@ -753,17 +763,17 @@ Idempotency-Key: {uuid}
   "errorCode": null,
   "message": null,
   "data": {
-    "marketId": 7,
     "reportId": 2,
     "status": "DONE",
-    "summary": "YES 근거: 최근 3주간 서울 아파트 매매가격지수는 상승세를 보였습니다...",
-    "analysisData": {},
+    "reportContent": "title: 서울 강남구 아파트 가격 전망\nsummary: ...\ncontent: |...",
     "generatedAt": "2026-05-25T15:30:00",
     "pointCharged": 0
   },
   "timestamp": "2026-05-28T10:00:00"
 }
 ```
+
+> `reportContent`: Claude가 생성한 YAML 형식 문자열 (`title:` / `summary:` / `content:` 구조). 클라이언트가 직접 파싱해 렌더링한다.
 
 **Error Codes**
 
@@ -794,17 +804,17 @@ GET /api/v1/insights/markets/{marketId}/report
   "errorCode": null,
   "message": null,
   "data": {
-    "marketId": 7,
     "reportId": 2,
     "status": "DONE",
-    "title": "다음 주 서울 아파트 매매가격지수는 상승할까?",
-    "summary": "YES 근거: 최근 3주간 서울 아파트 매매가격지수는 상승세를 보였습니다...",
-    "analysisData": {},
-    "generatedAt": "2026-05-25T15:30:00"
+    "reportContent": "title: 서울 강남구 아파트 가격 전망\nsummary: ...\ncontent: |...",
+    "generatedAt": "2026-05-25T15:30:00",
+    "pointCharged": 0
   },
   "timestamp": "2026-05-28T10:00:00"
 }
 ```
+
+> `reportContent`: YAML 형식 문자열. `status`가 `DONE`일 때만 값이 있고 그 외 `null`.
 
 **Error Codes**
 
@@ -871,6 +881,9 @@ GET /api/v1/insights/markets/{marketId}/report/status
 | INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패. Point 차감 후 환불 처리됨 |
 
 ---
+
+> **[v8 신규 섹션]** 아래 섹션은 v8에서 추가된 Market 분석 기능 관련 명세다.
+> 문서 재구성 시 섹션 2, 3-4, 7-0-M, 7-4 위치로 이동할 것.
 
 ## 2. Market Service 연계 — `basic-info` API 소비 규칙 (v8 신규)
 
