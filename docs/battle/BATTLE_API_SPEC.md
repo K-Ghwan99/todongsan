@@ -115,6 +115,7 @@ GET /api/v1/battles?status={status}&page={page}&size={size}
 | 파라미터 | 타입 | 필수 | 설명 |
 |---|---|---|---|
 | status | String | N | `ACTIVE`, `CLOSED` (기본: `ACTIVE`). `PENDING`/`CANCELLED`은 일반 사용자에게 노출 안 됨 |
+| sort | String | N | `popular` 지정 시 vote_count 내림차순. 미지정 시 최신 등록순 |
 | page | Integer | N | 페이지 번호 (기본: 0) |
 | size | Integer | N | 페이지 크기 (기본: 20) |
 
@@ -144,7 +145,7 @@ GET /api/v1/battles/{battleId}
 |---|---:|---|
 | `BATTLE_NOT_FOUND` | 404 | 존재하지 않거나 soft delete됨. **`PENDING`/`CANCELLED` 상태도 일반 사용자에게는 이 에러로 응답** |
 
-> 관리자 전용 조회(PENDING 포함)는 2-8/2-9 참조.
+> 관리자 전용 조회(PENDING 포함)는 2-9/2-10 참조.
 
 ---
 
@@ -217,7 +218,43 @@ PATCH /api/v1/battles/admin/{battleId}/cancel
 
 ---
 
-### 2-7. 내가 만든 배틀 목록 조회 (본인)
+### 2-7. Battle 취소 (본인)
+
+```
+PATCH /api/v1/battles/{battleId}/cancel
+```
+
+**인증**: 필요
+
+**설명**: 사용자가 등록한 Battle을 관리자 승인 전에 직접 취소한다. `PENDING` 상태인 자신의 Battle에만 허용된다.
+
+**Response**: status가 `PENDING` → `CANCELLED`
+
+```json
+{
+  "success": true,
+  "errorCode": null,
+  "message": null,
+  "data": {
+    "battleId": 42,
+    "status": "CANCELLED"
+  },
+  "timestamp": "2026-06-23T10:00:00"
+}
+```
+
+**Error Codes**
+
+| ErrorCode | HTTP | 상황 |
+|---|---:|---|
+| `UNAUTHORIZED` | 401 | JWT 없음/만료 |
+| `FORBIDDEN` | 403 | 본인이 등록한 Battle이 아님 |
+| `BATTLE_NOT_FOUND` | 404 | 존재하지 않거나 soft delete됨 |
+| `BATTLE_INVALID_STATUS` | 409 | `PENDING` 상태가 아님 (이미 승인·취소·종료됨) |
+
+---
+
+### 2-8. 내가 만든 배틀 목록 조회 (본인)
 
 
 
@@ -303,7 +340,7 @@ GET /api/v1/battles/created/me?status={status}&page={page}&size={size}
 
 ---
 
-### 2-8. PENDING 배틀 목록 조회 (관리자)
+### 2-9. PENDING 배틀 목록 조회 (관리자)
 
 ```
 GET /api/v1/battles/admin/pending?page={page}&size={size}
@@ -383,7 +420,7 @@ GET /api/v1/battles/admin/pending?page={page}&size={size}
 
 ---
 
-### 2-9. Battle 상세 조회 (관리자)
+### 2-10. Battle 상세 조회 (관리자)
 
 ```
 GET /api/v1/battles/admin/{battleId}
@@ -888,3 +925,5 @@ GET /api/v1/battles/{battleId}/info
 | 2026-06-18 | 2-7 내가 만든 배틀 목록 조회(`GET /api/v1/battles/created/me`) 신설. 생성자 본인에게는 PENDING/CANCELLED 포함 전체 상태 노출 |
 | 2026-06-22 | 2-8 관리자 PENDING 목록 조회(`GET /api/v1/battles/admin/pending`) 신설. 2-9 관리자 상세 조회(`GET /api/v1/battles/admin/{battleId}`) 신설. 2-3 관리자 전용 조회 안내 문구 수정 |
 | 2026-06-22 | 2-4/2-5/2-6 관리자 액션 경로를 `/admin/` 하위로 이동. (`/{battleId}/approve|reject|cancel` → `/admin/{battleId}/approve|reject|cancel`) |
+| 2026-06-23 | 2-7 Battle 취소 (본인) `PATCH /api/v1/battles/{battleId}/cancel` 신설. PENDING 상태 본인 Battle 직접 취소 지원. 기존 2-7~2-9를 2-8~2-10으로 번호 이동 |
+| 2026-06-23 | 2-2 `sort` 파라미터 추가. `popular` 지정 시 vote_count 내림차순, 미지정 시 최신 등록순(기존 동작 유지) |
