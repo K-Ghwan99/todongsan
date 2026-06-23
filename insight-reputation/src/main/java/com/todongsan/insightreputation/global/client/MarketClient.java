@@ -6,6 +6,9 @@ import com.todongsan.insightreputation.global.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
@@ -27,6 +30,15 @@ public class MarketClient {
     @Value("${client.market.base-url:http://market-service}")
     private String marketServiceBaseUrl;
 
+    @Value("${client.market.internal-auth-token:local-internal-token}")
+    private String internalAuthToken;
+
+    private HttpEntity<Void> internalAuthEntity() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Internal-Auth", internalAuthToken);
+        return new HttpEntity<>(headers);
+    }
+
     /**
      * Market 기본 정보 및 선택지별 집계 조회
      * 
@@ -38,8 +50,9 @@ public class MarketClient {
         
         try {
             log.info("Market Service 요약 정보 조회 요청: marketId={}", marketId);
-            
-            ApiResponse<Object> response = restTemplate.getForObject(url, ApiResponse.class);
+
+            ApiResponse<Object> response = restTemplate.exchange(
+                url, HttpMethod.GET, internalAuthEntity(), ApiResponse.class).getBody();
             
             if (response == null || !response.isSuccess()) {
                 log.warn("Market Service 응답 오류: marketId={}, response={}", marketId, response);
@@ -122,7 +135,8 @@ public class MarketClient {
             
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
-                log.warn("Market 없음: marketId={}", marketId);
+                // Market Service는 MARKET_NOT_FOUND 코드로 내려줌 → RESOURCE_NOT_FOUND로 변환
+                log.warn("Market 없음 (MARKET_NOT_FOUND): marketId={}", marketId);
                 throw new CustomException(ErrorCode.RESOURCE_NOT_FOUND);
             } else if (e.getStatusCode() == HttpStatus.CONFLICT) {
                 // MARKET_INVALID_STATUS (SETTLED 아님) 또는 MARKET_NO_PREDICTIONS
@@ -141,6 +155,70 @@ public class MarketClient {
         } catch (Exception e) {
             log.error("Market Service 호출 중 예상치 못한 오류: marketId={}", marketId, e);
             throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
+        }
+    }
+
+    public ActiveMarketInfoResponse getActiveMarketInfo(long marketId) {
+        String url = String.format("%s/internal/api/v1/markets/%d/basic-info", marketServiceBaseUrl, marketId);
+
+        try {
+            log.info("Market Service 기본 정보 조회 요청: marketId={}", marketId);
+
+            ApiResponse<Object> response = restTemplate.exchange(
+                url, HttpMethod.GET, internalAuthEntity(), ApiResponse.class).getBody();
+
+            if (response == null || !response.isSuccess()) {
+                log.warn("Market Service 기본 정보 응답 오류: marketId={}, response={}", marketId, response);
+                throw new CustomException(ErrorCode.EXTERNAL_SERVICE_BAD_RESPONSE);
+            }
+
+            Object data = response.getData();
+            if (data == null) {
+                log.warn("Market Service 기본 정보 응답 data 없음: marketId={}", marketId);
+                throw new CustomException(ErrorCode.RESOURCE_NOT_FOUND);
+            }
+
+            if (data instanceof java.util.Map) {
+                @SuppressWarnings("unchecked")
+                java.util.Map<String, Object> dataMap = (java.util.Map<String, Object>) data;
+
+                @SuppressWarnings("unchecked")
+                java.util.List<String> optionLabels =
+                    (java.util.List<String>) dataMap.get("optionLabels");
+
+                ActiveMarketInfoResponse result = ActiveMarketInfoResponse.builder()
+                    .marketId(((Number) dataMap.get("marketId")).longValue())
+                    .title((String) dataMap.get("title"))
+                    .optionLabels(optionLabels != null ? optionLabels : new ArrayList<>())
+                    .regionSido((String) dataMap.get("regionSido"))
+                    .regionSigu((String) dataMap.get("regionSigu"))
+                    .build();
+
+                log.info("Market 기본 정보 조회 성공: marketId={}", marketId);
+                return result;
+            }
+
+            log.warn("Market Service 기본 정보 응답 타입 오류: marketId={}, dataType={}", marketId, data.getClass());
+            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_BAD_RESPONSE);
+
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                // Market Service는 MARKET_NOT_FOUND 코드로 내려줌 → RESOURCE_NOT_FOUND로 변환
+                log.warn("Market 없음 (MARKET_NOT_FOUND): marketId={}", marketId);
+                throw new CustomException(ErrorCode.RESOURCE_NOT_FOUND);
+            } else {
+                log.error("Market Service 기본 정보 HTTP 오류: marketId={}, status={}, message={}",
+                         marketId, e.getStatusCode(), e.getMessage());
+                throw new CustomException(ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE);
+            }
+        } catch (ResourceAccessException e) {
+            log.error("Market Service 기본 정보 연결 오류: marketId={}, message={}", marketId, e.getMessage());
+            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE);
+        } catch (CustomException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Market Service 기본 정보 호출 중 예상치 못한 오류: marketId={}", marketId, e);
+            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE);
         }
     }
 
@@ -163,7 +241,8 @@ public class MarketClient {
             try {
                 log.info("Market Service 예측 데이터 조회 요청: marketId={}, page={}", marketId, page);
                 
-                ApiResponse<Object> response = restTemplate.getForObject(url, ApiResponse.class);
+                ApiResponse<Object> response = restTemplate.exchange(
+                    url, HttpMethod.GET, internalAuthEntity(), ApiResponse.class).getBody();
                 
                 if (response == null || !response.isSuccess()) {
                     log.warn("Market Service 응답 오류: marketId={}, page={}, response={}", marketId, page, response);

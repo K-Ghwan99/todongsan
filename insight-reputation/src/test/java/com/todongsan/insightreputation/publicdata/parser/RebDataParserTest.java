@@ -46,7 +46,7 @@ class RebDataParserTest {
         PublicDataSnapshot snapshot = result.get(0);
         // ERD 컬럼 전체 검증
         assertEquals(PublicDataSource.REB, snapshot.getSource());
-        assertEquals(PublicDataType.PRICE_INDEX, snapshot.getDataType());
+        assertEquals(PublicDataType.WEEKLY_PRICE_INDEX, snapshot.getDataType());
         assertEquals(LocalDate.of(2012, 5, 7), snapshot.getReferenceDate());
         assertEquals("경기", snapshot.getRegionSido());
         assertEquals("50071", snapshot.getSourceRegionId());
@@ -73,7 +73,7 @@ class RebDataParserTest {
         
         PublicDataSnapshot snapshot = result.get(0);
         assertEquals(PublicDataSource.REB, snapshot.getSource());
-        assertEquals(PublicDataType.PRICE_INDEX, snapshot.getDataType());
+        assertEquals(PublicDataType.MONTHLY_PRICE_INDEX, snapshot.getDataType());
         assertEquals(LocalDate.of(2003, 11, 1), snapshot.getReferenceDate()); // 월간은 해당 월 1일
         assertEquals("전북", snapshot.getRegionSido());
         assertEquals("510085", snapshot.getSourceRegionId());
@@ -135,9 +135,9 @@ class RebDataParserTest {
         assertEquals(1, result.size()); // 유효한 데이터 1개만 처리
         assertEquals("1001", result.get(0).getSourceRegionId());
         assertEquals(PublicDataSource.REB, result.get(0).getSource());
-        assertEquals(PublicDataType.PRICE_INDEX, result.get(0).getDataType());
+        assertEquals(PublicDataType.WEEKLY_PRICE_INDEX, result.get(0).getDataType());
     }
-    
+
     @Test
     @DisplayName("REB 데이터 파싱 - 잘못된 날짜 형식 시 해당 행 건너뜀")
     void parseRebData_invalidDateFormat_skipsRow() throws Exception {
@@ -184,7 +184,7 @@ class RebDataParserTest {
         assertEquals(1, result.size());
         assertNull(result.get(0).getNumericValue());
         assertEquals(PublicDataSource.REB, result.get(0).getSource());
-        assertEquals(PublicDataType.PRICE_INDEX, result.get(0).getDataType());
+        assertEquals(PublicDataType.WEEKLY_PRICE_INDEX, result.get(0).getDataType());
         assertEquals("1001", result.get(0).getSourceRegionId());
     }
     

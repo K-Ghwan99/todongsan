@@ -57,7 +57,7 @@
 |---|---|
 | `BATTLE_NOT_FOUND` | 상세 조회 시. `PENDING` 상태 Battle도 일반 사용자에게는 이 에러로 응답 |
 
-### 3-3. 관리자 상태 전환 — `PATCH /api/v1/battles/{id}/{approve|reject|cancel}`
+### 3-3. 관리자 상태 전환 — `PATCH /api/v1/battles/admin/{battleId}/{approve|reject|cancel}`
 
 | ErrorCode | 메모 |
 |---|---|
@@ -66,7 +66,16 @@
 | `BATTLE_NOT_FOUND` | 관리자는 `PENDING` 상태도 조회 가능. 진짜로 없을 때만 |
 | `BATTLE_INVALID_STATUS` | 현재 상태에서 해당 전이 불가 (예: PENDING이 아닌데 승인 요청) |
 
-### 3-4. 투표 참여 — `POST /api/v1/battles/{id}/votes`
+### 3-4. Battle 취소 (본인) — `PATCH /api/v1/battles/{battleId}/cancel`
+
+| ErrorCode | 메모 |
+|---|---|
+| `UNAUTHORIZED` (공통) | — |
+| `FORBIDDEN` (공통) | 본인이 등록한 Battle이 아님 (`createdBy ≠ memberId`) |
+| `BATTLE_NOT_FOUND` | 존재하지 않거나 soft delete됨 |
+| `BATTLE_INVALID_STATUS` | `PENDING` 상태가 아님 (이미 승인·취소·종료됨) |
+
+### 3-5. 투표 참여 — `POST /api/v1/battles/{id}/votes`
 
 | ErrorCode | 메모 |
 |---|---|
@@ -81,13 +90,13 @@
 > **start_at 미도달 시**: ACTIVE 상태이지만 service 레이어에서 `BATTLE_CLOSED` 응답.
 > (사용자 메시지는 "투표가 시작되지 않았습니다"로 처리 가능하나 ErrorCode는 같음)
 
-### 3-5. 결과 조회 — `GET /api/v1/battles/{id}/result`
+### 3-6. 결과 조회 — `GET /api/v1/battles/{id}/result`
 
 | ErrorCode | 메모 |
 |---|---|
 | `BATTLE_NOT_FOUND` | — |
 
-### 3-6. 관리자 전용 분석 결과 — `GET /api/v1/battles/{id}/result/{cross|certified}`
+### 3-7. 관리자 전용 분석 결과 — `GET /api/v1/battles/{id}/result/{cross|certified}`
 
 | ErrorCode | 메모 |
 |---|---|
@@ -96,7 +105,7 @@
 | `BATTLE_NOT_FOUND` | — |
 | `BATTLE_RESULT_NOT_AVAILABLE` | `CLOSED` 상태가 아님 (포인트 차감 없음, 관리자도 동일) |
 
-### 3-7. 댓글 작성 — `POST /api/v1/battles/{id}/comments`
+### 3-8. 댓글 작성 — `POST /api/v1/battles/{id}/comments`
 
 | ErrorCode | 메모 |
 |---|---|
@@ -106,13 +115,13 @@
 | `BATTLE_NOT_FOUND` | 존재하지 않거나 PENDING 상태 |
 | `BATTLE_CLOSED` | CLOSED/CANCELLED 상태 |
 
-### 3-8. 댓글 목록 — `GET /api/v1/battles/{id}/comments`
+### 3-9. 댓글 목록 — `GET /api/v1/battles/{id}/comments`
 
 | ErrorCode | 메모 |
 |---|---|
 | `BATTLE_NOT_FOUND` | — |
 
-### 3-9. 댓글 삭제 — `DELETE /api/v1/battles/{id}/comments/{commentId}`
+### 3-10. 댓글 삭제 — `DELETE /api/v1/battles/{id}/comments/{commentId}`
 
 | ErrorCode | 메모 |
 |---|---|
@@ -120,14 +129,14 @@
 | `BATTLE_COMMENT_NOT_FOUND` | 없거나 이미 삭제됨 |
 | `BATTLE_COMMENT_FORBIDDEN` | 본인 댓글 아님 |
 
-### 3-10. 내부 — 댓글 단건 조회 — `GET /api/v1/battles/comments/{commentId}`
+### 3-11. 내부 — 댓글 단건 조회 — `GET /api/v1/battles/comments/{commentId}`
 
 | ErrorCode | 메모 |
 |---|---|
 | `FORBIDDEN` (공통) | 내부 서비스 인증 실패 |
 | `BATTLE_COMMENT_NOT_FOUND` | 없거나 soft delete됨 (인증 무효 처리) |
 
-### 3-11. 내부 — 투표 원본 데이터 — `GET /api/v1/battles/{id}/votes/raw`
+### 3-12. 내부 — 투표 원본 데이터 — `GET /api/v1/battles/{id}/votes/raw`
 
 | ErrorCode | 메모 |
 |---|---|
@@ -269,3 +278,4 @@ CONVENTION 담당자(Insight)와 협의해서 통일 필요.
 | v2 | 5-4 섹션 추가: Member-Point 호출 시 referenceType/referenceId/idempotency_key 정책 명확화 |
 | v2 | 6번 충돌 항목 확장: NOT_FOUND, POINT_INSUFFICIENT HTTP 코드 등 추가 |
 | v3 | 3-6 교차분석·인증자 필터 에러 코드를 관리자 전용 기준으로 변경. POINT_INSUFFICIENT/IDEMPOTENCY_KEY_REQUIRED 제거, FORBIDDEN 추가 |
+| v4 | 3-3 관리자 전환 API 경로를 `/admin/` 하위로 정정. 3-4 사용자 Battle 취소 에러 섹션 신설. 이하 번호 이동 (3-4→3-5 ~ 3-11→3-12) |

@@ -92,6 +92,7 @@ public class VoteServiceImpl implements VoteService {
                     .referenceType("BATTLE")
                     .referenceId(battleId)
                     .amount(VOTE_REWARD)
+                    .reason("Battle 투표 참여 보상")
                     .idempotencyKey(idempotencyKey)
                     .build());
         } catch (CustomException e) {
@@ -103,6 +104,7 @@ public class VoteServiceImpl implements VoteService {
                             .referenceId(battleId)
                             .type("EARN_VOTE")
                             .amount(VOTE_REWARD)
+                            .reason("Battle 투표 참여 보상")
                             .idempotencyKey(idempotencyKey)
                             .build());
                 }

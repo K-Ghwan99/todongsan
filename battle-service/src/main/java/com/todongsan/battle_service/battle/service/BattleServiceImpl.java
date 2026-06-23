@@ -60,9 +60,12 @@ public class BattleServiceImpl implements BattleService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<BattleListResponse> getBattles(String status, int page, int size) {
+    public Page<BattleListResponse> getBattles(String status, String sort, int page, int size) {
         BattleStatus battleStatus = parsePublicStatus(status);
-        PageRequest pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Sort sorting = "popular".equalsIgnoreCase(sort)
+                ? Sort.by("voteCount").descending()
+                : Sort.by("createdAt").descending();
+        PageRequest pageable = PageRequest.of(page, size, sorting);
         return battleRepository.findByStatusAndDeletedAtIsNull(battleStatus, pageable)
                 .map(b -> BattleListResponse.from(b, commentRepository.countByBattleIdAndDeletedAtIsNull(b.getId())));
     }
@@ -121,6 +124,7 @@ public class BattleServiceImpl implements BattleService {
                     .referenceType("BATTLE")
                     .referenceId(battleId)
                     .amount(APPROVED_REWARD)
+                    .reason("Battle 주제 등록 승인 보상")
                     .idempotencyKey(idempotencyKey)
                     .build());
         } catch (CustomException e) {
@@ -132,6 +136,7 @@ public class BattleServiceImpl implements BattleService {
                             .referenceId(battleId)
                             .type("EARN_BATTLE_APPROVED")
                             .amount(APPROVED_REWARD)
+                            .reason("Battle 주제 등록 승인 보상")
                             .idempotencyKey(idempotencyKey)
                             .build());
                 }
@@ -159,6 +164,20 @@ public class BattleServiceImpl implements BattleService {
         Battle battle = findByIdOrThrow(battleId);
         if (battle.getStatus() != BattleStatus.ACTIVE) {
             throw new CustomException(ErrorCode.BATTLE_INVALID_STATUS);
+        }
+        battle.cancel();
+        return BattleStatusResponse.from(battle);
+    }
+
+    @Override
+    @Transactional
+    public BattleStatusResponse cancelBattleByUser(Long battleId, Long memberId) {
+        Battle battle = findByIdOrThrow(battleId);
+        if (battle.getStatus() != BattleStatus.PENDING) {
+            throw new CustomException(ErrorCode.BATTLE_INVALID_STATUS);
+        }
+        if (!battle.getCreatedBy().equals(memberId)) {
+            throw new CustomException(ErrorCode.FORBIDDEN);
         }
         battle.cancel();
         return BattleStatusResponse.from(battle);
