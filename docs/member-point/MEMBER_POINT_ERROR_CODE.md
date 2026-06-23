@@ -19,8 +19,8 @@
 
 | ErrorCode | HTTP Status | 메시지 | 발생 조건 | Retry | 실패 후 상태 | 프론트 처리 |
 |---|---|---|---|---|---|---|
-| `MEMBER_NOT_FOUND` | 404 | 존재하지 않는 회원입니다. | 요청한 memberId가 DB에 없음 | X | 변경 없음 | Toast 표시 후 현재 화면 유지 |
-| `MEMBER_ALREADY_DELETED` | 409 | 이미 탈퇴한 회원입니다. | member.deleted_at이 존재하는 회원에 요청 | X | 변경 없음 | Toast 표시 후 로그인 페이지 이동 |
+| `MEMBER_NOT_FOUND` | 404 | 존재하지 않는 회원입니다. | 요청한 memberId가 DB에 없음. 모든 일반 API가 `findByIdAndDeletedAtIsNull`을 사용해 **탈퇴 회원도 이 코드로 처리됨** | X | 변경 없음 | Toast 표시 후 현재 화면 유지 |
+| `MEMBER_ALREADY_DELETED` | 409 | 이미 탈퇴한 회원입니다. | (현재 미사용) ErrorCode enum에 정의만 있고 실제로 throw하는 코드가 없음 — 탈퇴 회원 요청은 전부 `MEMBER_NOT_FOUND`로 처리됨 | X | 변경 없음 | 해당 없음 (실제로 발생하지 않음) |
 | `MEMBER_NICKNAME_DUPLICATE` | 409 | 이미 사용 중인 닉네임입니다. | member.nickname UNIQUE 제약 충돌 | X | 변경 없음 | Toast 표시 후 입력 폼 유지 |
 | `MEMBER_RESIDENCE_CHANGE_COOLDOWN` | 409 | 거주지는 30일마다 1회 변경 가능합니다. | residence_changed_at 기준 30일 이내 재변경 요청 | X | 변경 없음 | Toast 표시 후 현재 화면 유지 |
 
@@ -32,8 +32,8 @@
 |---|---|---|---|---|---|---|
 | `POINT_INSUFFICIENT` | 409 | 포인트가 부족합니다. | member.point_balance < 차감 요청액 | X | point_balance 변경 없음, point_history FAILED 레코드 INSERT (Scheduler 대사용) | Toast 표시 후 현재 화면 유지 |
 | `POINT_INVALID_AMOUNT` | 400 | 포인트 금액은 0보다 커야 합니다. | 요청 amount <= 0 | X | 변경 없음 | Toast 표시 후 입력 폼 유지 |
-| `POINT_HISTORY_NOT_FOUND` | 404 | 포인트 내역을 찾을 수 없습니다. | 요청한 point_history.id가 DB에 없음 | X | 변경 없음 | Toast 표시 후 현재 화면 유지 |
-| `POINT_ORIGINAL_TRANSACTION_NOT_FOUND` | 404 | 환불/정산 대상 원본 거래를 찾을 수 없습니다. | 환불/정산 요청의 reference_id에 해당하는 원본 거래 없음 | X | 변경 없음 | Toast 표시 후 관리자 문의 안내 |
+| `POINT_HISTORY_NOT_FOUND` | 404 | 포인트 내역을 찾을 수 없습니다. | (현재 미사용) ErrorCode enum에 정의만 있고 실제로 throw하는 코드가 없음 | X | 변경 없음 | 해당 없음 (실제로 발생하지 않음) |
+| `POINT_ORIGINAL_TRANSACTION_NOT_FOUND` | 404 | 환불/정산 대상 원본 거래를 찾을 수 없습니다. | (현재 미사용) ErrorCode enum에 정의만 있고 실제로 throw하는 코드가 없음 (정산/환불은 원본 거래 존재 여부를 검증하지 않음) | X | 변경 없음 | 해당 없음 (실제로 발생하지 않음) |
 | `POINT_INVALID_REFERENCE_TYPE` | 400 | 유효하지 않은 referenceType입니다. | referenceType이 BATTLE/MARKET_PREDICTION/INSIGHT_REPORT 외 값 | X | 변경 없음 | 호출 측 코드 수정 필요 |
 
 ---
@@ -90,8 +90,7 @@
 | ErrorCode | 발생 상황 |
 |---|---|
 | `UNAUTHORIZED` | JWT 유효하지 않음 (공통) |
-| `MEMBER_NOT_FOUND` | 회원 없음 |
-| `MEMBER_ALREADY_DELETED` | 탈퇴한 회원 |
+| `MEMBER_NOT_FOUND` | 회원 없음 (탈퇴 회원 포함) |
 
 ---
 
@@ -111,8 +110,7 @@
 | ErrorCode | 발생 상황 |
 |---|---|
 | `UNAUTHORIZED` | JWT 유효하지 않음 (공통) |
-| `MEMBER_NOT_FOUND` | 회원 없음 |
-| `MEMBER_ALREADY_DELETED` | 이미 탈퇴한 회원 |
+| `MEMBER_NOT_FOUND` | 회원 없음 (이미 탈퇴한 회원도 동일하게 처리됨) |
 
 ---
 
@@ -179,25 +177,27 @@
 
 ### 3-13. POST /internal/api/v1/points/settlements (정산 일괄 지급)
 
+요청 자체를 막는 에러(items 처리 시작 전):
+
 | ErrorCode | 발생 상황 |
 |---|---|
-| `IDEMPOTENCY_KEY_REQUIRED` | Idempotency-Key 헤더 누락 |
-| `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 요청 내용 다름 |
-| `POINT_TRANSACTION_ALREADY_PROCESSED` | 동일 키 + 동일 요청 재시도 |
-| `MEMBER_NOT_FOUND` | items 중 존재하지 않는 memberId 포함 |
-| `POINT_ORIGINAL_TRANSACTION_NOT_FOUND` | 정산 대상 원본 거래 없음 |
+| `IDEMPOTENCY_KEY_REQUIRED` | Header Idempotency-Key 누락, 또는 items 중 하나라도 idempotencyKey 누락 |
+| `INVALID_REQUEST` | Header Idempotency-Key 값이 body의 settlementId와 다름 |
+
+item 단위 에러(`results[].errorCode`로만 표시, 요청 전체는 200 유지)는 7절 참조. `MEMBER_NOT_FOUND`, `POINT_INVALID_AMOUNT`, `POINT_INVALID_REFERENCE_TYPE`, `IDEMPOTENCY_KEY_CONFLICT`가 여기 해당하며 요청 레벨 에러가 아니다.
 
 ---
 
 ### 3-14. POST /internal/api/v1/points/refunds (무효 환불)
 
+요청 자체를 막는 에러(items 처리 시작 전):
+
 | ErrorCode | 발생 상황 |
 |---|---|
-| `IDEMPOTENCY_KEY_REQUIRED` | Idempotency-Key 헤더 누락 |
-| `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 요청 내용 다름 |
-| `POINT_TRANSACTION_ALREADY_PROCESSED` | 동일 키 + 동일 요청 재시도 |
-| `MEMBER_NOT_FOUND` | items 중 존재하지 않는 memberId 포함 |
-| `POINT_ORIGINAL_TRANSACTION_NOT_FOUND` | 환불 대상 원본 거래 없음 |
+| `IDEMPOTENCY_KEY_REQUIRED` | Header Idempotency-Key 누락, 또는 items 중 하나라도 idempotencyKey 누락 |
+| `INVALID_REQUEST` | Header Idempotency-Key 값이 body의 refundId와 다름 |
+
+item 단위 에러(`results[].errorCode`로만 표시, 요청 전체는 200 유지)는 7절 참조. `MEMBER_NOT_FOUND`, `POINT_INVALID_AMOUNT`, `POINT_INVALID_REFERENCE_TYPE`, `IDEMPOTENCY_KEY_CONFLICT`가 여기 해당하며 요청 레벨 에러가 아니다.
 
 ---
 
@@ -222,7 +222,7 @@ MEMBER_NOT_FOUND 또는 INTERNAL_ERROR 발생
   → point_history INSERT 안 함
   → Battle은 투표 데이터 유지 (투표 취소 안 함)
   → Battle의 point_reward_retry_queue에 적재
-  → 스케줄러가 재시도 (2차 개발)
+  → battle-service RetryScheduler가 주기적으로 재시도 (구현 완료)
 ```
 
 ### 4-3. Market → Point 네트워크 오류 / Timeout 시
@@ -379,6 +379,7 @@ Response:
 |---|---|---|
 | `MEMBER_NOT_FOUND` | memberId에 해당하는 회원 없음 | 관리자 확인 후 수동 보정 |
 | `POINT_INVALID_AMOUNT` | amount <= 0 | 호출 측 데이터 확인 |
+| `POINT_INVALID_REFERENCE_TYPE` | referenceType이 BATTLE/MARKET_PREDICTION/INSIGHT_REPORT 외 값 | 호출 측 데이터 확인 |
 | `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 다른 요청 내용 | 호출 측 키 재생성 후 재시도 |
 | `INTERNAL_ERROR` | 서버 오류 | Retry 대상 |
 
