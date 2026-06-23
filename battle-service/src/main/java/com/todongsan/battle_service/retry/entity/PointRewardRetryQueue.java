@@ -40,6 +40,9 @@ public class PointRewardRetryQueue extends BaseEntity {
     @Column(name = "idempotency_key", nullable = false, unique = true, length = 100)
     private String idempotencyKey;
 
+    @Column(length = 100)
+    private String reason;
+
     @Column(name = "retry_count", nullable = false)
     private int retryCount = 0;
 
@@ -49,13 +52,14 @@ public class PointRewardRetryQueue extends BaseEntity {
 
     @Builder
     public PointRewardRetryQueue(Long memberId, String referenceType, Long referenceId,
-                                  String type, BigDecimal amount, String idempotencyKey) {
+                                  String type, BigDecimal amount, String idempotencyKey, String reason) {
         this.memberId = memberId;
         this.referenceType = referenceType;
         this.referenceId = referenceId;
         this.type = type;
         this.amount = amount;
         this.idempotencyKey = idempotencyKey;
+        this.reason = reason;
         this.retryCount = 0;
         this.status = RetryStatus.PENDING;
     }

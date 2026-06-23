@@ -78,6 +78,7 @@ erDiagram
         VARCHAR type "PointHistoryType"
         DECIMAL amount
         VARCHAR idempotency_key UK
+        VARCHAR reason "사용자 노출용 설명 (nullable)"
         INT retry_count
         VARCHAR status "PENDING/SUCCESS/FAILED"
         DATETIME created_at
@@ -209,6 +210,7 @@ CREATE TABLE point_reward_retry_queue (
     type            VARCHAR(50)     NOT NULL,                    -- PointHistoryType (EARN_VOTE, EARN_VOTE_WIN, EARN_COMMENT 등)
     amount          DECIMAL(10,2)   NOT NULL,
     idempotency_key VARCHAR(100)    NOT NULL UNIQUE,
+    reason          VARCHAR(100),                                -- 사용자 노출용 설명 (point_history.reason과 동일 값으로 재시도 시 전달)
     retry_count     INT             NOT NULL DEFAULT 0,
     status          VARCHAR(20)     NOT NULL DEFAULT 'PENDING',  -- PENDING, SUCCESS, FAILED
     created_at      DATETIME        NOT NULL,
@@ -333,3 +335,4 @@ flowchart TD
 | v4 | `ALREADY_VOTED` 참조를 `BATTLE_ALREADY_VOTED`로 정정 |
 | v5 | `battle` 테이블에 `sido`, `sigu` 컬럼 추가 (Insight 방문 인증 연동) |
 | v6 | 4-1 CANCELLED 설명에 사용자 직접 취소 경우 추가. 4-2 상태 전이도에 `PENDING → CANCELLED (사용자 직접 취소)` 경로 추가 |
+| v7 | `point_reward_retry_queue`에 `reason` 컬럼 추가. 재시도 시 Member-Point에 reason을 그대로 전달하기 위함 |

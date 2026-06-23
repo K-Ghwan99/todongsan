@@ -40,6 +40,7 @@ public class RetryScheduler {
                         .referenceType(queue.getReferenceType())
                         .referenceId(queue.getReferenceId())
                         .amount(queue.getAmount())
+                        .reason(queue.getReason())
                         .idempotencyKey(queue.getIdempotencyKey())
                         .build();
                 memberPointClient.earnPoint(request);
