@@ -57,3 +57,4 @@ client:
     base-url: ${MEMBER_POINT_SERVICE_BASE_URL:http://member-point-service}
   market:
     base-url: ${MARKET_SERVICE_BASE_URL:http://localhost:8082}
+    internal-auth-token: ${MARKET_INTERNAL_AUTH_TOKEN:local-internal-token}

@@ -132,6 +132,7 @@ services:
       CLAUDE_API_URL: ${CLAUDE_API_URL:-replace-me}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-replace-me}
       BATTLE_INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-local-internal-token}
+      MARKET_INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-local-internal-token}
       BATTLE_SERVICE_BASE_URL: http://battle-service:8081
       MEMBER_POINT_SERVICE_BASE_URL: http://member-point-service:8080
       MARKET_SERVICE_BASE_URL: http://market-service:8082
