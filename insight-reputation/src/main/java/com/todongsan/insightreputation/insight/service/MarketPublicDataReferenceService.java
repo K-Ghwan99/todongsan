@@ -42,8 +42,9 @@ public class MarketPublicDataReferenceService {
         String marketTitle = marketInfo != null ? marketInfo.getTitle() : "마켓 #" + marketId;
         List<String> optionLabels = marketInfo != null ? marketInfo.getOptionLabels() : Collections.emptyList();
         String regionSido = marketInfo != null ? marketInfo.getRegionSido() : null;
+        String regionSigu = marketInfo != null ? marketInfo.getRegionSigu() : null;
 
-        // 2. 공공 데이터 조회 — regionSido 있으면 지역 필터, 없으면 전체에서 최근 4주
+        // 2. 공공 데이터 조회 — 주간(8주) 우선, 없으면 월간(3개월) 폴백, 지역 정책 필터 적용
         List<PublicDataSnapshot> publicData = Collections.emptyList();
         LocalDate today = LocalDate.now();
         try {
@@ -56,14 +57,9 @@ public class MarketPublicDataReferenceService {
                             PublicDataSource.REB, PublicDataType.MONTHLY_PRICE_INDEX,
                             today.minusMonths(3), today);
                 }
-                // regionSido 기반으로 필터링
-                final String sido = regionSido;
-                publicData = publicData.stream()
-                        .filter(snap -> sido.equals(snap.getRegionSido())
-                                || (snap.getRegionFullpath() != null && snap.getRegionFullpath().contains(sido)))
-                        .toList();
-                log.info("공공 데이터 지역 필터 조회 완료: marketId={}, regionSido={}, dataCount={}",
-                        marketId, regionSido, publicData.size());
+                publicData = applyRegionFilter(publicData, regionSido, regionSigu);
+                log.info("공공 데이터 지역 필터 조회 완료: marketId={}, regionSido={}, regionSigu={}, dataCount={}",
+                        marketId, regionSido, regionSigu, publicData.size());
             } else {
                 publicData = publicDataSnapshotRepository.findRecentPriceData(
                         PublicDataSource.REB, PublicDataType.WEEKLY_PRICE_INDEX,
@@ -150,5 +146,28 @@ public class MarketPublicDataReferenceService {
                 .content(content)
                 .dataAsOf(dataAsOf)
                 .build();
+    }
+
+    /**
+     * Market 지역 정책 기준 필터링
+     * - "전국": region_sido = '전국'
+     * - 시도(regionSigu=null): region_sido = :regionSido
+     * - 시군구: region_sido = :regionSido AND region_fullpath LIKE '%:regionSigu%'
+     */
+    private List<PublicDataSnapshot> applyRegionFilter(List<PublicDataSnapshot> snapshots,
+                                                        String regionSido, String regionSigu) {
+        return snapshots.stream()
+                .filter(snap -> {
+                    if ("전국".equals(regionSido)) {
+                        return "전국".equals(snap.getRegionSido());
+                    } else if (regionSigu != null && !regionSigu.isBlank()) {
+                        return regionSido.equals(snap.getRegionSido())
+                                && snap.getRegionFullpath() != null
+                                && snap.getRegionFullpath().contains(regionSigu);
+                    } else {
+                        return regionSido.equals(snap.getRegionSido());
+                    }
+                })
+                .toList();
     }
 }
