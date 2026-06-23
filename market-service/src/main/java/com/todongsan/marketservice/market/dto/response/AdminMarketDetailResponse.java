@@ -10,6 +10,7 @@ import com.todongsan.marketservice.market.type.MarketPriceModel;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import com.todongsan.marketservice.market.type.MarketVoidReasonType;
 import com.todongsan.marketservice.market.type.RefundStatus;
+import com.todongsan.marketservice.market.type.RegionScope;
 import com.todongsan.marketservice.market.type.SettlementStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
@@ -24,6 +25,9 @@ public record AdminMarketDetailResponse(
         MarketCategory category,
         MarketAnswerType answerType,
         MarketMetricUnit metricUnit,
+        RegionScope regionScope,
+        String regionSido,
+        String regionSigu,
         MarketStatus status,
         MarketDisplayStatus displayStatus,
         boolean canPredict,

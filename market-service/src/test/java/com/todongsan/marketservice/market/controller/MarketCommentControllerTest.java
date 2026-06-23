@@ -87,12 +87,13 @@ class MarketCommentControllerTest {
                 .andExpect(jsonPath("$.data.content[0].commentId").value(10))
                 .andExpect(jsonPath("$.data.content[1].commentId").value(9))
                 .andExpect(jsonPath("$.data.content[2].commentId").value(11))
-                .andExpect(jsonPath("$.data.number").value(0))
+                .andExpect(jsonPath("$.data.page").value(0))
                 .andExpect(jsonPath("$.data.size").value(10))
                 .andExpect(jsonPath("$.data.totalElements").value(3))
                 .andExpect(jsonPath("$.data.totalPages").value(1))
-                .andExpect(jsonPath("$.data.first").value(true))
-                .andExpect(jsonPath("$.data.last").value(true));
+                .andExpect(jsonPath("$.data.last").value(true))
+                .andExpect(jsonPath("$.data.number").doesNotExist())
+                .andExpect(jsonPath("$.data.first").doesNotExist());
     }
 
     @Test
@@ -102,12 +103,13 @@ class MarketCommentControllerTest {
         mockMvc.perform(get("/api/v1/markets/{marketId}/comments", MARKET_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content").isEmpty())
-                .andExpect(jsonPath("$.data.number").value(0))
+                .andExpect(jsonPath("$.data.page").value(0))
                 .andExpect(jsonPath("$.data.size").value(10))
                 .andExpect(jsonPath("$.data.totalElements").value(0))
                 .andExpect(jsonPath("$.data.totalPages").value(0))
-                .andExpect(jsonPath("$.data.first").value(true))
-                .andExpect(jsonPath("$.data.last").value(true));
+                .andExpect(jsonPath("$.data.last").value(true))
+                .andExpect(jsonPath("$.data.number").doesNotExist())
+                .andExpect(jsonPath("$.data.first").doesNotExist());
     }
 
     @Test
@@ -195,6 +197,22 @@ class MarketCommentControllerTest {
         createCommentRequest(MARKET_ID, MEMBER_ID)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.errorCode").value("MARKET_COMMENT_NOT_ALLOWED"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PENDING", "VOIDED"})
+    void blockedMarketStatusesRejectBeforeContentLengthValidation(String statusValue) throws Exception {
+        insertMarket(MARKET_ID, statusValue, false);
+        String content = "가".repeat(501);
+
+        mockMvc.perform(post("/api/v1/markets/{marketId}/comments", MARKET_ID)
+                        .header("X-Member-Id", MEMBER_ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"" + content + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("MARKET_COMMENT_NOT_ALLOWED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM market_comment", Integer.class)).isZero();
     }
 
     @ParameterizedTest

@@ -3,6 +3,7 @@ package com.todongsan.marketservice.market.dto.request;
 import com.todongsan.marketservice.market.type.MarketAnswerType;
 import com.todongsan.marketservice.market.type.MarketCategory;
 import com.todongsan.marketservice.market.type.MarketMetricUnit;
+import com.todongsan.marketservice.market.type.RegionScope;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -32,6 +33,15 @@ public class CreateMarketRequest {
     private MarketAnswerType answerType;
 
     private MarketMetricUnit metricUnit;
+
+    @NotNull
+    private RegionScope regionScope;
+
+    @Size(max = 50)
+    private String regionSido;
+
+    @Size(max = 50)
+    private String regionSigu;
 
     @NotBlank
     @Size(max = 255)

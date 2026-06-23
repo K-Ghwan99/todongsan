@@ -12,6 +12,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,7 +21,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-@SpringBootTest
+@SpringBootTest(properties = "internal.auth-token=test-internal-token")
 @AutoConfigureMockMvc
 class InternalMarketInsightControllerTest {
 
@@ -27,6 +29,7 @@ class InternalMarketInsightControllerTest {
     private static final long RESULT_OPTION_ID = 11L;
     private static final long LOSER_OPTION_ID = 12L;
     private static final LocalDateTime BASE_TIME = LocalDateTime.of(2026, 6, 1, 10, 0);
+    private static final String INTERNAL_AUTH_TOKEN = "test-internal-token";
 
     @Autowired
     private MockMvc mockMvc;
@@ -48,6 +51,71 @@ class InternalMarketInsightControllerTest {
         jdbcTemplate.update("DELETE FROM market_prediction");
         jdbcTemplate.update("DELETE FROM market_option");
         jdbcTemplate.update("DELETE FROM market");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "PENDING",
+            "ACTIVE",
+            "CLOSED",
+            "DATA_PENDING",
+            "SETTLEMENT_IN_PROGRESS",
+            "SETTLED",
+            "VOIDED"
+    })
+    void getBasicInfoReturnsMarketBasicInfoRegardlessOfStatus(String status) throws Exception {
+        insertMarket(MARKET_ID, status, RESULT_OPTION_ID);
+        insertInsightOptions(MARKET_ID);
+
+        mockMvc.perform(get("/internal/api/v1/markets/{marketId}/basic-info", MARKET_ID)
+                        .header("X-Internal-Auth", INTERNAL_AUTH_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.marketId").value(MARKET_ID))
+                .andExpect(jsonPath("$.data.title").value("Insight Test Market"))
+                .andExpect(jsonPath("$.data.optionLabels[0]").value("Option A"))
+                .andExpect(jsonPath("$.data.optionLabels[1]").value("Option B"))
+                .andExpect(jsonPath("$.data.regionScope").value("NON_REGIONAL"))
+                .andExpect(jsonPath("$.data.regionSido").value("서울"))
+                .andExpect(jsonPath("$.data.regionSigu").value("강남구"));
+    }
+
+    @Test
+    void getBasicInfoRejectsMissingInternalAuthHeader() throws Exception {
+        insertMarket(MARKET_ID, "ACTIVE", RESULT_OPTION_ID);
+
+        mockMvc.perform(get("/internal/api/v1/markets/{marketId}/basic-info", MARKET_ID))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void getBasicInfoRejectsInvalidInternalAuthHeader() throws Exception {
+        insertMarket(MARKET_ID, "ACTIVE", RESULT_OPTION_ID);
+
+        mockMvc.perform(get("/internal/api/v1/markets/{marketId}/basic-info", MARKET_ID)
+                        .header("X-Internal-Auth", "wrong-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void getBasicInfoRejectsMissingMarket() throws Exception {
+        mockMvc.perform(get("/internal/api/v1/markets/{marketId}/basic-info", 999L)
+                        .header("X-Internal-Auth", INTERNAL_AUTH_TOKEN))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("MARKET_NOT_FOUND"));
+    }
+
+    @Test
+    void getBasicInfoRejectsDeletedMarket() throws Exception {
+        insertMarket(MARKET_ID, "ACTIVE", RESULT_OPTION_ID);
+        jdbcTemplate.update("UPDATE market SET deleted_at = ? WHERE id = ?", BASE_TIME, MARKET_ID);
+
+        mockMvc.perform(get("/internal/api/v1/markets/{marketId}/basic-info", MARKET_ID)
+                        .header("X-Internal-Auth", INTERNAL_AUTH_TOKEN))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("MARKET_NOT_FOUND"));
     }
 
     @Test
@@ -252,12 +320,13 @@ class InternalMarketInsightControllerTest {
         jdbcTemplate.update("""
                 INSERT INTO market (
                     id, title, description, category, answer_type, judge_data_source, judge_criteria, judge_date,
+                    region_sido, region_sigu,
                     status, close_at, settled_at, result_option_id, result_value, result_text,
                     total_pool, fee_rate, fee_amount, settlement_pool, initial_virtual_liquidity,
                     created_by, created_at, updated_at
                 ) VALUES (
                     ?, 'Insight Test Market', 'Insight summary source', 'PRICE_INDEX', 'NUMERIC_RANGE',
-                    'TEST_SOURCE', 'TEST_CRITERIA', ?, ?, ?, ?, ?, 0.7500, 'Option A',
+                    'TEST_SOURCE', 'TEST_CRITERIA', ?, '서울', '강남구', ?, ?, ?, ?, 0.7500, 'Option A',
                     999.00, 5.00, 30.00, 570.00, 200.00, 1, ?, ?
                 )
                 """,

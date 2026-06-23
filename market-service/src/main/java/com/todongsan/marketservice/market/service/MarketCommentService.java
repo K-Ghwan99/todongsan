@@ -87,8 +87,7 @@ public class MarketCommentService {
                 size,
                 totalElements,
                 totalPages,
-                page == 0,
-                totalElements == 0 || page >= totalPages - 1
+                isLast(page, size, totalElements)
         );
     }
 
@@ -150,6 +149,10 @@ public class MarketCommentService {
     }
 
     private int totalPages(long totalElements, int size) {
-        return (int) Math.ceil((double) totalElements / size);
+        return (int) ((totalElements + size - 1) / size);
+    }
+
+    private boolean isLast(int page, int size, long totalElements) {
+        return (long) (page + 1) * size >= totalElements;
     }
 }

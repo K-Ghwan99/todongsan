@@ -938,6 +938,41 @@ NOT_FOUND는 자동 재차감하지 않고 Prediction FAILED 처리한다.
 
 ---
 
+## 5-1. Market 지역 범위 validation 실패 시나리오
+
+관리자 Market 생성 시 `regionScope`/`regionSido`/`regionSigu` 조합이 정책과 맞지 않으면 신규 Market ErrorCode를 만들지 않고 공통 `VALIDATION_FAILED`를 반환한다.
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | `POST /api/v1/admin/markets` 요청 validation |
+| 실패 원인 | `regionScope` 누락, scope별 regionSido/regionSigu 조합 오류, blank 지역 문자열 |
+| 상태 변화 | Market row 생성 없음 |
+| 재시도 | 요청 값을 수정한 뒤 재요청 가능 |
+| 관련 ErrorCode | `VALIDATION_FAILED` |
+| HTTP Status | 400 |
+
+실패 케이스:
+
+```text
+regionScope 누락 또는 null
+NON_REGIONAL인데 regionSido 또는 regionSigu 존재
+NATIONAL인데 regionSido가 null 또는 "전국" 외 값
+NATIONAL인데 regionSigu 존재
+REGIONAL인데 regionSido null 또는 blank
+REGIONAL인데 regionSido = "전국"
+regionSido 또는 regionSigu blank
+```
+
+정상 조합:
+
+```text
+NON_REGIONAL -> regionSido=null, regionSigu=null
+NATIONAL -> 저장/응답 regionSido="전국", regionSigu=null
+REGIONAL -> regionSido=시도, regionSigu=시군구 또는 null
+```
+
+---
+
 ## 6. 선택지 검증 실패 시나리오
 
 ### 6-1. 선택지 범위가 겹치는 경우
@@ -1538,6 +1573,34 @@ Insight-Reputation Service는 Market AI 리포트 생성을 위해 Market Servic
 
 Market Service는 분석 결과를 생성하거나 저장하지 않고, SETTLED Market의 원본 참여 데이터만 제공한다.
 
+`basic-info` API는 진행 중인 Market의 공공데이터 참조 요약 생성을 위한 상태 무관 기본 정보 조회 API다. 기존 `insight-summary`, `insight-predictions`는 SETTLED 전용 분석 데이터 조회 API이고, `basic-info`는 PENDING부터 VOIDED까지 모든 Market 상태에서 기본 정보를 제공한다.
+
+### 13-0. 정상 Market 기본 정보 조회
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Insight-Reputation Service가 진행 중인 Market의 공공데이터 참조 요약을 생성하기 위해 기본 정보 조회 |
+| API | `GET /internal/api/v1/markets/{marketId}/basic-info` |
+| 인증 | `X-Internal-Auth`가 `INTERNAL_AUTH_TOKEN`과 일치 |
+| 허용 상태 | PENDING, ACTIVE, CLOSED, DATA_PENDING, SETTLEMENT_IN_PROGRESS, SETTLED, VOIDED |
+| 제공 데이터 | marketId, title, optionLabels, regionScope, regionSido, regionSigu |
+| 상태 변화 | 없음 |
+| 관련 ErrorCode | 없음 |
+
+처리 기준:
+
+```text
+1. Insight-Reputation Service가 basic-info API 호출
+2. Market Service가 X-Internal-Auth를 검증
+3. Market 존재 및 deleted_at IS NULL 검증
+4. Market 상태와 무관하게 기본 정보와 regionScope/regionSido/regionSigu 반환
+5. regionSigu가 있는 경우 Insight-Reputation Service가 region_fullpath LIKE 등으로 public_data_snapshot을 매칭
+```
+
+Market Service는 Insight `public_data_snapshot.region_fullpath` 매칭을 수행하지 않는다. Market은 `regionScope`, `regionSido`, `regionSigu` 값을 제공만 하며, Insight DB에는 `region_sigu` 컬럼이 없으므로 세부 지역 매칭은 Insight-Reputation Service 책임이다.
+
+---
+
 ### 13-1. 정상 Insight 데이터 조회
 
 | 항목 | 내용 |
@@ -1573,6 +1636,21 @@ Market Service는 분석 결과를 생성하거나 저장하지 않고, SETTLED 
 | 관련 ErrorCode | MARKET_NOT_FOUND |
 | HTTP Status | 404 |
 
+basic-info API에서도 Market 없음 또는 soft delete는 동일하게 `MARKET_NOT_FOUND`를 반환한다. Market Service는 `RESOURCE_NOT_FOUND`를 반환하지 않으며, 필요하면 Insight-Reputation Service가 내부에서 매핑한다.
+
+---
+
+### 13-2-1. basic-info 내부 인증 실패
+
+| 항목 | 내용 |
+|---|---|
+| 발생 시점 | Insight-Reputation Service 또는 내부 호출자가 basic-info API 호출 |
+| 실패 원인 | `X-Internal-Auth` 없음 또는 `INTERNAL_AUTH_TOKEN`과 불일치 |
+| 상태 변화 | 없음 |
+| 재시도 | 올바른 내부 인증 토큰으로만 가능 |
+| 관련 ErrorCode | UNAUTHORIZED |
+| HTTP Status | 401 |
+
 ---
 
 ### 13-3. SETTLED 상태가 아닌 Market 조회
@@ -1592,6 +1670,13 @@ Market Service는 분석 결과를 생성하거나 저장하지 않고, SETTLED 
 ```text
 Insight 분석용 내부 API는 정산 완료 후 데이터 분석을 전제로 한다.
 따라서 SETTLED 상태가 아닌 Market은 분석 대상이 아니다.
+```
+
+예외:
+
+```text
+basic-info API는 분석 데이터 조회가 아니라 기본 정보 조회이므로 SETTLED가 아닌 상태도 허용한다.
+basic-info API는 PENDING, ACTIVE, CLOSED, DATA_PENDING, SETTLEMENT_IN_PROGRESS, SETTLED, VOIDED 전체 상태에서 조회 가능하다.
 ```
 
 ---
@@ -1845,6 +1930,24 @@ history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
 
 댓글 작성/삭제 실패는 Market 생명주기, Prediction, MarketSettlement, MarketRefund, MarketReputationUpdate 상태에 영향을 주지 않는다. 댓글 처리에는 Member-Point 호출, 포인트 처리, retry queue, Idempotency-Key가 없으므로 `POINT_UNKNOWN` 같은 상태도 사용하지 않는다.
 
+댓글 작성 검증 우선순위:
+
+```text
+1. Request body 기본 validation
+   - content null/blank → VALIDATION_FAILED
+
+2. Market 존재 여부
+   - Market 없음/삭제됨 → MARKET_NOT_FOUND
+
+3. Market 댓글 작성 가능 상태
+   - PENDING/VOIDED → MARKET_COMMENT_NOT_ALLOWED
+
+4. content 길이
+   - 500자 초과 → MARKET_COMMENT_TOO_LONG
+```
+
+따라서 `PENDING` 또는 `VOIDED` Market에 500자를 초과한 content로 댓글 작성을 요청하면 `MARKET_COMMENT_NOT_ALLOWED`가 우선 반환된다.
+
 ### 15-1. 본문 null 또는 blank
 
 | 항목 | 내용 |
@@ -1868,6 +1971,8 @@ history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
 | 복구 | 500자 이하로 수정 |
 | 관련 ErrorCode | `MARKET_COMMENT_TOO_LONG` |
 | HTTP Status | 400 |
+
+단, `PENDING` 또는 `VOIDED` Market에 대한 댓글 작성 요청이면 Market 상태 검증이 content 길이 검증보다 우선하므로 500자를 초과해도 `MARKET_COMMENT_NOT_ALLOWED`를 반환한다.
 
 ### 15-3. PENDING Market 댓글 작성
 
@@ -2052,7 +2157,8 @@ history insert 실패 시 가격 확정 트랜잭션 전체를 rollback한다.
 - [ ] `SETTLEMENT_IN_PROGRESS`, `SETTLED` 상태는 VOIDED 처리할 수 없다.
 - [ ] 환불은 item별 idempotencyKey를 사용하고 환불 타임아웃은 `REFUND_UNKNOWN`으로 변경한다.
 - [ ] Scheduler는 `limit` 기반 chunk 처리를 한다.
-- [ ] Insight-Reputation 내부 조회 API는 SETTLED Market만 허용한다.
+- [ ] Insight-Reputation 분석 데이터 API는 SETTLED Market만 허용한다.
+- [ ] Insight-Reputation basic-info API는 Market 상태와 무관하게 허용한다.
 - [ ] Insight-Reputation 내부 조회 API는 summary와 prediction page를 분리한다.
 - [ ] Insight-Reputation 내부 조회 API는 memberId까지만 제공한다.
 - [ ] Insight-Reputation 내부 조회 API 실패는 Market 상태를 변경하지 않는다.

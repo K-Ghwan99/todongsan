@@ -3,11 +3,14 @@ package com.todongsan.marketservice.market.service;
 import com.todongsan.marketservice.global.exception.CustomException;
 import com.todongsan.marketservice.global.exception.errorcode.CommonErrorCode;
 import com.todongsan.marketservice.global.exception.errorcode.MarketErrorCode;
+import com.todongsan.marketservice.market.dto.response.MarketBasicInfoResponse;
 import com.todongsan.marketservice.market.dto.response.MarketInsightMarketSummaryResponse;
 import com.todongsan.marketservice.market.dto.response.MarketInsightOptionStatisticsResponse;
 import com.todongsan.marketservice.market.dto.response.MarketInsightPredictionPageResponse;
 import com.todongsan.marketservice.market.dto.response.MarketInsightPredictionResponse;
 import com.todongsan.marketservice.market.dto.response.MarketInsightSummaryResponse;
+import com.todongsan.marketservice.market.entity.Market;
+import com.todongsan.marketservice.market.entity.MarketOption;
 import com.todongsan.marketservice.market.repository.MarketInsightOptionStatisticsRow;
 import com.todongsan.marketservice.market.repository.MarketInsightPredictionRow;
 import com.todongsan.marketservice.market.repository.MarketInsightSummaryRow;
@@ -15,6 +18,7 @@ import com.todongsan.marketservice.market.repository.MarketMapper;
 import com.todongsan.marketservice.market.type.MarketStatus;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +27,30 @@ import org.springframework.transaction.annotation.Transactional;
 public class MarketInsightService {
 
     private final MarketMapper marketMapper;
+
+    @Value("${INTERNAL_AUTH_TOKEN:${internal.auth-token:}}")
+    private String internalAuthToken;
+
+    @Transactional(readOnly = true)
+    public MarketBasicInfoResponse getBasicInfo(long marketId, String internalAuth) {
+        validateInternalAuth(internalAuth);
+        Market market = marketMapper.selectMarketBasicInfo(marketId);
+        if (market == null) {
+            throw new CustomException(MarketErrorCode.MARKET_NOT_FOUND);
+        }
+        List<String> optionLabels = marketMapper.selectOptionsByMarketId(marketId).stream()
+                .map(MarketOption::getOptionText)
+                .toList();
+
+        return new MarketBasicInfoResponse(
+                market.getId(),
+                market.getTitle(),
+                optionLabels,
+                market.getRegionScope(),
+                market.getRegionSido(),
+                market.getRegionSigu()
+        );
+    }
 
     @Transactional(readOnly = true)
     public MarketInsightSummaryResponse getSummary(long marketId) {
@@ -74,6 +102,12 @@ public class MarketInsightService {
             throw new CustomException(MarketErrorCode.MARKET_NO_PREDICTIONS);
         }
         return new InsightMarketSource(market, predictionCount);
+    }
+
+    private void validateInternalAuth(String internalAuth) {
+        if (internalAuthToken == null || internalAuthToken.isBlank() || !internalAuthToken.equals(internalAuth)) {
+            throw new CustomException(CommonErrorCode.UNAUTHORIZED);
+        }
     }
 
     private int calculateOffset(int page, int size) {

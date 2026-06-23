@@ -2,6 +2,7 @@ package com.todongsan.marketservice.market.dto.response;
 
 import com.todongsan.marketservice.market.type.MarketDisplayStatus;
 import com.todongsan.marketservice.market.type.MarketStatus;
+import com.todongsan.marketservice.market.type.RegionScope;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -33,6 +34,9 @@ public class MarketListResponse {
         private Long marketId;
         private String title;
         private MarketStatus status;
+        private RegionScope regionScope;
+        private String regionSido;
+        private String regionSigu;
         private LocalDateTime closeAt;
         @Schema(description = "실제 참여 포인트 총합. Decimal String으로 응답", type = "string", example = "1000.00")
         @JsonSerialize(using = ToStringSerializer.class)

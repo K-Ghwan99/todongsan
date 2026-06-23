@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import com.todongsan.marketservice.market.type.MarketDisplayStatus;
 import com.todongsan.marketservice.market.type.MarketStatus;
+import com.todongsan.marketservice.market.type.RegionScope;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -22,6 +23,9 @@ public class MarketDetailResponse {
     private String title;
     private String description;
     private MarketStatus status;
+    private RegionScope regionScope;
+    private String regionSido;
+    private String regionSigu;
 
     private LocalDateTime closeAt;
     private LocalDateTime resultAnnounceAt;
