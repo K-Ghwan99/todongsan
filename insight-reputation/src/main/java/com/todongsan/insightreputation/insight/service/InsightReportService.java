@@ -443,8 +443,49 @@ public class InsightReportService {
     }
     
     /**
+     * Market AI 분석 자동 트리거 (내부 API)
+     * Market SETTLED 시 Market Service에서 호출
+     * Point 차감 없음
+     *
+     * @param marketId Market ID
+     */
+    @Transactional
+    public void triggerMarketReport(Long marketId) {
+        log.info("Market 자동 트리거 요청: marketId={}", marketId);
+
+        // 1. 기존 리포트 확인 (중복 트리거 방지)
+        Optional<InsightReport> existingReport = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.MARKET, marketId);
+
+        if (existingReport.isPresent()) {
+            InsightReport report = existingReport.get();
+            log.info("기존 리포트 존재로 중복 트리거 무시: reportId={}, status={}, marketId={}",
+                    report.getId(), report.getStatus(), marketId);
+            return;
+        }
+
+        // 2. Market SETTLED 상태 확인 — SETTLED가 아니면 getSummary가 예외를 던지므로 그대로 전파
+        marketClient.getSummary(marketId);
+
+        // 3. 리포트 레코드 생성 (PENDING 상태, requestedBy는 시스템용으로 0)
+        InsightReport newReport = InsightReport.builder()
+                .type(InsightReportType.MARKET)
+                .referenceId(marketId)
+                .requestedBy(0L) // 시스템 자동 트리거
+                .status(InsightReportStatus.PENDING)
+                .retryCount(0)
+                .build();
+
+        InsightReport savedReport = insightReportRepository.save(newReport);
+        log.info("자동 트리거 리포트 레코드 생성: reportId={}, marketId={}", savedReport.getId(), marketId);
+
+        // 4. 비동기 분석 시작
+        generateMarketReportAsync(savedReport.getId());
+    }
+
+    /**
      * Market AI 정보 요약 생성 요청
-     * 
+     *
      * @param memberId 요청 회원 ID
      * @param marketId Market ID
      * @param idempotencyKey 멱등성 키

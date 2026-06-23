@@ -33,6 +33,20 @@ public class InsightReportController implements InsightReportControllerDocs {
         return ResponseEntity.ok(ApiResponse.success(null));
     }
     
+    /**
+     * Market 자동 트리거 (내부 API)
+     * Market Service에서 Market SETTLED 시 호출
+     */
+    @PostMapping("/internal/api/v1/insights/markets/{marketId}/report")
+    @Override
+    public ResponseEntity<ApiResponse<Void>> triggerMarketReport(@PathVariable Long marketId) {
+        log.info("Market 자동 트리거: marketId={}", marketId);
+
+        insightReportService.triggerMarketReport(marketId);
+
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
     // ========== 관리자 API ==========
     
     /**
