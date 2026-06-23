@@ -5,6 +5,18 @@
 
 ---
 
+## 변경 내역 (v7 → v8)
+
+| 섹션 | 변경 내용 |
+|---|---|
+| 섹션 2 신규 | Market `basic-info` API 소비 명세 및 지역 매핑 규칙 추가 |
+| 섹션 7-0 신규 | Market SETTLED 자동 트리거 내부 API 추가 (`POST /internal/api/v1/insights/markets/{marketId}/report`) |
+| 섹션 7-4 신규 | Market 공공 데이터 참고 자료 조회 API 추가 (`GET /api/v1/insights/markets/{marketId}/public-data-reference`) |
+| 섹션 3-4 신규 | 관리자 마켓 가격 이력 조회 API 추가 (`GET /api/v1/admin/insights/markets/{marketId}/price-history`) |
+| `RebDataParser` 버그 수정 | `dtaCycleCd` 기반 `data_type` 결정 (`WK→WEEKLY_PRICE_INDEX`, `MM→MONTHLY_PRICE_INDEX`) |
+
+---
+
 ## 변경 내역 (v6 → v7)
 
 | 섹션 | 변경 내용 |
@@ -112,6 +124,7 @@ Insight-Reputation Service가 다른 서비스를 호출하는 API 목록이다.
 | Battle Service | GET /internal/api/v1/battles/{battleId}/info | Battle 기본 정보 조회 (**⚠️ Battle 담당자 구현 필요 — COORDINATION_ISSUES.md 참조**) |
 | Battle Service | GET /internal/api/v1/battles/{battleId}/votes/raw | 투표 목록 조회 (member_id, selected_option) (**⚠️ Battle 담당자 경로 변경 필요 — COORDINATION_ISSUES.md 참조**) |
 | Battle Service | GET /internal/api/v1/battles/comments/{commentId} | 댓글 단건 조회 (방문 인증용) (**⚠️ Battle 담당자 경로 변경 필요 — COORDINATION_ISSUES.md 참조**) |
+| Market Service | GET /internal/api/v1/markets/{marketId}/basic-info | 마켓 기본 정보 조회 (상태 무관. regionSido/regionSigu 포함. MARKET_NOT_FOUND → RESOURCE_NOT_FOUND 변환) |
 | Market Service | GET /internal/api/v1/markets/{marketId}/insight-summary | Market 기본 정보 + 옵션별 통계 조회 (SETTLED 전용. Market spec 섹션 11-1) |
 | Market Service | GET /internal/api/v1/markets/{marketId}/insight-predictions | 예측 참여 목록 조회 (member_id, selected_option, 페이지네이션. Market spec 섹션 11-2) |
 | Member-Point Service | POST /internal/api/v1/members/batch | 회원 정보 배치 조회 (ageGroup, gender, residenceSido/Sigu) |
@@ -124,6 +137,13 @@ Insight-Reputation Service가 다른 서비스를 호출하는 API 목록이다.
 ## 3. 서비스 간 내부 연계 API (인바운드)
 
 다른 서비스가 Insight-Reputation Service를 호출하는 API 목록이다.
+
+| 호출 주체 | 엔드포인트 | 목적 |
+|---|---|---|
+| Battle Service | POST /internal/api/v1/reputations/activity | 투표/댓글/Battle 승인 시 activity_score 업데이트 |
+| Battle Service | POST /internal/api/v1/insights/battles/{battleId}/report | Battle 종료 시 AI 리포트 자동 트리거 |
+| Market Service | POST /internal/api/v1/reputations/prediction | 정산 완료 시 prediction_count/correct 업데이트 |
+| Market Service | POST /internal/api/v1/insights/markets/{marketId}/report | Market SETTLED 시 AI 리포트 자동 트리거 (v8 신규, 섹션 7-0-M 참조) |
 
 ### 3-1. Activity Score 업데이트
 
@@ -723,15 +743,17 @@ Idempotency-Key: {uuid}
   "errorCode": null,
   "message": null,
   "data": {
-    "marketId": 7,
     "reportId": 2,
     "status": "PENDING",
-    "statusUrl": "/api/v1/insights/markets/7/report/status",
+    "reportContent": null,
+    "generatedAt": null,
     "pointCharged": 80
   },
   "timestamp": "2026-05-28T10:00:00"
 }
 ```
+
+> 폴링: `GET /api/v1/insights/markets/{marketId}/report/status` (2초 간격, 30초 타임아웃)
 
 **Response - 기존 리포트 존재 (DONE, pointCharged=0)**
 
@@ -741,17 +763,17 @@ Idempotency-Key: {uuid}
   "errorCode": null,
   "message": null,
   "data": {
-    "marketId": 7,
     "reportId": 2,
     "status": "DONE",
-    "summary": "YES 근거: 최근 3주간 서울 아파트 매매가격지수는 상승세를 보였습니다...",
-    "analysisData": {},
+    "reportContent": "title: 서울 강남구 아파트 가격 전망\nsummary: ...\ncontent: |...",
     "generatedAt": "2026-05-25T15:30:00",
     "pointCharged": 0
   },
   "timestamp": "2026-05-28T10:00:00"
 }
 ```
+
+> `reportContent`: Claude가 생성한 YAML 형식 문자열 (`title:` / `summary:` / `content:` 구조). 클라이언트가 직접 파싱해 렌더링한다.
 
 **Error Codes**
 
@@ -782,17 +804,17 @@ GET /api/v1/insights/markets/{marketId}/report
   "errorCode": null,
   "message": null,
   "data": {
-    "marketId": 7,
     "reportId": 2,
     "status": "DONE",
-    "title": "다음 주 서울 아파트 매매가격지수는 상승할까?",
-    "summary": "YES 근거: 최근 3주간 서울 아파트 매매가격지수는 상승세를 보였습니다...",
-    "analysisData": {},
-    "generatedAt": "2026-05-25T15:30:00"
+    "reportContent": "title: 서울 강남구 아파트 가격 전망\nsummary: ...\ncontent: |...",
+    "generatedAt": "2026-05-25T15:30:00",
+    "pointCharged": 0
   },
   "timestamp": "2026-05-28T10:00:00"
 }
 ```
+
+> `reportContent`: YAML 형식 문자열. `status`가 `DONE`일 때만 값이 있고 그 외 `null`.
 
 **Error Codes**
 
@@ -857,4 +879,193 @@ GET /api/v1/insights/markets/{marketId}/report/status
 | INSIGHT_REPORT_SOURCE_NOT_CLOSED | 400 | Battle이 아직 종료되지 않음 |
 | INSIGHT_REPORT_SOURCE_DATA_NOT_READY | 409 | Battle/Market이 종료되지 않았거나 분석에 필요한 데이터 부족. Point 차감 후 환불 처리됨 |
 | INSIGHT_REPORT_GENERATION_FAILED | 500 | Claude API 호출 실패. Point 차감 후 환불 처리됨 |
+
+---
+
+> **[v8 신규 섹션]** 아래 섹션은 v8에서 추가된 Market 분석 기능 관련 명세다.
+> 문서 재구성 시 섹션 2, 3-4, 7-0-M, 7-4 위치로 이동할 것.
+
+## 2. Market Service 연계 — `basic-info` API 소비 규칙 (v8 신규)
+
+> Insight 서비스가 Market Service의 `GET /internal/api/v1/markets/{marketId}/basic-info`를 호출할 때의 계약 및 지역 매핑 규칙.
+
+### 2-1. Market Service 응답 계약
+
+```json
+{
+  "success": true,
+  "data": {
+    "marketId": 123,
+    "title": "강남구 아파트 2024년 하반기 매매가격 변동률",
+    "optionLabels": ["0~5% 상승", "5~10% 상승"],
+    "regionSido": "서울",
+    "regionSigu": "강남구"
+  }
+}
+```
+
+| 필드 | 타입 | Nullable | 설명 |
+|---|---|---|---|
+| `marketId` | Long | N | 마켓 ID |
+| `title` | String | N | 마켓 제목 |
+| `optionLabels` | List\<String\> | N | 옵션 레이블 목록 |
+| `regionSido` | String | **Y** | 시도명. 전국 마켓은 `"전국"`, 미설정은 null |
+| `regionSigu` | String | **Y** | 시군구명. 시도 전체·전국 마켓은 null |
+
+**지역 단위별 값 계약**
+
+| 마켓 유형 | regionSido | regionSigu |
+|---|---|---|
+| 시군구 마켓 | `"서울"` | `"강남구"` |
+| 시도 전체 마켓 | `"경기"` | `null` |
+| 전국 마켓 | `"전국"` | `null` |
+
+**Market Service 에러 코드**
+
+| HTTP | Market errorCode | Insight 변환 |
+|---|---|---|
+| 404 | `MARKET_NOT_FOUND` | `RESOURCE_NOT_FOUND` |
+
+### 2-2. Insight DB 지역 필터 매핑
+
+`basic-info` 응답의 `regionSido`/`regionSigu`로 `public_data_snapshot` 조회 시 적용 규칙.
+`public_data_snapshot`에 `region_sigu` 컬럼이 없으므로 `regionSigu`는 `region_fullpath LIKE` 조건으로 대체한다.
+
+```sql
+-- 전국 마켓 (regionSido = "전국")
+WHERE region_sido = '전국'
+
+-- 시도 전체 마켓 (regionSido = "서울", regionSigu = null)
+WHERE region_sido = :regionSido
+
+-- 시군구 마켓 (regionSido = "서울", regionSigu = "강남구")
+WHERE region_sido = :regionSido
+  AND region_fullpath LIKE CONCAT('%', :regionSigu, '%')
+```
+
+---
+
+## 3-4. 관리자 마켓 가격 이력 조회 (v8 신규)
+
+**관리자 전용.** 마켓 지역의 공공 매매가격지수 시계열과 최종 예측 분포를 반환한다.
+
+```
+GET /api/v1/admin/insights/markets/{marketId}/price-history
+Headers:
+  X-Member-Id: {memberId}
+```
+
+**응답 (200 OK)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "regionSido": "서울",
+    "regionSigu": "강남구",
+    "dataType": "WEEKLY_PRICE_INDEX",
+    "priceHistory": [
+      { "referenceDate": "2026-04-28", "value": 103.08 },
+      { "referenceDate": "2026-05-05", "value": 103.29 },
+      { "referenceDate": "2026-06-16", "value": 104.71 }
+    ],
+    "latestPredictionDistribution": [
+      { "optionLabel": "0~5% 상승", "ratio": 0.657, "isResult": true },
+      { "optionLabel": "5~10% 상승", "ratio": 0.343, "isResult": false }
+    ]
+  }
+}
+```
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `regionSido` | String\|null | 마켓 지역 시도 |
+| `regionSigu` | String\|null | 마켓 지역 시군구 |
+| `dataType` | String | `WEEKLY_PRICE_INDEX` 또는 `MONTHLY_PRICE_INDEX` |
+| `priceHistory` | Array | `referenceDate`(오름차순) + `value` 목록. 데이터 없으면 빈 배열 |
+| `latestPredictionDistribution` | Array | SETTLED 마켓만 채워짐, 그 외 빈 배열 |
+
+**데이터 조회 우선순위:** 주간(최근 8주) → 없으면 월간(최근 6개월) 폴백
+
+**Error Codes**
+
+| 에러 코드 | HTTP | 상황 |
+|---|---:|---|
+| `RESOURCE_NOT_FOUND` | 404 | 존재하지 않는 marketId |
+| `EXTERNAL_SERVICE_UNAVAILABLE` | 503 | Market Service 연결 불가 |
+
+---
+
+## 7-0-M. Market SETTLED 자동 트리거 (v8 신규, 내부 API)
+
+> Market Service가 Market 정산 완료(SETTLED) 시 호출.
+
+```
+POST /internal/api/v1/insights/markets/{marketId}/report
+```
+
+- Point 차감 없음
+- 이미 리포트 존재 시 상태 무관 skip (멱등성)
+- SETTLED 상태가 아니면 `INSIGHT_REPORT_SOURCE_DATA_NOT_READY` 반환
+
+**응답 (200 OK)**
+
+```json
+{ "success": true, "data": null }
+```
+
+**Error Codes**
+
+| 에러 코드 | HTTP | 상황 |
+|---|---:|---|
+| `INSIGHT_REPORT_SOURCE_DATA_NOT_READY` | 409 | Market이 SETTLED 아님 |
+| `RESOURCE_NOT_FOUND` | 404 | 존재하지 않는 marketId |
+
+---
+
+## 7-4. Market 공공 데이터 참고 자료 조회 (v8 신규)
+
+진행 중(ACTIVE) 마켓에서 베팅 전 공공 데이터 기반 AI 참고 요약을 제공한다.
+포인트 차감 없음. 결과 저장 없음(실시간 생성). Claude extended thinking 적용.
+
+```
+GET /api/v1/insights/markets/{marketId}/public-data-reference
+Headers:
+  X-Member-Id: {memberId}
+```
+
+**응답 (200 OK)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "title": "서울 강남구 아파트 매매가격지수 최근 동향",
+    "summary": "강남구 매매가격지수는 최근 8주간 103.08에서 104.71로 완만한 상승세를 보이고 있습니다.",
+    "content": "## 최근 시장 지표\n...\n## 시장 해석\n...\n## 베팅 참고 포인트\n1. ...",
+    "dataAsOf": "2026-06-16T00:00:00"
+  }
+}
+```
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `title` | String | AI 생성 제목 |
+| `summary` | String | 2~3문장 핵심 요약 |
+| `content` | String | Markdown 본문 (`## 최근 시장 지표` / `## 시장 해석` / `## 베팅 참고 포인트`) |
+| `dataAsOf` | String\|null | 가장 최근 공공 데이터 기준일 (ISO 8601). 공공 데이터 없으면 null |
+
+**동작 규칙**
+
+- Market 상태(ACTIVE/SETTLED 등) **무관하게** 조회 가능
+- Market Service 연결 실패 시 지역 필터 없이 전체 공공 데이터로 자동 fallback
+- 공공 데이터가 없으면 200 OK + 안내 메시지 반환 (에러 아님)
+- 응답 시간 3~5초 예상 (Claude API 호출) → 클라이언트 로딩 처리 권장
+
+**Error Codes**
+
+| 에러 코드 | HTTP | 상황 |
+|---|---:|---|
+| `RESOURCE_NOT_FOUND` | 404 | 존재하지 않는 marketId (Market Service 확인된 경우) |
+| `EXTERNAL_SERVICE_UNAVAILABLE` | 503 | Market Service 연결 불가 (fallback 실패 시) |
 

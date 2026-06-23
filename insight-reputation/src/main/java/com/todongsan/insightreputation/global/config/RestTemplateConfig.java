@@ -5,10 +5,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.converter.StringHttpMessageConverter;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.Arrays;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 @Configuration
 public class RestTemplateConfig {
@@ -17,12 +19,15 @@ public class RestTemplateConfig {
     public RestTemplate restTemplate() {
         RestTemplate restTemplate = new RestTemplate();
 
-        // REB API 서버가 JSON 데이터를 text/html로 잘못 응답하는 문제 해결
+        // REB API 서버가 JSON 데이터를 text/html 로 잘못 응답하는 문제 해결.
+        // defaultCharset=UTF_8 을 명시하지 않으면 text/html·text/plain 의 HTTP 기본값(ISO-8859-1)으로
+        // 디코드되어 한국어가 깨진다.
         MappingJackson2HttpMessageConverter converter = new MappingJackson2HttpMessageConverter();
-        converter.setSupportedMediaTypes(Arrays.asList(
+        converter.setDefaultCharset(StandardCharsets.UTF_8);
+        converter.setSupportedMediaTypes(List.of(
             MediaType.APPLICATION_JSON,
-            MediaType.TEXT_HTML,
-            MediaType.TEXT_PLAIN
+            new MediaType("text", "html",  StandardCharsets.UTF_8),
+            new MediaType("text", "plain", StandardCharsets.UTF_8)
         ));
 
         restTemplate.getMessageConverters().add(0, converter);
@@ -37,6 +42,16 @@ public class RestTemplateConfig {
         factory.setConnectTimeout(10_000);   // 연결 10초
         factory.setReadTimeout(120_000);     // 응답 대기 120초
 
-        return new RestTemplate(factory);
+        RestTemplate restTemplate = new RestTemplate(factory);
+
+        // RestTemplate 기본 StringHttpMessageConverter 는 ISO-8859-1 을 사용한다.
+        // Claude API 응답(application/json, UTF-8)을 올바르게 처리하도록 UTF-8 로 교체한다.
+        restTemplate.getMessageConverters().replaceAll(converter ->
+            converter instanceof StringHttpMessageConverter
+                ? new StringHttpMessageConverter(StandardCharsets.UTF_8)
+                : converter
+        );
+
+        return restTemplate;
     }
 }

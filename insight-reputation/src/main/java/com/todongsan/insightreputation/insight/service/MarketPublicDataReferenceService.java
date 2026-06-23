@@ -11,6 +11,8 @@ import com.todongsan.insightreputation.publicdata.entity.PublicDataSnapshot;
 import com.todongsan.insightreputation.publicdata.repository.PublicDataSnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -26,6 +28,9 @@ public class MarketPublicDataReferenceService {
     private final MarketClient marketClient;
     private final PublicDataSnapshotRepository publicDataSnapshotRepository;
     private final ClaudeApiClient claudeApiClient;
+    private final CacheManager cacheManager;
+
+    private static final String CACHE_NAME = "publicDataReference";
 
     public MarketPublicDataReferenceResponse getReference(long marketId) {
         // 1. Market 기본 정보 조회 — Market Service 미구현 시 fallback
@@ -42,8 +47,9 @@ public class MarketPublicDataReferenceService {
         String marketTitle = marketInfo != null ? marketInfo.getTitle() : "마켓 #" + marketId;
         List<String> optionLabels = marketInfo != null ? marketInfo.getOptionLabels() : Collections.emptyList();
         String regionSido = marketInfo != null ? marketInfo.getRegionSido() : null;
+        String regionSigu = marketInfo != null ? marketInfo.getRegionSigu() : null;
 
-        // 2. 공공 데이터 조회 — regionSido 있으면 지역 필터, 없으면 전체에서 최근 4주
+        // 2. 공공 데이터 조회 — 주간(8주) 우선, 없으면 월간(3개월) 폴백, 지역 정책 필터 적용
         List<PublicDataSnapshot> publicData = Collections.emptyList();
         LocalDate today = LocalDate.now();
         try {
@@ -56,14 +62,9 @@ public class MarketPublicDataReferenceService {
                             PublicDataSource.REB, PublicDataType.MONTHLY_PRICE_INDEX,
                             today.minusMonths(3), today);
                 }
-                // regionSido 기반으로 필터링
-                final String sido = regionSido;
-                publicData = publicData.stream()
-                        .filter(snap -> sido.equals(snap.getRegionSido())
-                                || (snap.getRegionFullpath() != null && snap.getRegionFullpath().contains(sido)))
-                        .toList();
-                log.info("공공 데이터 지역 필터 조회 완료: marketId={}, regionSido={}, dataCount={}",
-                        marketId, regionSido, publicData.size());
+                publicData = applyRegionFilter(publicData, regionSido, regionSigu);
+                log.info("공공 데이터 지역 필터 조회 완료: marketId={}, regionSido={}, regionSigu={}, dataCount={}",
+                        marketId, regionSido, regionSigu, publicData.size());
             } else {
                 publicData = publicDataSnapshotRepository.findRecentPriceData(
                         PublicDataSource.REB, PublicDataType.WEEKLY_PRICE_INDEX,
@@ -87,23 +88,54 @@ public class MarketPublicDataReferenceService {
                     .summary("현재 해당 마켓과 관련된 최신 공공 데이터가 없습니다. 공공 데이터는 매주 목요일 및 매월 15일에 업데이트됩니다.")
                     .content("## 안내\n공공 데이터가 아직 수집되지 않았습니다. 잠시 후 다시 시도해 주세요.")
                     .dataAsOf(null)
+                    .aiAnalyzed(false)
                     .build();
         }
 
-        // 4. 프롬프트 생성
-        String prompt = claudeApiClient.createMarketPublicDataReferencePrompt(
-                marketTitle, optionLabels, publicData);
-
-        // 5. Claude extended thinking 호출
-        String rawResult = claudeApiClient.analyzeWithThinking(prompt, 2000, 1500);
-
-        // 6. 응답 파싱 후 DTO 반환
         LocalDateTime dataAsOf = publicData.stream()
                 .map(snap -> snap.getReferenceDate().atStartOfDay())
                 .max(LocalDateTime::compareTo)
                 .orElse(null);
 
-        return parseAndBuild(rawResult, dataAsOf);
+        // 4. 캐시 조회 — 키: {marketId}_{dataAsOf date}
+        // 공공 데이터 갱신(dataAsOf 변경) 시 자연스럽게 캐시 미스 → 새 Claude 호출
+        LocalDate dataAsOfDate = dataAsOf != null ? dataAsOf.toLocalDate() : null;
+        String cacheKey = marketId + "_" + dataAsOfDate;
+        Cache cache = cacheManager.getCache(CACHE_NAME);
+        if (cache != null) {
+            MarketPublicDataReferenceResponse cached = cache.get(cacheKey, MarketPublicDataReferenceResponse.class);
+            if (cached != null) {
+                log.info("캐시 히트: marketId={}, dataAsOf={}", marketId, dataAsOfDate);
+                return cached;
+            }
+        }
+
+        // 5. 프롬프트 생성
+        String prompt = claudeApiClient.createMarketPublicDataReferencePrompt(
+                marketTitle, optionLabels, publicData);
+
+        // 6. Claude 호출 — 실패 시 원시 공공 데이터 표로 폴백 (200 유지, 캐시 저장 안 함)
+        String rawResult;
+        try {
+            rawResult = claudeApiClient.analyze(prompt, 2000);
+        } catch (Exception e) {
+            log.warn("Claude API 호출 실패, 공공 데이터 원문 표로 폴백: marketId={}, error={}", marketId, e.getMessage());
+            return MarketPublicDataReferenceResponse.builder()
+                    .title(marketTitle + " — 공공 데이터 참고 자료")
+                    .summary("AI 분석을 일시적으로 이용할 수 없습니다. 아래 공공 데이터를 직접 참고해 주세요.")
+                    .content(buildRawDataContent(publicData))
+                    .dataAsOf(dataAsOf)
+                    .aiAnalyzed(false)
+                    .build();
+        }
+
+        // 7. 응답 파싱 후 캐시 저장 → DTO 반환 (aiAnalyzed = true)
+        MarketPublicDataReferenceResponse result = parseAndBuild(rawResult, dataAsOf);
+        if (cache != null) {
+            cache.put(cacheKey, result);
+            log.info("캐시 저장: marketId={}, dataAsOf={}", marketId, dataAsOfDate);
+        }
+        return result;
     }
 
     private MarketPublicDataReferenceResponse parseAndBuild(String rawResult, LocalDateTime dataAsOf) {
@@ -149,6 +181,47 @@ public class MarketPublicDataReferenceService {
                 .summary(summary)
                 .content(content)
                 .dataAsOf(dataAsOf)
+                .aiAnalyzed(true)
                 .build();
+    }
+
+    private String buildRawDataContent(List<PublicDataSnapshot> publicData) {
+        StringBuilder sb = new StringBuilder("## 최근 시장 지표\n\n");
+        sb.append("| 기준일 | 지역 | 지표명 | 수치 |\n");
+        sb.append("|--------|------|--------|------|\n");
+        for (PublicDataSnapshot snap : publicData) {
+            String region = snap.getRegionFullpath() != null ? snap.getRegionFullpath()
+                    : (snap.getRegionSido() != null ? snap.getRegionSido() : "-");
+            String value = snap.getNumericValue() != null
+                    ? snap.getNumericValue().stripTrailingZeros().toPlainString() : "-";
+            sb.append("| ").append(snap.getReferenceDate())
+              .append(" | ").append(region)
+              .append(" | ").append(snap.getItmNm() != null ? snap.getItmNm() : "-")
+              .append(" | ").append(value).append(" |\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Market 지역 정책 기준 필터링
+     * - "전국": region_sido = '전국'
+     * - 시도(regionSigu=null): region_sido = :regionSido
+     * - 시군구: region_sido = :regionSido AND region_fullpath LIKE '%:regionSigu%'
+     */
+    private List<PublicDataSnapshot> applyRegionFilter(List<PublicDataSnapshot> snapshots,
+                                                        String regionSido, String regionSigu) {
+        return snapshots.stream()
+                .filter(snap -> {
+                    if ("전국".equals(regionSido)) {
+                        return "전국".equals(snap.getRegionSido());
+                    } else if (regionSigu != null && !regionSigu.isBlank()) {
+                        return regionSido.equals(snap.getRegionSido())
+                                && snap.getRegionFullpath() != null
+                                && snap.getRegionFullpath().contains(regionSigu);
+                    } else {
+                        return regionSido.equals(snap.getRegionSido());
+                    }
+                })
+                .toList();
     }
 }
