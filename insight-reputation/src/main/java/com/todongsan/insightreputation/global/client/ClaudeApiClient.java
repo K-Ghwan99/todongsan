@@ -41,7 +41,7 @@ public class ClaudeApiClient {
     @Value("${claude.api.url:https://api.anthropic.com/v1/messages}")
     private String apiUrl;
 
-    @Value("${claude.api.model:claude-sonnet-4-20250514}")
+    @Value("${claude.api.model:claude-sonnet-4-6}")
     private String model;
 
     /**
@@ -529,6 +529,7 @@ public class ClaudeApiClient {
             headers.set("Content-Type", "application/json");
             headers.set("X-API-Key", apiKey);
             headers.set("anthropic-version", "2023-06-01");
+            headers.set("anthropic-beta", "interleaved-thinking-2025-05-14");
 
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
 

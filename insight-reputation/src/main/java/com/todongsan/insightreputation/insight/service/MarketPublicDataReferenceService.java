@@ -99,7 +99,7 @@ public class MarketPublicDataReferenceService {
         // 5. Claude extended thinking 호출 — 실패 시 원시 공공 데이터 표로 폴백 (200 유지)
         String rawResult;
         try {
-            rawResult = claudeApiClient.analyzeWithThinking(prompt, 2000, 1500);
+            rawResult = claudeApiClient.analyzeWithThinking(prompt, 4000, 2000);
         } catch (Exception e) {
             log.warn("Claude API 호출 실패, 공공 데이터 원문 표로 폴백: marketId={}, error={}", marketId, e.getMessage());
             return MarketPublicDataReferenceResponse.builder()
