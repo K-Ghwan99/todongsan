@@ -474,6 +474,216 @@ public class ClaudeApiClient {
             }
         }
 
+        if (!recentPublicData.isEmpty()) {
+            prompt.append("\n## 최근 시장 지표 (공공 데이터)\n");
+            prompt.append("| 기준일 | 지역 | 지표명 | 수치 |\n");
+            prompt.append("|--------|------|--------|------|\n");
+            DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+            for (PublicDataSnapshot snap : recentPublicData) {
+                String region = snap.getRegionFullpath() != null ? snap.getRegionFullpath()
+                        : (snap.getRegionSido() != null ? snap.getRegionSido() : "-");
+                String value = snap.getNumericValue() != null
+                        ? snap.getNumericValue().stripTrailingZeros().toPlainString() : "-";
+                prompt.append("| ").append(snap.getReferenceDate().format(dateFmt))
+                      .append(" | ").append(region)
+                      .append(" | ").append(snap.getItmNm() != null ? snap.getItmNm() : "-")
+                      .append(" | ").append(value)
+                      .append(" |\n");
+            }
+            prompt.append("\n");
+        }
+
         return prompt.toString();
+    }
+
+    public String analyzeWithThinking(String prompt, int maxTokens, int thinkingBudgetTokens) {
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            log.warn("Claude API key가 설정되지 않음. 목업 응답 반환 (analyzeWithThinking)");
+            return generateMockPublicDataReference();
+        }
+
+        try {
+            log.info("Claude API (extended thinking) 호출 시작: promptLength={}, maxTokens={}, thinkingBudget={}",
+                    prompt.length(), maxTokens, thinkingBudgetTokens);
+
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", model);
+            // max_tokens는 thinkingBudgetTokens보다 반드시 커야 함
+            requestBody.put("max_tokens", Math.max(maxTokens, thinkingBudgetTokens + 1));
+
+            Map<String, Object> thinking = new HashMap<>();
+            thinking.put("type", "enabled");
+            thinking.put("budget_tokens", thinkingBudgetTokens);
+            requestBody.put("thinking", thinking);
+
+            // extended thinking 사용 시 temperature 파라미터 제거 (동시 사용 불가)
+
+            List<Map<String, Object>> messages = new ArrayList<>();
+            Map<String, Object> message = new HashMap<>();
+            message.put("role", "user");
+            message.put("content", prompt);
+            messages.add(message);
+            requestBody.put("messages", messages);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Content-Type", "application/json");
+            headers.set("X-API-Key", apiKey);
+            headers.set("anthropic-version", "2023-06-01");
+
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+            Map<String, Object> response = restTemplate.exchange(
+                apiUrl,
+                HttpMethod.POST,
+                request,
+                Map.class
+            ).getBody();
+
+            if (response == null) {
+                log.warn("Claude API (extended thinking) 응답 없음");
+                throw new CustomException(ErrorCode.INSIGHT_REPORT_GENERATION_FAILED);
+            }
+
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> content = (List<Map<String, Object>>) response.get("content");
+
+            if (content == null || content.isEmpty()) {
+                log.warn("Claude API (extended thinking) 응답에 content 없음: response={}", response);
+                throw new CustomException(ErrorCode.INSIGHT_REPORT_GENERATION_FAILED);
+            }
+
+            // thinking block 제외, text block만 추출
+            String result = content.stream()
+                    .filter(block -> "text".equals(block.get("type")))
+                    .map(block -> (String) block.get("text"))
+                    .filter(text -> text != null && !text.trim().isEmpty())
+                    .findFirst()
+                    .orElse(null);
+
+            if (result == null || result.trim().isEmpty()) {
+                log.warn("Claude API (extended thinking) 응답 텍스트 비어있음");
+                throw new CustomException(ErrorCode.INSIGHT_REPORT_GENERATION_FAILED);
+            }
+
+            log.info("Claude API (extended thinking) 호출 성공: responseLength={}", result.length());
+            return result.trim();
+
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode() == HttpStatus.UNAUTHORIZED) {
+                log.error("Claude API (extended thinking) 인증 실패");
+                throw new CustomException(ErrorCode.INSIGHT_REPORT_GENERATION_FAILED);
+            } else if (e.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
+                log.error("Claude API (extended thinking) 요청 한도 초과");
+                throw new CustomException(ErrorCode.INSIGHT_REPORT_GENERATION_FAILED);
+            } else {
+                log.error("Claude API (extended thinking) HTTP 오류: status={}, message={}",
+                         e.getStatusCode(), e.getMessage());
+                throw new CustomException(ErrorCode.INSIGHT_REPORT_GENERATION_FAILED);
+            }
+        } catch (ResourceAccessException e) {
+            log.error("Claude API (extended thinking) 연결 오류: message={}", e.getMessage());
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_GENERATION_FAILED);
+        } catch (CustomException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Claude API (extended thinking) 호출 중 예상치 못한 오류", e);
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_GENERATION_FAILED);
+        }
+    }
+
+    public String createMarketPublicDataReferencePrompt(String marketTitle,
+                                                        List<String> optionLabels,
+                                                        List<PublicDataSnapshot> publicData) {
+        StringBuilder prompt = new StringBuilder();
+
+        prompt.append("당신은 부동산 시장 데이터 분석 전문가입니다.\n");
+        prompt.append("아래 공공 데이터를 바탕으로 마켓 주제와 관련된 시장 현황을 요약하세요.\n");
+        prompt.append("베팅 참여자가 예측에 앞서 참고할 수 있도록 객관적인 정보를 제공합니다.\n\n");
+
+        prompt.append("[출력 형식]\n");
+        prompt.append("title: {마켓 주제 관련 시장 현황 요약}\n");
+        prompt.append("summary: {2~3문장 핵심 요약, 수치 포함}\n");
+        prompt.append("content: (Markdown)\n\n");
+        prompt.append("## 최근 시장 지표\n");
+        prompt.append("공공 데이터 수치를 표 또는 목록으로 정리합니다.\n\n");
+        prompt.append("## 시장 해석\n");
+        prompt.append("수치가 의미하는 현재 시장 상황을 서술합니다.\n\n");
+        prompt.append("## 베팅 참고 포인트\n");
+        prompt.append("이 마켓 예측에 도움이 되는 핵심 고려 사항을 3가지 이상 정리합니다.\n\n");
+
+        prompt.append("---\n");
+        prompt.append("[Few-shot 예시]\n\n");
+        prompt.append("입력:\n");
+        prompt.append("- 마켓 제목: 강남구 아파트 매매가격지수 2024년 3분기 전망\n");
+        prompt.append("- 옵션: [\"상승\", \"보합\", \"하락\"]\n");
+        prompt.append("- 공공 데이터:\n");
+        prompt.append("  | 기준일 | 지역 | 지표명 | 수치 |\n");
+        prompt.append("  |--------|------|--------|------|\n");
+        prompt.append("  | 2024-06-24 | 서울특별시 강남구 | 매매가격지수 | 101.2 |\n");
+        prompt.append("  | 2024-06-17 | 서울특별시 강남구 | 매매가격지수 | 100.8 |\n");
+        prompt.append("  | 2024-06-10 | 서울특별시 강남구 | 매매가격지수 | 100.5 |\n\n");
+        prompt.append("출력:\n");
+        prompt.append("title: 강남구 아파트 매매가격지수 최근 동향\n");
+        prompt.append("summary: 강남구 아파트 매매가격지수는 6월 기준 101.2로 최근 3주 연속 상승세입니다. ");
+        prompt.append("3주간 0.7포인트 상승하며 완만한 회복 흐름을 보이고 있어 3분기 전망에 긍정적 신호로 해석됩니다.\n");
+        prompt.append("content: |\n");
+        prompt.append("  ## 최근 시장 지표\n");
+        prompt.append("  | 기준일 | 매매가격지수 | 전주 대비 |\n");
+        prompt.append("  |--------|------------|----------|\n");
+        prompt.append("  | 2024-06-24 | 101.2 | +0.4 |\n");
+        prompt.append("  | 2024-06-17 | 100.8 | +0.3 |\n");
+        prompt.append("  | 2024-06-10 | 100.5 | - |\n\n");
+        prompt.append("  ## 시장 해석\n");
+        prompt.append("  강남구 매매가격지수는 3주 연속 상승하며 회복 기조를 나타내고 있습니다. ");
+        prompt.append("6월 넷째 주 101.2는 기준선(100) 대비 1.2% 높은 수준으로, 실수요 중심의 거래가 이어지고 있음을 시사합니다.\n\n");
+        prompt.append("  ## 베팅 참고 포인트\n");
+        prompt.append("  1. **최근 3주 연속 상승**: 단기 상승 모멘텀이 형성되어 있습니다.\n");
+        prompt.append("  2. **기준선 상회 유지**: 지수가 100 이상을 유지, 시장 강세를 나타냅니다.\n");
+        prompt.append("  3. **상승 폭 축소 여부 주시**: 주간 상승폭이 +0.4 → +0.3 수준으로 소폭 둔화되고 있어 모멘텀 지속성을 확인해야 합니다.\n");
+        prompt.append("---\n\n");
+        prompt.append(buildLengthGuide(1500)).append("\n");
+        prompt.append("이제 아래 실제 데이터를 분석하세요.\n\n");
+
+        prompt.append("입력:\n");
+        prompt.append("- 마켓 제목: ").append(marketTitle).append("\n");
+        prompt.append("- 옵션: ").append(optionLabels).append("\n");
+
+        if (!publicData.isEmpty()) {
+            DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+            prompt.append("- 공공 데이터:\n");
+            prompt.append("  | 기준일 | 지역 | 지표명 | 수치 |\n");
+            prompt.append("  |--------|------|--------|------|\n");
+            for (PublicDataSnapshot snap : publicData) {
+                String region = snap.getRegionFullpath() != null ? snap.getRegionFullpath()
+                        : (snap.getRegionSido() != null ? snap.getRegionSido() : "-");
+                String value = snap.getNumericValue() != null
+                        ? snap.getNumericValue().stripTrailingZeros().toPlainString() : "-";
+                prompt.append("  | ").append(snap.getReferenceDate().format(dateFmt))
+                      .append(" | ").append(region)
+                      .append(" | ").append(snap.getItmNm() != null ? snap.getItmNm() : "-")
+                      .append(" | ").append(value)
+                      .append(" |\n");
+            }
+        }
+
+        return prompt.toString();
+    }
+
+    private String generateMockPublicDataReference() {
+        return """
+                title: 서울 아파트 매매가격지수 최근 동향 (Mock)
+                summary: 최근 8주간 서울 아파트 매매가격지수는 완만한 상승세를 유지하고 있습니다. 강남권을 중심으로 실수요 거래가 이어지며 지수가 기준선 위에서 안정적으로 움직이고 있습니다.
+                content: |
+                  ## 최근 시장 지표
+                  공공 데이터 기반 최근 시장 지표입니다. (Mock 데이터)
+
+                  ## 시장 해석
+                  현재 시장은 완만한 상승 기조를 보이고 있으며, 금리 동결 기조와 함께 실수요자 중심의 거래가 이어지고 있습니다.
+
+                  ## 베팅 참고 포인트
+                  1. **금리 동향**: 한국은행 기준금리 동결이 지속되며 시장 안정 요인으로 작용하고 있습니다.
+                  2. **공급 물량**: 신규 입주 물량 감소로 매물 희소성이 높아지고 있습니다.
+                  3. **거래량 회복**: 거래량이 점진적으로 회복되며 시장 회복 신호가 나타나고 있습니다.
+                """;
     }
 }

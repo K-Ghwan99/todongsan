@@ -139,7 +139,31 @@ public interface InsightReportControllerDocs {
     );
 
     @Operation(
-        summary = "Market AI 정보 요약 생성 요청", 
+        summary = "Market AI 분석 자동 트리거 (내부 API)",
+        description = "Market Service에서 Market SETTLED 시 호출하는 내부 API. " +
+                     "Point 차감 없이 자동으로 AI 분석 리포트를 생성한다. " +
+                     "중복 트리거는 무시되며, 비동기로 분석을 수행한다."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "자동 트리거 성공 (중복 트리거는 무시하고 200 반환)"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "409",
+            description = "INSIGHT_REPORT_SOURCE_DATA_NOT_READY (Market이 아직 SETTLED 상태가 아님)"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "RESOURCE_NOT_FOUND (존재하지 않는 marketId)"
+        )
+    })
+    ResponseEntity<ApiResponse<Void>> triggerMarketReport(
+        @Parameter(description = "Market ID", example = "456") Long marketId
+    );
+
+    @Operation(
+        summary = "Market AI 정보 요약 생성 요청",
         description = "정산 완료된 Market에 대해 AI 정보 요약을 생성한다. " +
                      "80포인트가 차감되며, 기존 완료 리포트가 있는 경우 즉시 반환한다. " +
                      "리포트는 비동기로 생성되며, 상태 조회 API로 진행 상황을 확인할 수 있다. " +
