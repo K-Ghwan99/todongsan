@@ -10,7 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.*;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.ResourceAccessException;
@@ -20,8 +20,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,6 +35,7 @@ class BattleClientTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(battleClient, "battleServiceBaseUrl", "http://test-battle-service");
+        ReflectionTestUtils.setField(battleClient, "internalAuthToken", "test-internal-token");
     }
 
     @Test
@@ -44,18 +44,18 @@ class BattleClientTest {
         // Given
         Long commentId = 15L;
         LocalDateTime createdAt = LocalDateTime.of(2026, 5, 28, 10, 0, 0);
-        
+
         Map<String, Object> responseData = Map.of(
             "commentId", commentId,
             "battleId", 42L,
             "memberId", 678L,
             "createdAt", createdAt.toString()
         );
-        
+
         ApiResponse<Map<String, Object>> mockResponse = ApiResponse.success(responseData);
-        
-        when(restTemplate.getForObject(anyString(), eq(ApiResponse.class)))
-            .thenReturn(mockResponse);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(ApiResponse.class)))
+            .thenReturn(ResponseEntity.ok(mockResponse));
 
         // When
         BattleCommentResponse response = battleClient.getComment(commentId);
@@ -65,10 +65,12 @@ class BattleClientTest {
         assertThat(response.getBattleId()).isEqualTo(42L);
         assertThat(response.getMemberId()).isEqualTo(678L);
         assertThat(response.getCreatedAt()).isEqualTo(createdAt);
-        
-        verify(restTemplate).getForObject(
-            "http://test-battle-service/api/v1/battles/comments/15",
-            ApiResponse.class
+
+        verify(restTemplate).exchange(
+            eq("http://test-battle-service/api/v1/battles/comments/15"),
+            eq(HttpMethod.GET),
+            any(HttpEntity.class),
+            eq(ApiResponse.class)
         );
     }
 
@@ -77,8 +79,8 @@ class BattleClientTest {
     void getComment_notFound() {
         // Given
         Long commentId = 999L;
-        
-        when(restTemplate.getForObject(anyString(), eq(ApiResponse.class)))
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(ApiResponse.class)))
             .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
 
         // When & Then
@@ -92,8 +94,8 @@ class BattleClientTest {
     void getComment_connectionError() {
         // Given
         Long commentId = 15L;
-        
-        when(restTemplate.getForObject(anyString(), eq(ApiResponse.class)))
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(ApiResponse.class)))
             .thenThrow(new ResourceAccessException("Connection refused"));
 
         // When & Then
@@ -107,8 +109,8 @@ class BattleClientTest {
     void getComment_serverError() {
         // Given
         Long commentId = 15L;
-        
-        when(restTemplate.getForObject(anyString(), eq(ApiResponse.class)))
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(ApiResponse.class)))
             .thenThrow(new HttpClientErrorException(HttpStatus.INTERNAL_SERVER_ERROR));
 
         // When & Then
@@ -122,16 +124,15 @@ class BattleClientTest {
     void getComment_wrongResponseType() {
         // Given
         Long commentId = 15L;
-        
-        // ApiResponse는 성공이지만 data가 Map이 아닌 경우
+
         ApiResponse<Object> mockResponse = ApiResponse.<Object>builder()
             .success(true)
-            .data("invalid data type")  // String 타입으로 잘못된 데이터
+            .data("invalid data type")
             .timestamp(LocalDateTime.now())
             .build();
-        
-        when(restTemplate.getForObject(anyString(), eq(ApiResponse.class)))
-            .thenReturn(mockResponse);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(ApiResponse.class)))
+            .thenReturn(ResponseEntity.ok(mockResponse));
 
         // When & Then
         assertThatThrownBy(() -> battleClient.getComment(commentId))
@@ -144,14 +145,13 @@ class BattleClientTest {
     void getComment_nullData() {
         // Given
         Long commentId = 15L;
-        
-        // ApiResponse에서 data가 null인 경우를 직접 모킹
+
         ApiResponse<Object> mockResponse = mock(ApiResponse.class);
         when(mockResponse.isSuccess()).thenReturn(true);
         when(mockResponse.getData()).thenReturn(null);
-        
-        when(restTemplate.getForObject(anyString(), eq(ApiResponse.class)))
-            .thenReturn(mockResponse);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(ApiResponse.class)))
+            .thenReturn(ResponseEntity.ok(mockResponse));
 
         // When & Then
         assertThatThrownBy(() -> battleClient.getComment(commentId))
@@ -164,7 +164,7 @@ class BattleClientTest {
     void getBattle_success() {
         // Given
         Long battleId = 42L;
-        
+
         Map<String, Object> responseData = Map.of(
             "battleId", battleId,
             "title", "성수 vs 연남",
@@ -172,11 +172,11 @@ class BattleClientTest {
             "sigu", "성동구",
             "status", "ACTIVE"
         );
-        
+
         ApiResponse<Map<String, Object>> mockResponse = ApiResponse.success(responseData);
-        
-        when(restTemplate.getForObject(anyString(), eq(ApiResponse.class)))
-            .thenReturn(mockResponse);
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(ApiResponse.class)))
+            .thenReturn(ResponseEntity.ok(mockResponse));
 
         // When
         BattleResponse response = battleClient.getBattle(battleId);
@@ -187,10 +187,12 @@ class BattleClientTest {
         assertThat(response.getSido()).isEqualTo("서울");
         assertThat(response.getSigu()).isEqualTo("성동구");
         assertThat(response.getStatus()).isEqualTo("ACTIVE");
-        
-        verify(restTemplate).getForObject(
-            "http://test-battle-service/api/v1/battles/42",
-            ApiResponse.class
+
+        verify(restTemplate).exchange(
+            eq("http://test-battle-service/api/v1/battles/42"),
+            eq(HttpMethod.GET),
+            any(HttpEntity.class),
+            eq(ApiResponse.class)
         );
     }
 
@@ -199,8 +201,8 @@ class BattleClientTest {
     void getBattle_notFound() {
         // Given
         Long battleId = 999L;
-        
-        when(restTemplate.getForObject(anyString(), eq(ApiResponse.class)))
+
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(ApiResponse.class)))
             .thenThrow(new HttpClientErrorException(HttpStatus.NOT_FOUND));
 
         // When & Then

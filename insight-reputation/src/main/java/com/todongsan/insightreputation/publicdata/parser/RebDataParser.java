@@ -101,8 +101,8 @@ public class RebDataParser {
 
             // ERD 컬럼 전체 매핑하여 PublicDataSnapshot 생성
             return PublicDataSnapshot.builder()
-                    .source(PublicDataSource.REB)                    // source: 'REB' 고정
-                    .dataType(PublicDataType.PRICE_INDEX)           // data_type: 'PRICE_INDEX' 고정
+                    .source(PublicDataSource.REB)
+                    .dataType(resolveDataType(row.getDtaCycleCd()))
                     .referenceDate(referenceDate)                   // reference_date
                     .regionSido(regionSido)                         // region_sido
                     .sourceRegionId(sourceRegionId)                 // source_region_id
@@ -121,6 +121,16 @@ public class RebDataParser {
             log.error("REB 데이터 행 파싱 중 오류: clsId={}", row.getClsId(), e);
             return null;
         }
+    }
+
+    /**
+     * REB API dtaCycleCd 기반으로 PublicDataType 결정
+     * WK → WEEKLY_PRICE_INDEX, MM → MONTHLY_PRICE_INDEX
+     */
+    private PublicDataType resolveDataType(String dtaCycleCd) {
+        if ("WK".equals(dtaCycleCd)) return PublicDataType.WEEKLY_PRICE_INDEX;
+        if ("MM".equals(dtaCycleCd)) return PublicDataType.MONTHLY_PRICE_INDEX;
+        return PublicDataType.PRICE_INDEX;
     }
 
     /**

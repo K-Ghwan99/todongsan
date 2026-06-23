@@ -31,6 +31,7 @@ public class MarketPriceHistoryService {
         // 1. 지역 정보 조회 — RESOURCE_NOT_FOUND이면 그대로 전파
         ActiveMarketInfoResponse marketInfo = marketClient.getActiveMarketInfo(marketId);
         String regionSido = marketInfo.getRegionSido();
+        String regionSigu = marketInfo.getRegionSigu();
 
         // 2. 공공 데이터 조회 — 주간(8주) 우선, 없으면 월간(6개월) 폴백
         LocalDate today = LocalDate.now();
@@ -39,7 +40,7 @@ public class MarketPriceHistoryService {
                 PublicDataSource.REB, PublicDataType.WEEKLY_PRICE_INDEX,
                 today.minusWeeks(8), today);
         if (regionSido != null) {
-            weekly = filterByRegion(weekly, regionSido);
+            weekly = applyRegionFilter(weekly, regionSido, regionSigu);
         }
 
         List<PublicDataSnapshot> snapshots;
@@ -53,7 +54,7 @@ public class MarketPriceHistoryService {
                     PublicDataSource.REB, PublicDataType.MONTHLY_PRICE_INDEX,
                     today.minusMonths(6), today);
             if (regionSido != null) {
-                monthly = filterByRegion(monthly, regionSido);
+                monthly = applyRegionFilter(monthly, regionSido, regionSigu);
             }
             snapshots = monthly;
             dataType = "MONTHLY_PRICE_INDEX";
@@ -101,10 +102,26 @@ public class MarketPriceHistoryService {
                 .build();
     }
 
-    private List<PublicDataSnapshot> filterByRegion(List<PublicDataSnapshot> snapshots, String regionSido) {
+    /**
+     * Market 지역 정책 기준 필터링
+     * - "전국": region_sido = '전국'
+     * - 시도(regionSigu=null): region_sido = :regionSido
+     * - 시군구: region_sido = :regionSido AND region_fullpath LIKE '%:regionSigu%'
+     */
+    private List<PublicDataSnapshot> applyRegionFilter(List<PublicDataSnapshot> snapshots,
+                                                        String regionSido, String regionSigu) {
         return snapshots.stream()
-                .filter(s -> regionSido.equals(s.getRegionSido())
-                        || (s.getRegionFullpath() != null && s.getRegionFullpath().contains(regionSido)))
+                .filter(s -> {
+                    if ("전국".equals(regionSido)) {
+                        return "전국".equals(s.getRegionSido());
+                    } else if (regionSigu != null && !regionSigu.isBlank()) {
+                        return regionSido.equals(s.getRegionSido())
+                                && s.getRegionFullpath() != null
+                                && s.getRegionFullpath().contains(regionSigu);
+                    } else {
+                        return regionSido.equals(s.getRegionSido());
+                    }
+                })
                 .collect(Collectors.toList());
     }
 }

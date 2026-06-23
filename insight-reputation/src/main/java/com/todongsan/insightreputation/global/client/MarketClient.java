@@ -6,6 +6,9 @@ import com.todongsan.insightreputation.global.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
@@ -27,6 +30,15 @@ public class MarketClient {
     @Value("${client.market.base-url:http://market-service}")
     private String marketServiceBaseUrl;
 
+    @Value("${client.market.internal-auth-token:local-internal-token}")
+    private String internalAuthToken;
+
+    private HttpEntity<Void> internalAuthEntity() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Internal-Auth", internalAuthToken);
+        return new HttpEntity<>(headers);
+    }
+
     /**
      * Market 기본 정보 및 선택지별 집계 조회
      * 
@@ -38,8 +50,9 @@ public class MarketClient {
         
         try {
             log.info("Market Service 요약 정보 조회 요청: marketId={}", marketId);
-            
-            ApiResponse<Object> response = restTemplate.getForObject(url, ApiResponse.class);
+
+            ApiResponse<Object> response = restTemplate.exchange(
+                url, HttpMethod.GET, internalAuthEntity(), ApiResponse.class).getBody();
             
             if (response == null || !response.isSuccess()) {
                 log.warn("Market Service 응답 오류: marketId={}, response={}", marketId, response);
@@ -145,15 +158,14 @@ public class MarketClient {
         }
     }
 
-    // TODO: Market Service에 GET /internal/api/v1/markets/{marketId}/basic-info 엔드포인트 추가 필요
-    // 현재는 구현 준비 상태, Market Service 팀과 협의 후 활성화
     public ActiveMarketInfoResponse getActiveMarketInfo(long marketId) {
         String url = String.format("%s/internal/api/v1/markets/%d/basic-info", marketServiceBaseUrl, marketId);
 
         try {
             log.info("Market Service 기본 정보 조회 요청: marketId={}", marketId);
 
-            ApiResponse<Object> response = restTemplate.getForObject(url, ApiResponse.class);
+            ApiResponse<Object> response = restTemplate.exchange(
+                url, HttpMethod.GET, internalAuthEntity(), ApiResponse.class).getBody();
 
             if (response == null || !response.isSuccess()) {
                 log.warn("Market Service 기본 정보 응답 오류: marketId={}, response={}", marketId, response);
@@ -229,7 +241,8 @@ public class MarketClient {
             try {
                 log.info("Market Service 예측 데이터 조회 요청: marketId={}, page={}", marketId, page);
                 
-                ApiResponse<Object> response = restTemplate.getForObject(url, ApiResponse.class);
+                ApiResponse<Object> response = restTemplate.exchange(
+                    url, HttpMethod.GET, internalAuthEntity(), ApiResponse.class).getBody();
                 
                 if (response == null || !response.isSuccess()) {
                     log.warn("Market Service 응답 오류: marketId={}, page={}, response={}", marketId, page, response);

@@ -1,7 +1,20 @@
 spring:
   application:
     name: insight-reputation-service
-  
+
+  # HTTP 응답 Content-Type 에 charset=UTF-8 을 강제 포함시킨다.
+  # 없으면 application/json 응답을 일부 클라이언트가 ISO-8859-1 로 해석해 한국어가 깨진다.
+  http:
+    encoding:
+      charset: UTF-8
+      force: true
+      enabled: true
+
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=7d
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -57,3 +70,4 @@ client:
     base-url: ${MEMBER_POINT_SERVICE_BASE_URL:http://member-point-service}
   market:
     base-url: ${MARKET_SERVICE_BASE_URL:http://localhost:8082}
+    internal-auth-token: ${MARKET_INTERNAL_AUTH_TOKEN:local-internal-token}

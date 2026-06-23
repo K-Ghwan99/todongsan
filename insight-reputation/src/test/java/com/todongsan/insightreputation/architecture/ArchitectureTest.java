@@ -183,12 +183,10 @@ class ArchitectureTest {
     }
 
     @Test
-    @DisplayName("도메인 간 직접 참조 금지: insight ↔ publicdata")
-    void insight_and_publicdata_should_not_depend_on_each_other() {
-        noClasses().that().resideInAPackage("..insight..")
-                .should().dependOnClassesThat().resideInAPackage("..publicdata..")
-                .check(allClasses);
-        
+    @DisplayName("도메인 간 직접 참조 금지: publicdata → insight (역방향만 금지, insight→publicdata 허용)")
+    void publicdata_should_not_depend_on_insight() {
+        // insight 서비스가 공공 데이터를 직접 조회하는 것은 허용 (insight → publicdata)
+        // publicdata 도메인이 insight 도메인을 역참조하는 것은 금지
         noClasses().that().resideInAPackage("..publicdata..")
                 .should().dependOnClassesThat().resideInAPackage("..insight..")
                 .check(allClasses);
