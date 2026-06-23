@@ -1,7 +1,15 @@
 spring:
   application:
     name: insight-reputation-service
-  
+
+  # HTTP 응답 Content-Type 에 charset=UTF-8 을 강제 포함시킨다.
+  # 없으면 application/json 응답을 일부 클라이언트가 ISO-8859-1 로 해석해 한국어가 깨진다.
+  http:
+    encoding:
+      charset: UTF-8
+      force: true
+      enabled: true
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
