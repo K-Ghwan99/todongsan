@@ -111,6 +111,7 @@ public class BattleSettleScheduler {
                             .referenceId(battleId)
                             .type("EARN_VOTE_WIN")
                             .amount(VOTE_WIN_REWARD)
+                            .reason("배틀 승리 보상")
                             .idempotencyKey(key)
                             .build());
                 }

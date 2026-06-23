@@ -124,6 +124,7 @@ public class BattleServiceImpl implements BattleService {
                     .referenceType("BATTLE")
                     .referenceId(battleId)
                     .amount(APPROVED_REWARD)
+                    .reason("Battle 주제 등록 승인 보상")
                     .idempotencyKey(idempotencyKey)
                     .build());
         } catch (CustomException e) {
@@ -135,6 +136,7 @@ public class BattleServiceImpl implements BattleService {
                             .referenceId(battleId)
                             .type("EARN_BATTLE_APPROVED")
                             .amount(APPROVED_REWARD)
+                            .reason("Battle 주제 등록 승인 보상")
                             .idempotencyKey(idempotencyKey)
                             .build());
                 }

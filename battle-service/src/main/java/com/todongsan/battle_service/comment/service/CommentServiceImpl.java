@@ -71,6 +71,7 @@ public class CommentServiceImpl implements CommentService {
                     .referenceType("BATTLE")
                     .referenceId(battleId)
                     .amount(COMMENT_REWARD)
+                    .reason("Battle 댓글 작성 보상")
                     .idempotencyKey(idempotencyKey)
                     .build());
         } catch (CustomException e) {
@@ -82,6 +83,7 @@ public class CommentServiceImpl implements CommentService {
                             .referenceId(battleId)
                             .type("EARN_COMMENT")
                             .amount(COMMENT_REWARD)
+                            .reason("Battle 댓글 작성 보상")
                             .idempotencyKey(idempotencyKey)
                             .build());
                 }
