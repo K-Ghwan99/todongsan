@@ -26,6 +26,8 @@ public interface BattleService {
 
     BattleStatusResponse cancelBattle(Long battleId);
 
+    BattleStatusResponse cancelBattleByUser(Long battleId, Long memberId);
+
     // 내부 Insight API 전용 (PENDING/CANCELLED도 노출)
     BattleDetailResponse getBattleInternal(Long battleId);
 

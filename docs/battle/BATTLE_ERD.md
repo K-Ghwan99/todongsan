@@ -232,7 +232,7 @@ CREATE TABLE point_reward_retry_queue (
 PENDING    검수 대기 (사용자 등록 후 관리자 승인 전)
 ACTIVE     투표 진행 중 (관리자 승인 후 자동 전환, start_at 도달 후 실제 투표 가능)
 CLOSED     투표 종료 (end_at 도달, 자동 전환)
-CANCELLED  강제 취소 / 관리자 거절
+CANCELLED  강제 취소 / 관리자 거절 / 사용자 직접 취소(PENDING 상태 본인 Battle 한정)
 ```
 
 > **정산 상태는 별도 컬럼**: status에 `SETTLED`를 두지 않고 `settled_at IS NOT NULL`로 판단한다.
@@ -245,6 +245,7 @@ stateDiagram-v2
     [*] --> PENDING: Battle 생성
     PENDING --> ACTIVE: 관리자 승인
     PENDING --> CANCELLED: 관리자 거절
+    PENDING --> CANCELLED: 사용자 직접 취소 (본인 Battle)
     ACTIVE --> CLOSED: end_at 도달<br/>(winning_option 확정)
     ACTIVE --> CANCELLED: 관리자 강제 취소
     CLOSED --> [*]
@@ -331,3 +332,4 @@ flowchart TD
 | v4 | `point_reward_retry_queue`에 `reference_type` 컬럼 추가 (Member-Point `point_history`와 정합성) |
 | v4 | `ALREADY_VOTED` 참조를 `BATTLE_ALREADY_VOTED`로 정정 |
 | v5 | `battle` 테이블에 `sido`, `sigu` 컬럼 추가 (Insight 방문 인증 연동) |
+| v6 | 4-1 CANCELLED 설명에 사용자 직접 취소 경우 추가. 4-2 상태 전이도에 `PENDING → CANCELLED (사용자 직접 취소)` 경로 추가 |

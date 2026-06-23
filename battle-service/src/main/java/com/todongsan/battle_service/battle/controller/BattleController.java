@@ -4,6 +4,7 @@ import com.todongsan.battle_service.battle.dto.request.BattleCreateRequest;
 import com.todongsan.battle_service.battle.dto.response.BattleCreateResponse;
 import com.todongsan.battle_service.battle.dto.response.BattleDetailResponse;
 import com.todongsan.battle_service.battle.dto.response.BattleListResponse;
+import com.todongsan.battle_service.battle.dto.response.BattleStatusResponse;
 import com.todongsan.battle_service.battle.dto.response.MyCreatedBattleResponse;
 import com.todongsan.battle_service.battle.service.BattleService;
 import com.todongsan.battle_service.global.response.ApiResponse;
@@ -52,5 +53,13 @@ public class BattleController {
     @GetMapping("/{battleId}")
     public ApiResponse<BattleDetailResponse> getBattle(@PathVariable Long battleId) {
         return ApiResponse.ok(battleService.getBattle(battleId));
+    }
+
+    // PATCH /api/v1/battles/{battleId}/cancel
+    @PatchMapping("/{battleId}/cancel")
+    public ApiResponse<BattleStatusResponse> cancelBattleByUser(
+            @PathVariable Long battleId,
+            @RequestHeader("X-Member-Id") Long memberId) {
+        return ApiResponse.ok(battleService.cancelBattleByUser(battleId, memberId));
     }
 }

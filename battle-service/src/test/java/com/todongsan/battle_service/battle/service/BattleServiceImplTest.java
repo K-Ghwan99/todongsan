@@ -9,6 +9,7 @@ import com.todongsan.battle_service.battle.entity.Battle;
 import com.todongsan.battle_service.battle.entity.BattleStatus;
 import com.todongsan.battle_service.battle.repository.BattleRepository;
 import com.todongsan.battle_service.client.MemberPointClient;
+import com.todongsan.battle_service.comment.repository.CommentRepository;
 import com.todongsan.battle_service.global.exception.CustomException;
 import com.todongsan.battle_service.global.exception.ErrorCode;
 import com.todongsan.battle_service.retry.repository.PointRewardRetryQueueRepository;
@@ -45,6 +46,7 @@ import static org.mockito.Mockito.verify;
 class BattleServiceImplTest {
 
     @Mock private BattleRepository battleRepository;
+    @Mock private CommentRepository commentRepository;
     @Mock private MemberPointClient memberPointClient;
     @Mock private PointRewardRetryQueueRepository retryQueueRepository;
     @Mock private TransactionTemplate txTemplate;
@@ -341,6 +343,40 @@ class BattleServiceImplTest {
                 .isInstanceOf(CustomException.class)
                 .satisfies(e -> assertThat(((CustomException) e).getErrorCode())
                         .isEqualTo(ErrorCode.BATTLE_INVALID_STATUS));
+    }
+
+    // ===================== cancelBattleByUser =====================
+
+    @Test
+    @DisplayName("사용자 취소 성공 - PENDING → CANCELLED")
+    void cancelBattleByUser_success() {
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(pendingBattle()));
+
+        BattleStatusResponse response = battleService.cancelBattleByUser(1L, 1L);
+
+        assertThat(response.getStatus()).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    @DisplayName("사용자 취소 실패 - PENDING 아님 → BATTLE_INVALID_STATUS")
+    void cancelBattleByUser_fail_notPending() {
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(activeBattle()));
+
+        assertThatThrownBy(() -> battleService.cancelBattleByUser(1L, 1L))
+                .isInstanceOf(CustomException.class)
+                .satisfies(e -> assertThat(((CustomException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.BATTLE_INVALID_STATUS));
+    }
+
+    @Test
+    @DisplayName("사용자 취소 실패 - 본인 배틀 아님 → FORBIDDEN")
+    void cancelBattleByUser_fail_notOwner() {
+        given(battleRepository.findByIdAndDeletedAtIsNull(1L)).willReturn(Optional.of(pendingBattle()));
+
+        assertThatThrownBy(() -> battleService.cancelBattleByUser(1L, 999L))
+                .isInstanceOf(CustomException.class)
+                .satisfies(e -> assertThat(((CustomException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.FORBIDDEN));
     }
 
     // ===================== helpers =====================

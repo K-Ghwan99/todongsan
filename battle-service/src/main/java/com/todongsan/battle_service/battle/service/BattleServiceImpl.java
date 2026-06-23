@@ -165,6 +165,20 @@ public class BattleServiceImpl implements BattleService {
     }
 
     @Override
+    @Transactional
+    public BattleStatusResponse cancelBattleByUser(Long battleId, Long memberId) {
+        Battle battle = findByIdOrThrow(battleId);
+        if (battle.getStatus() != BattleStatus.PENDING) {
+            throw new CustomException(ErrorCode.BATTLE_INVALID_STATUS);
+        }
+        if (!battle.getCreatedBy().equals(memberId)) {
+            throw new CustomException(ErrorCode.FORBIDDEN);
+        }
+        battle.cancel();
+        return BattleStatusResponse.from(battle);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public BattleDetailResponse getBattleInternal(Long battleId) {
         Battle battle = findByIdOrThrow(battleId);
