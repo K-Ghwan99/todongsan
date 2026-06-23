@@ -60,7 +60,6 @@ POST /api/v1/battles
   "title": "성수 vs 연남, 데이트하기 어디가 더 좋을까?",
   "optionA": "성수",
   "optionB": "연남",
-  "description": "주말 데이트 코스로 어디가 더 매력적인지 투표해주세요!",
   "sido": "서울",
   "sigu": "성동구",
   "startAt": "2026-05-29T00:00:00",
@@ -98,7 +97,6 @@ POST /api/v1/battles
 | `UNAUTHORIZED` | 401 | JWT 없음/만료 |
 | `VALIDATION_FAILED` | 400 | 필수 필드 누락, 길이 초과 |
 | `BATTLE_INVALID_PERIOD` | 400 | endAt이 startAt 이전이거나 과거 |
-| `POINT_INSUFFICIENT` | 400 | Battle 생성권 부족 |
 
 ---
 
@@ -119,7 +117,21 @@ GET /api/v1/battles?status={status}&page={page}&size={size}
 | page | Integer | N | 페이지 번호 (기본: 0) |
 | size | Integer | N | 페이지 크기 (기본: 20) |
 
-**Response**: (기존 형식 유지)
+**Response**: Spring `Page<T>` 직렬화 형태(`content`, `number`, `size`, `totalElements`, `totalPages`, `first`, `last`).
+
+**응답 item 필드**
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| battleId | Long | 배틀 ID |
+| title / optionA / optionB | String | 배틀 제목·선택지 |
+| status | String | `ACTIVE` / `CLOSED` |
+| voteCount | Integer | 총 투표 수 |
+| commentCount | Long | 댓글 수 |
+| startAt / endAt | String | 배틀 기간 |
+| createdAt | String | 등록 시각 |
+
+> sido/sigu는 목록 응답에 포함되지 않는다. 상세 조회(2-3)에서 확인 가능.
 
 **Error Codes**
 
@@ -927,3 +939,4 @@ GET /api/v1/battles/{battleId}/info
 | 2026-06-22 | 2-4/2-5/2-6 관리자 액션 경로를 `/admin/` 하위로 이동. (`/{battleId}/approve|reject|cancel` → `/admin/{battleId}/approve|reject|cancel`) |
 | 2026-06-23 | 2-7 Battle 취소 (본인) `PATCH /api/v1/battles/{battleId}/cancel` 신설. PENDING 상태 본인 Battle 직접 취소 지원. 기존 2-7~2-9를 2-8~2-10으로 번호 이동 |
 | 2026-06-23 | 2-2 `sort` 파라미터 추가. `popular` 지정 시 vote_count 내림차순, 미지정 시 최신 등록순(기존 동작 유지) |
+| 2026-06-23 | 2-1 Request Body에서 미구현 `description` 필드 제거. 2-1 Error Codes에서 미구현 `POINT_INSUFFICIENT` 제거. 2-2 Response 필드 목록 명시(sido/sigu 없음, commentCount 추가) |
