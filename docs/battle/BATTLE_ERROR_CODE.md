@@ -49,7 +49,6 @@
 | `UNAUTHORIZED` (공통) | JWT 없음/만료 |
 | `VALIDATION_FAILED` (공통) | title/optionA/optionB 빈 값, 길이 초과 |
 | `BATTLE_INVALID_PERIOD` | end_at < start_at 또는 과거 시점 |
-| `POINT_INSUFFICIENT` (공통) | Battle 생성권 부족 |
 
 ### 3-2. Battle 목록/상세 조회 — `GET /api/v1/battles`, `GET /api/v1/battles/{id}`
 
@@ -209,18 +208,16 @@
 
 Battle Service가 Member-Point를 호출할 때 페이로드 규칙이다.
 모든 보상 호출에서 `referenceType = "BATTLE"`, `referenceId = battleId`로 통일한다.
-댓글 보상의 경우 commentId는 `idempotency_key`에 포함시켜 unique를 보장한다.
 (`MEMBER_POINT_ERD.md` 4-3 `PointReferenceType` 규칙 준수)
 
-| 상황 | type | referenceType | referenceId | idempotency_key |
-|---|---|---|---|---|
-| 투표 보상 | `EARN_VOTE` | `BATTLE` | `battleId` | `battle:vote:{battleId}:member:{memberId}` |
-| 댓글 보상 | `EARN_COMMENT` | `BATTLE` | `battleId` | `battle:comment:{commentId}:member:{memberId}` |
-| 승리 보상 (정산) | `EARN_VOTE_WIN` | `BATTLE` | `battleId` | `battle:settle:{battleId}:member:{memberId}` |
-| 주제 승인 보상 | `EARN_BATTLE_APPROVED` | `BATTLE` | `battleId` | `battle:approved:{battleId}:member:{memberId}` |
-| 주제 생성권 차감 | `SPEND_BATTLE_CREATE` | `BATTLE` | `battleId` | `battle:create:{battleId}:member:{memberId}` |
+| 상황 | type | amount | reason | referenceType | referenceId | idempotency_key |
+|---|---|---|---|---|---|---|
+| 투표 보상 | `EARN_VOTE` | +10P | Battle 투표 참여 보상 | `BATTLE` | `battleId` | `battle:vote:{battleId}:member:{memberId}` |
+| 댓글 보상 | `EARN_COMMENT` | +2P | Battle 댓글 작성 보상 | `BATTLE` | `battleId` | `battle:comment:battle:{battleId}:member:{memberId}` |
+| 승리 보상 (정산) | `EARN_VOTE_WIN` | +10P | 배틀 승리 보상 | `BATTLE` | `battleId` | `battle:settle:{battleId}:member:{memberId}` |
+| 주제 승인 보상 | `EARN_BATTLE_APPROVED` | +20P | Battle 주제 등록 승인 보상 | `BATTLE` | `battleId` | `battle:approved:{battleId}:member:{memberId}` |
 
-> **댓글 보상의 reference_id가 battleId인 이유**: `PointReferenceType.BATTLE`은 `reference_id = battle.id`로 정의되어 있음 (Member-Point ERD 4-3). 같은 사용자가 같은 Battle에 여러 댓글을 작성해도 `idempotency_key`에 commentId가 포함되어 unique가 보장되므로, Member-Point의 `request_hash` 충돌은 발생하지 않는다 (서로 다른 idempotency_key는 비교 자체가 일어나지 않음).
+> **댓글 보상 idempotency_key**: `battle:comment:battle:{battleId}:member:{memberId}` 형태로, 사용자당 배틀 1개에 최초 1회만 보상이 지급된다. commentId를 키에 포함하지 않으므로 같은 사용자가 동일 Battle에 댓글을 여러 개 작성해도 두 번째 댓글부터는 보상 없음.
 
 ---
 
@@ -279,3 +276,4 @@ CONVENTION 담당자(Insight)와 협의해서 통일 필요.
 | v2 | 6번 충돌 항목 확장: NOT_FOUND, POINT_INSUFFICIENT HTTP 코드 등 추가 |
 | v3 | 3-6 교차분석·인증자 필터 에러 코드를 관리자 전용 기준으로 변경. POINT_INSUFFICIENT/IDEMPOTENCY_KEY_REQUIRED 제거, FORBIDDEN 추가 |
 | v4 | 3-3 관리자 전환 API 경로를 `/admin/` 하위로 정정. 3-4 사용자 Battle 취소 에러 섹션 신설. 이하 번호 이동 (3-4→3-5 ~ 3-11→3-12) |
+| v5 | 3-1 미구현 `POINT_INSUFFICIENT` 제거. 5-4 테이블에 amount/reason 컬럼 추가. 댓글 idempotency_key 실제 구현 패턴으로 정정(`{commentId}` → `battle:{battleId}`). 미구현 `SPEND_BATTLE_CREATE` 행 제거 |
