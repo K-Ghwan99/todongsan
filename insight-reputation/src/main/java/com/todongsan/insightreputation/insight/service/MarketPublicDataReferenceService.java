@@ -83,6 +83,7 @@ public class MarketPublicDataReferenceService {
                     .summary("현재 해당 마켓과 관련된 최신 공공 데이터가 없습니다. 공공 데이터는 매주 목요일 및 매월 15일에 업데이트됩니다.")
                     .content("## 안내\n공공 데이터가 아직 수집되지 않았습니다. 잠시 후 다시 시도해 주세요.")
                     .dataAsOf(null)
+                    .aiAnalyzed(false)
                     .build();
         }
 
@@ -106,10 +107,11 @@ public class MarketPublicDataReferenceService {
                     .summary("AI 분석을 일시적으로 이용할 수 없습니다. 아래 공공 데이터를 직접 참고해 주세요.")
                     .content(buildRawDataContent(publicData))
                     .dataAsOf(dataAsOf)
+                    .aiAnalyzed(false)
                     .build();
         }
 
-        // 6. 응답 파싱 후 DTO 반환
+        // 6. 응답 파싱 후 DTO 반환 (aiAnalyzed = true)
         return parseAndBuild(rawResult, dataAsOf);
     }
 
@@ -156,6 +158,7 @@ public class MarketPublicDataReferenceService {
                 .summary(summary)
                 .content(content)
                 .dataAsOf(dataAsOf)
+                .aiAnalyzed(true)
                 .build();
     }
 
