@@ -60,9 +60,12 @@ public class BattleServiceImpl implements BattleService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<BattleListResponse> getBattles(String status, int page, int size) {
+    public Page<BattleListResponse> getBattles(String status, String sort, int page, int size) {
         BattleStatus battleStatus = parsePublicStatus(status);
-        PageRequest pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Sort sorting = "popular".equalsIgnoreCase(sort)
+                ? Sort.by("voteCount").descending()
+                : Sort.by("createdAt").descending();
+        PageRequest pageable = PageRequest.of(page, size, sorting);
         return battleRepository.findByStatusAndDeletedAtIsNull(battleStatus, pageable)
                 .map(b -> BattleListResponse.from(b, commentRepository.countByBattleIdAndDeletedAtIsNull(b.getId())));
     }

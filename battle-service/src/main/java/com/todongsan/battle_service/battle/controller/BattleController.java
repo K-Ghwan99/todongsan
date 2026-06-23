@@ -30,13 +30,14 @@ public class BattleController {
         return ApiResponse.ok(battleService.createBattle(memberId, request));
     }
 
-    // GET /api/v1/battles?status=ACTIVE&page=0&size=20
+    // GET /api/v1/battles?status=ACTIVE&sort=popular&page=0&size=20
     @GetMapping
     public ApiResponse<Page<BattleListResponse>> getBattles(
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.ok(battleService.getBattles(status, page, size));
+        return ApiResponse.ok(battleService.getBattles(status, sort, page, size));
     }
 
     // GET /api/v1/battles/created/me?status=PENDING,ACTIVE&page=0&size=20

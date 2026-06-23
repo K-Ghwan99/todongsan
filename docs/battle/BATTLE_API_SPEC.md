@@ -115,6 +115,7 @@ GET /api/v1/battles?status={status}&page={page}&size={size}
 | 파라미터 | 타입 | 필수 | 설명 |
 |---|---|---|---|
 | status | String | N | `ACTIVE`, `CLOSED` (기본: `ACTIVE`). `PENDING`/`CANCELLED`은 일반 사용자에게 노출 안 됨 |
+| sort | String | N | `popular` 지정 시 vote_count 내림차순. 미지정 시 최신 등록순 |
 | page | Integer | N | 페이지 번호 (기본: 0) |
 | size | Integer | N | 페이지 크기 (기본: 20) |
 
@@ -925,3 +926,4 @@ GET /api/v1/battles/{battleId}/info
 | 2026-06-22 | 2-8 관리자 PENDING 목록 조회(`GET /api/v1/battles/admin/pending`) 신설. 2-9 관리자 상세 조회(`GET /api/v1/battles/admin/{battleId}`) 신설. 2-3 관리자 전용 조회 안내 문구 수정 |
 | 2026-06-22 | 2-4/2-5/2-6 관리자 액션 경로를 `/admin/` 하위로 이동. (`/{battleId}/approve|reject|cancel` → `/admin/{battleId}/approve|reject|cancel`) |
 | 2026-06-23 | 2-7 Battle 취소 (본인) `PATCH /api/v1/battles/{battleId}/cancel` 신설. PENDING 상태 본인 Battle 직접 취소 지원. 기존 2-7~2-9를 2-8~2-10으로 번호 이동 |
+| 2026-06-23 | 2-2 `sort` 파라미터 추가. `popular` 지정 시 vote_count 내림차순, 미지정 시 최신 등록순(기존 동작 유지) |

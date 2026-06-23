@@ -10,7 +10,7 @@ public interface BattleService {
 
     BattleCreateResponse createBattle(Long memberId, BattleCreateRequest request);
 
-    Page<BattleListResponse> getBattles(String status, int page, int size);
+    Page<BattleListResponse> getBattles(String status, String sort, int page, int size);
 
     // 관리자: PENDING 배틀 목록 조회
     Page<BattleDetailResponse> getPendingBattles(int page, int size);
