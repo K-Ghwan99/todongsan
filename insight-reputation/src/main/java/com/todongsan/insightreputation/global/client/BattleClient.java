@@ -102,6 +102,26 @@ public class BattleClient {
     }
 
     /**
+     * 진행 중인 배틀 수 조회 (ACTIVE 상태)
+     * 연결 불가 시 null 반환
+     */
+    public Integer getActiveBattlesCount() {
+        String url = String.format("%s/api/v1/battles/internal/active-count", battleServiceBaseUrl);
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("X-Internal-Auth", internalAuthToken);
+            ApiResponse<Object> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), ApiResponse.class).getBody();
+            if (response == null || !response.isSuccess()) return null;
+            Object data = response.getData();
+            return data != null ? ((Number) data).intValue() : null;
+        } catch (Exception e) {
+            log.warn("Battle 활성 카운트 조회 실패 (null 반환): {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Battle 정보 조회 (지역 정보 확인용)
      */
     public BattleResponse getBattle(Long battleId) {

@@ -28,4 +28,18 @@ public interface InsightReportRepository extends JpaRepository<InsightReport, Lo
     @Query("SELECT ir FROM InsightReport ir WHERE ir.status = :status AND ir.createdAt < :cutoff")
     List<InsightReport> findOrphanedPendingReports(@Param("status") InsightReportStatus status,
                                                     @Param("cutoff") LocalDateTime cutoff);
+
+    long countByStatus(InsightReportStatus status);
+
+    // 주간 AI 리포트 완료/실패 건수 (native — YEARWEEK는 MySQL 전용)
+    @Query(value = """
+            SELECT YEARWEEK(ir.generated_at, 1),
+                   SUM(CASE WHEN ir.status = 'DONE'   THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN ir.status = 'FAILED' THEN 1 ELSE 0 END)
+            FROM insight_report ir
+            WHERE ir.generated_at >= :from
+            GROUP BY YEARWEEK(ir.generated_at, 1)
+            ORDER BY YEARWEEK(ir.generated_at, 1)
+            """, nativeQuery = true)
+    List<Object[]> countCompletedByWeek(@Param("from") LocalDateTime from);
 }

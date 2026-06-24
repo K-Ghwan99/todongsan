@@ -158,6 +158,30 @@ public class MarketClient {
         }
     }
 
+    /**
+     * 진행 중인 마켓 수 조회 (ACTIVE 상태)
+     * 연결 불가 시 null 반환
+     */
+    public Integer getActiveMarketsCount() {
+        String url = String.format("%s/api/v1/markets?status=ACTIVE&page=0&size=1", marketServiceBaseUrl);
+        try {
+            ApiResponse<Object> response = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(new HttpHeaders()), ApiResponse.class).getBody();
+            if (response == null || !response.isSuccess()) return null;
+            Object data = response.getData();
+            if (data instanceof java.util.Map) {
+                @SuppressWarnings("unchecked")
+                java.util.Map<String, Object> map = (java.util.Map<String, Object>) data;
+                Object total = map.get("totalElements");
+                return total != null ? ((Number) total).intValue() : null;
+            }
+            return null;
+        } catch (Exception e) {
+            log.warn("Market 활성 카운트 조회 실패 (null 반환): {}", e.getMessage());
+            return null;
+        }
+    }
+
     public ActiveMarketInfoResponse getActiveMarketInfo(long marketId) {
         String url = String.format("%s/internal/api/v1/markets/%d/basic-info", marketServiceBaseUrl, marketId);
 
@@ -317,5 +341,82 @@ public class MarketClient {
         
         log.info("Market 예측 데이터 수집 완료: marketId={}, totalPredictions={}", marketId, allPredictions.size());
         return allPredictions;
+    }
+
+    /**
+     * Market 예측 데이터 단일 페이지 조회 (관리자 대시보드용)
+     */
+    public MarketPredictionsPageResponse getPredictionsPage(Long marketId, int page, int size) {
+        String url = String.format("%s/internal/api/v1/markets/%d/insight-predictions?page=%d&size=%d",
+                marketServiceBaseUrl, marketId, page, size);
+
+        try {
+            log.info("Market Service 예측 데이터 페이지 조회: marketId={}, page={}, size={}", marketId, page, size);
+
+            ApiResponse<Object> response = restTemplate.exchange(
+                    url, HttpMethod.GET, internalAuthEntity(), ApiResponse.class).getBody();
+
+            if (response == null || !response.isSuccess()) {
+                throw new CustomException(ErrorCode.EXTERNAL_SERVICE_BAD_RESPONSE);
+            }
+
+            Object data = response.getData();
+            if (data == null) {
+                return MarketPredictionsPageResponse.builder()
+                        .content(new ArrayList<>()).page(page).size(size)
+                        .totalElements(0L).totalPages(0).build();
+            }
+
+            if (data instanceof java.util.Map) {
+                @SuppressWarnings("unchecked")
+                java.util.Map<String, Object> dataMap = (java.util.Map<String, Object>) data;
+
+                @SuppressWarnings("unchecked")
+                java.util.List<java.util.Map<String, Object>> contentList =
+                        (java.util.List<java.util.Map<String, Object>>) dataMap.get("content");
+
+                List<MarketPredictionResponse> content = new ArrayList<>();
+                for (java.util.Map<String, Object> predictionMap : contentList) {
+                    content.add(MarketPredictionResponse.builder()
+                            .predictionId(((Number) predictionMap.get("predictionId")).longValue())
+                            .memberId(((Number) predictionMap.get("memberId")).longValue())
+                            .optionId(((Number) predictionMap.get("optionId")).longValue())
+                            .optionLabel((String) predictionMap.get("optionLabel"))
+                            .pointAmount(new java.math.BigDecimal((String) predictionMap.get("pointAmount")))
+                            .priceSnapshot(new java.math.BigDecimal((String) predictionMap.get("priceSnapshot")))
+                            .contractQuantity(new java.math.BigDecimal((String) predictionMap.get("contractQuantity")))
+                            .status((String) predictionMap.get("status"))
+                            .isCorrect((Boolean) predictionMap.get("isCorrect"))
+                            .participatedAt(LocalDateTime.parse((String) predictionMap.get("participatedAt")))
+                            .build());
+                }
+
+                long totalElements = ((Number) dataMap.get("totalElements")).longValue();
+                int totalPages = ((Number) dataMap.get("totalPages")).intValue();
+
+                return MarketPredictionsPageResponse.builder()
+                        .content(content).page(page).size(size)
+                        .totalElements(totalElements).totalPages(totalPages).build();
+            }
+
+            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_BAD_RESPONSE);
+
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                return MarketPredictionsPageResponse.builder()
+                        .content(new ArrayList<>()).page(page).size(size)
+                        .totalElements(0L).totalPages(0).build();
+            }
+            log.error("Market Service 예측 페이지 조회 HTTP 오류: marketId={}, status={}", marketId, e.getStatusCode());
+            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
+        } catch (ResourceAccessException e) {
+            log.error("Market Service 예측 페이지 조회 연결 오류: marketId={}", marketId, e.getMessage());
+            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE);
+        } catch (CustomException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Market Service 예측 페이지 조회 중 오류: marketId={}", marketId, e);
+            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
+        }
     }
 }
