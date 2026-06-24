@@ -1,5 +1,6 @@
 package com.todongsan.battle_service.comment.entity;
 
+import com.todongsan.battle_service.battle.entity.Battle;
 import com.todongsan.battle_service.global.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.Builder;
@@ -22,6 +23,10 @@ public class Comment extends BaseEntity {
 
     @Column(name = "battle_id", nullable = false)
     private Long battleId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "battle_id", nullable = false, insertable = false, updatable = false)
+    private Battle battle;
 
     @Column(name = "member_id", nullable = false)
     private Long memberId; // member.id (REST 참조)
