@@ -16,6 +16,8 @@ public class BattleListResponse {
     private String optionB;
     private String status;
     private int voteCount;
+    private int optionACount;
+    private int optionBCount;
     private long commentCount;
     private LocalDateTime startAt;
     private LocalDateTime endAt;
@@ -29,6 +31,8 @@ public class BattleListResponse {
                 .optionB(battle.getOptionB())
                 .status(battle.getStatus().name())
                 .voteCount(battle.getVoteCount())
+                .optionACount(battle.getOptionACount())
+                .optionBCount(battle.getOptionBCount())
                 .commentCount(commentCount)
                 .startAt(battle.getStartAt())
                 .endAt(battle.getEndAt())

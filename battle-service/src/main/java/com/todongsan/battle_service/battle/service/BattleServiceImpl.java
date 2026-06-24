@@ -46,6 +46,7 @@ public class BattleServiceImpl implements BattleService {
 
         Battle battle = Battle.builder()
                 .title(request.getTitle())
+                .description(request.getDescription())
                 .optionA(request.getOptionA())
                 .optionB(request.getOptionB())
                 .sido(request.getSido())

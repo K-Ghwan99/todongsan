@@ -14,6 +14,7 @@ public class BattleDetailResponse {
 
     private Long battleId;
     private String title;
+    private String description;
     private String optionA;
     private String optionB;
     private String sido;
@@ -35,6 +36,7 @@ public class BattleDetailResponse {
         return BattleDetailResponse.builder()
                 .battleId(battle.getId())
                 .title(battle.getTitle())
+                .description(battle.getDescription())
                 .optionA(battle.getOptionA())
                 .optionB(battle.getOptionB())
                 .sido(battle.getSido())

@@ -20,6 +20,9 @@ public class BattleCreateRequest {
     @Size(max = 255)
     private String title;
 
+    @Size(max = 1000)
+    private String description;
+
     @NotBlank
     @Size(max = 100)
     private String optionA;
