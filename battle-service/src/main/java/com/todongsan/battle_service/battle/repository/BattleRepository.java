@@ -34,6 +34,9 @@ public interface BattleRepository extends JpaRepository<Battle, Long> {
     @Query("SELECT b FROM Battle b WHERE b.status = 'CLOSED' AND b.settledAt IS NULL AND b.deletedAt IS NULL")
     List<Battle> findUnsettledClosedBattles();
 
+    // 상태별 카운트 (Insight Service 내부 API용)
+    long countByStatusAndDeletedAtIsNull(BattleStatus status);
+
     // 투표 집계 원자적 UPDATE (같은 트랜잭션에서 INSERT 후 호출)
     @Modifying
     @Query(value = "UPDATE battle SET option_a_count = option_a_count + 1, vote_count = vote_count + 1 WHERE id = :battleId", nativeQuery = true)

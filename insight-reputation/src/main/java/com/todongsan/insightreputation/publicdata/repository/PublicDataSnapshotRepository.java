@@ -49,6 +49,32 @@ public interface PublicDataSnapshotRepository extends JpaRepository<PublicDataSn
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
 
+    // 전국 가격 지도용 — itmId 필터 없음 (기존 findRecentPriceData와 동일 패턴)
+    @Query("""
+            SELECT MAX(pds.referenceDate)
+            FROM PublicDataSnapshot pds
+            WHERE pds.source = :source
+              AND pds.dataType = :dataType
+            """)
+    Optional<LocalDate> findLatestReferenceDate(
+            @Param("source") PublicDataSource source,
+            @Param("dataType") PublicDataType dataType);
+
+    @Query("""
+            SELECT pds.regionSido, AVG(pds.numericValue)
+            FROM PublicDataSnapshot pds
+            WHERE pds.source = :source
+              AND pds.dataType = :dataType
+              AND pds.referenceDate = :referenceDate
+              AND pds.regionSido != '전국'
+              AND pds.regionSido IS NOT NULL
+            GROUP BY pds.regionSido
+            """)
+    List<Object[]> findIndexGroupByRegionSido(
+            @Param("source") PublicDataSource source,
+            @Param("dataType") PublicDataType dataType,
+            @Param("referenceDate") LocalDate referenceDate);
+
     /**
      * 공공 데이터 배치 적재 (ON DUPLICATE KEY UPDATE)
      * 멱등성 보장을 위해 UNIQUE KEY 중복 시 UPDATE 처리

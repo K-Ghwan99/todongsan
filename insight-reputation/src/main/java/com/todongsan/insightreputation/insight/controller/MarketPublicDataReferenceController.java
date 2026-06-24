@@ -1,6 +1,9 @@
 package com.todongsan.insightreputation.insight.controller;
 
+import com.todongsan.insightreputation.global.exception.CustomException;
+import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
 import com.todongsan.insightreputation.global.response.ApiResponse;
+import com.todongsan.insightreputation.insight.dto.MarketDashboardResponse;
 import com.todongsan.insightreputation.insight.dto.MarketPriceHistoryResponse;
 import com.todongsan.insightreputation.insight.dto.MarketPublicDataReferenceResponse;
 import com.todongsan.insightreputation.insight.service.MarketPriceHistoryService;
@@ -89,5 +92,19 @@ public class MarketPublicDataReferenceController {
         log.info("마켓 가격 이력 조회: marketId={}, memberId={}", marketId, memberId);
 
         return ResponseEntity.ok(ApiResponse.success(marketPriceHistoryService.getPriceHistory(marketId)));
+    }
+
+    @Operation(
+        summary = "마켓 통합 대시보드 조회",
+        description = "관리자용. 마켓의 가격 이력, 예측 분포, 참여자 인구통계, 방문 인증 현황을 통합 제공한다. " +
+                     "SETTLED 마켓이면 predictionDistribution·priceVsPredictionOverlay·participantStats 포함."
+    )
+    @GetMapping("/api/v1/admin/insights/markets/{marketId}/dashboard")
+    public ResponseEntity<ApiResponse<MarketDashboardResponse>> getDashboard(
+            @PathVariable Long marketId,
+            @RequestHeader(value = "X-Member-Role", required = false) String role) {
+        if (!"ADMIN".equals(role)) throw new CustomException(ErrorCode.FORBIDDEN);
+        log.info("마켓 통합 대시보드 조회: marketId={}", marketId);
+        return ResponseEntity.ok(ApiResponse.success(marketPriceHistoryService.getDashboard(marketId)));
     }
 }

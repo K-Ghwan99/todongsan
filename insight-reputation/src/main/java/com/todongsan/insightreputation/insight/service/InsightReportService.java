@@ -1,5 +1,6 @@
 package com.todongsan.insightreputation.insight.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.todongsan.insightreputation.enums.InsightReportStatus;
 import com.todongsan.insightreputation.enums.InsightReportType;
 import com.todongsan.insightreputation.global.client.BattleClient;
@@ -22,6 +23,7 @@ import com.todongsan.insightreputation.enums.PublicDataSource;
 import com.todongsan.insightreputation.enums.PublicDataType;
 import com.todongsan.insightreputation.publicdata.entity.PublicDataSnapshot;
 import com.todongsan.insightreputation.publicdata.repository.PublicDataSnapshotRepository;
+import com.todongsan.insightreputation.visitcertification.repository.VisitCertificationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -30,9 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -42,10 +42,12 @@ public class InsightReportService {
 
     private final InsightReportRepository insightReportRepository;
     private final PublicDataSnapshotRepository publicDataSnapshotRepository;
+    private final VisitCertificationRepository visitCertificationRepository;
     private final BattleClient battleClient;
     private final MarketClient marketClient;
     private final MemberPointClient memberPointClient;
     private final ClaudeApiClient claudeApiClient;
+    private final ObjectMapper objectMapper;
 
     private static final int REPORT_COST = 80;
 
@@ -377,9 +379,36 @@ public class InsightReportService {
 
             // 5. Claude API를 통한 분석 수행
             String analysisResult = claudeApiClient.analyze(prompt, maxTokens);
-            
-            // 6. 분석 완료 처리
-            completeAnalysis(reportId, analysisResult);
+
+            // 6. analysisData JSON 빌드
+            Map<Long, MemberInfoResponse> memberInfoMap = memberInfo.stream()
+                    .collect(Collectors.toMap(MemberInfoResponse::getMemberId, m -> m));
+
+            List<Long> certifiedMemberIds;
+            try {
+                if (battleInfo.getSigu() != null && !battleInfo.getSigu().isBlank()) {
+                    certifiedMemberIds = visitCertificationRepository
+                            .findMemberIdsBySidoAndSigu(battleInfo.getSido(), battleInfo.getSigu());
+                } else {
+                    certifiedMemberIds = visitCertificationRepository
+                            .findMemberIdsBySido(battleInfo.getSido());
+                }
+            } catch (Exception e) {
+                log.warn("방문 인증 데이터 조회 실패 (analysisData 부분 생략): battleId={}", battleId, e);
+                certifiedMemberIds = List.of();
+            }
+
+            String analysisDataJson = null;
+            try {
+                Map<String, Object> analysisData = buildAnalysisData(
+                        votesData.getVotes(), memberInfoMap, battleInfo, certifiedMemberIds);
+                analysisDataJson = objectMapper.writeValueAsString(analysisData);
+            } catch (Exception e) {
+                log.warn("analysisData 빌드/직렬화 실패 (리포트는 저장): battleId={}", battleId, e);
+            }
+
+            // 7. 분석 완료 처리
+            completeAnalysis(reportId, analysisResult, analysisDataJson);
             
         } catch (Exception e) {
             log.error("Battle 분석 수행 중 오류: reportId={}, battleId={}", reportId, battleId, e);
@@ -387,21 +416,24 @@ public class InsightReportService {
         }
     }
     
-    /**
-     * 분석 완료 처리
-     * 
-     * @param reportId 리포트 ID
-     * @param analysisResult 분석 결과
-     */
     @Transactional
     public void completeAnalysis(Long reportId, String analysisResult) {
+        completeAnalysis(reportId, analysisResult, null);
+    }
+
+    @Transactional
+    public void completeAnalysis(Long reportId, String analysisResult, String analysisData) {
         InsightReport report = insightReportRepository.findById(reportId)
                 .orElseThrow(() -> new RuntimeException("리포트 없음: " + reportId));
-        
-        report.complete(analysisResult);  // 상태를 DONE으로 변경하고 결과 저장
+
+        report.complete(analysisResult);
+        if (analysisData != null) {
+            report.updateAnalysisData(analysisData);
+        }
         insightReportRepository.save(report);
-        
-        log.info("Battle 분석 완료: reportId={}, resultLength={}", reportId, analysisResult.length());
+
+        log.info("분석 완료: reportId={}, resultLength={}, hasAnalysisData={}",
+                reportId, analysisResult.length(), analysisData != null);
     }
     
     /**
@@ -741,16 +773,103 @@ public class InsightReportService {
         }
     }
 
-    /**
-     * 멱등성 키 생성
-     * 
-     * @param memberId 회원 ID
-     * @param referenceId 참조 ID (battleId 또는 marketId)
-     * @param type 타입 구분자
-     * @return 멱등성 키
-     */
     private String generateIdempotencyKey(Long memberId, Long referenceId, String type) {
-        return String.format("%s-report-%d-%d-%s", type.toLowerCase(), memberId, referenceId, 
+        return String.format("%s-report-%d-%d-%s", type.toLowerCase(), memberId, referenceId,
                 LocalDateTime.now().toLocalDate().toString());
+    }
+
+    private Map<String, Object> buildAnalysisData(
+            List<BattleVote> rawVotes,
+            Map<Long, MemberInfoResponse> memberInfoMap,
+            BattleResponse battleInfo,
+            List<Long> certifiedMemberIds
+    ) {
+        int totalVotes = rawVotes.size();
+        String labelA = battleInfo.getOptionA() != null ? battleInfo.getOptionA() : "A";
+        String labelB = battleInfo.getOptionB() != null ? battleInfo.getOptionB() : "B";
+        Map<String, String> labelMap = Map.of("A", labelA, "B", labelB);
+
+        // 1. optionDistribution
+        Map<String, Long> countByOption = rawVotes.stream()
+                .filter(v -> labelMap.containsKey(v.getSelectedOption()))
+                .collect(Collectors.groupingBy(v -> labelMap.get(v.getSelectedOption()), Collectors.counting()));
+
+        List<Map<String, Object>> optionDistribution = countByOption.entrySet().stream()
+                .map(e -> Map.<String, Object>of(
+                        "optionLabel", e.getKey(),
+                        "count", e.getValue(),
+                        "ratio", totalVotes > 0 ? Math.round((double) e.getValue() / totalVotes * 1000) / 1000.0 : 0.0
+                )).toList();
+
+        // 2. genderByOption
+        Map<String, Map<String, Double>> genderByOption = rawVotes.stream()
+                .filter(v -> memberInfoMap.containsKey(v.getMemberId())
+                        && memberInfoMap.get(v.getMemberId()).getGender() != null
+                        && labelMap.containsKey(v.getSelectedOption()))
+                .collect(Collectors.groupingBy(
+                        v -> labelMap.get(v.getSelectedOption()),
+                        Collectors.collectingAndThen(
+                                Collectors.groupingBy(
+                                        v -> memberInfoMap.get(v.getMemberId()).getGender(),
+                                        Collectors.counting()
+                                ),
+                                genderCount -> {
+                                    long total = genderCount.values().stream().mapToLong(Long::longValue).sum();
+                                    return genderCount.entrySet().stream().collect(
+                                            Collectors.toMap(Map.Entry::getKey,
+                                                    e -> Math.round((double) e.getValue() / total * 1000) / 1000.0));
+                                }
+                        )
+                ));
+
+        // 3. ageGroupByOption
+        Map<String, Map<String, Double>> ageGroupByOption = rawVotes.stream()
+                .filter(v -> memberInfoMap.containsKey(v.getMemberId())
+                        && memberInfoMap.get(v.getMemberId()).getAgeGroup() != null
+                        && labelMap.containsKey(v.getSelectedOption()))
+                .collect(Collectors.groupingBy(
+                        v -> labelMap.get(v.getSelectedOption()),
+                        Collectors.collectingAndThen(
+                                Collectors.groupingBy(
+                                        v -> memberInfoMap.get(v.getMemberId()).getAgeGroup(),
+                                        Collectors.counting()
+                                ),
+                                ageCount -> {
+                                    long total = ageCount.values().stream().mapToLong(Long::longValue).sum();
+                                    return ageCount.entrySet().stream().collect(
+                                            Collectors.toMap(Map.Entry::getKey,
+                                                    e -> Math.round((double) e.getValue() / total * 1000) / 1000.0));
+                                }
+                        )
+                ));
+
+        // 4. visitCertifiedVotePattern
+        Set<Long> certifiedSet = new HashSet<>(certifiedMemberIds);
+        List<BattleVote> certifiedVotes = rawVotes.stream()
+                .filter(v -> certifiedSet.contains(v.getMemberId()))
+                .toList();
+
+        Map<String, Long> certifiedCountByOption = certifiedVotes.stream()
+                .filter(v -> labelMap.containsKey(v.getSelectedOption()))
+                .collect(Collectors.groupingBy(v -> labelMap.get(v.getSelectedOption()), Collectors.counting()));
+
+        int certifiedTotal = certifiedVotes.size();
+        List<Map<String, Object>> certifiedDistribution = certifiedCountByOption.entrySet().stream()
+                .map(e -> Map.<String, Object>of(
+                        "optionLabel", e.getKey(),
+                        "count", e.getValue(),
+                        "ratio", certifiedTotal > 0 ? Math.round((double) e.getValue() / certifiedTotal * 1000) / 1000.0 : 0.0
+                )).toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("totalVotes", totalVotes);
+        result.put("optionDistribution", optionDistribution);
+        result.put("genderByOption", genderByOption);
+        result.put("ageGroupByOption", ageGroupByOption);
+        result.put("visitCertifiedVotePattern", Map.of(
+                "certifiedVoterCount", certifiedTotal,
+                "certifiedOptionDistribution", certifiedDistribution
+        ));
+        return result;
     }
 }
