@@ -102,6 +102,14 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             return true;
         }
 
+        // Battle 공개 GET 경로 (목록/상세/댓글목록) - 비로그인 허용
+        if (HttpMethod.GET.equals(method)
+                && (path.equals("/api/v1/battles")
+                        || path.matches("/api/v1/battles/[0-9]+")
+                        || path.matches("/api/v1/battles/[0-9]+/comments"))) {
+            return true;
+        }
+
         return false;
     }
 
