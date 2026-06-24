@@ -24,6 +24,9 @@ public class Battle extends BaseEntity {
     @Column(nullable = false)
     private String title;
 
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
     @Column(name = "option_a", nullable = false, length = 100)
     private String optionA;
 
@@ -71,9 +74,10 @@ public class Battle extends BaseEntity {
     private LocalDateTime deletedAt;
 
     @Builder
-    public Battle(String title, String optionA, String optionB, String sido, String sigu,
+    public Battle(String title, String description, String optionA, String optionB, String sido, String sigu,
                   Long createdBy, LocalDateTime startAt, LocalDateTime endAt) {
         this.title = title;
+        this.description = description;
         this.optionA = optionA;
         this.optionB = optionB;
         this.sido = sido;
