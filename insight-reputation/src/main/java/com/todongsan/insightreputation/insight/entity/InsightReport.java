@@ -133,4 +133,8 @@ public class InsightReport extends BaseEntity {
     public boolean canRetry() {
         return this.retryCount < MAX_RETRY_COUNT;
     }
+
+    public void updateAnalysisData(String analysisData) {
+        this.analysisData = analysisData;
+    }
 }

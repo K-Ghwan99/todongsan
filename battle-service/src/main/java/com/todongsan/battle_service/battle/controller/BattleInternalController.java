@@ -1,6 +1,8 @@
 package com.todongsan.battle_service.battle.controller;
 
 import com.todongsan.battle_service.battle.dto.response.BattleDetailResponse;
+import com.todongsan.battle_service.battle.entity.BattleStatus;
+import com.todongsan.battle_service.battle.repository.BattleRepository;
 import com.todongsan.battle_service.battle.service.BattleService;
 import com.todongsan.battle_service.comment.dto.response.CommentInternalResponse;
 import com.todongsan.battle_service.comment.service.CommentService;
@@ -21,6 +23,7 @@ public class BattleInternalController {
     private final BattleService battleService;
     private final VoteService voteService;
     private final CommentService commentService;
+    private final BattleRepository battleRepository;
 
     @Value("${external.internal-auth-token}")
     private String internalAuthToken;
@@ -50,6 +53,14 @@ public class BattleInternalController {
             @RequestHeader(value = "X-Internal-Auth", required = false) String authToken) {
         validateInternalAuth(authToken);
         return ApiResponse.ok(battleService.getBattleInternal(battleId));
+    }
+
+    // GET /api/v1/battles/internal/active-count (Insight 관리자 대시보드용)
+    @GetMapping("/internal/active-count")
+    public ApiResponse<Long> getActiveBattleCount(
+            @RequestHeader(value = "X-Internal-Auth", required = false) String authToken) {
+        validateInternalAuth(authToken);
+        return ApiResponse.ok(battleRepository.countByStatusAndDeletedAtIsNull(BattleStatus.ACTIVE));
     }
 
     private void validateInternalAuth(String token) {
