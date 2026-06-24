@@ -46,14 +46,20 @@ public class MarketPublicDataReferenceService {
 
         String marketTitle = marketInfo != null ? marketInfo.getTitle() : "마켓 #" + marketId;
         List<String> optionLabels = marketInfo != null ? marketInfo.getOptionLabels() : Collections.emptyList();
+        String regionScope = marketInfo != null ? marketInfo.getRegionScope() : null;
         String regionSido = marketInfo != null ? marketInfo.getRegionSido() : null;
         String regionSigu = marketInfo != null ? marketInfo.getRegionSigu() : null;
 
         // 2. 공공 데이터 조회 — 주간(8주) 우선, 없으면 월간(3개월) 폴백, 지역 정책 필터 적용
+        // regionScope 기준 분기:
+        //   NATIONAL  → 전국 단위 지역 마켓  (regionSido="전국")  → 지역 필터 적용
+        //   REGIONAL  → 특정 시도/시군구 마켓 (regionSido=시도)   → 지역 필터 적용
+        //   NON_REGIONAL / null → 지역 무관 마켓 (regionSido=null) → 전체 데이터 조회
         List<PublicDataSnapshot> publicData = Collections.emptyList();
         LocalDate today = LocalDate.now();
+        boolean hasRegion = "NATIONAL".equals(regionScope) || "REGIONAL".equals(regionScope);
         try {
-            if (regionSido != null && !regionSido.isBlank()) {
+            if (hasRegion) {
                 publicData = publicDataSnapshotRepository.findRecentPriceData(
                         PublicDataSource.REB, PublicDataType.WEEKLY_PRICE_INDEX,
                         today.minusWeeks(8), today);
@@ -62,9 +68,9 @@ public class MarketPublicDataReferenceService {
                             PublicDataSource.REB, PublicDataType.MONTHLY_PRICE_INDEX,
                             today.minusMonths(3), today);
                 }
-                publicData = applyRegionFilter(publicData, regionSido, regionSigu);
-                log.info("공공 데이터 지역 필터 조회 완료: marketId={}, regionSido={}, regionSigu={}, dataCount={}",
-                        marketId, regionSido, regionSigu, publicData.size());
+                publicData = applyRegionFilter(publicData, regionScope, regionSido, regionSigu);
+                log.info("공공 데이터 지역 필터 조회 완료: marketId={}, regionScope={}, regionSido={}, regionSigu={}, dataCount={}",
+                        marketId, regionScope, regionSido, regionSigu, publicData.size());
             } else {
                 publicData = publicDataSnapshotRepository.findRecentPriceData(
                         PublicDataSource.REB, PublicDataType.WEEKLY_PRICE_INDEX,
@@ -74,7 +80,8 @@ public class MarketPublicDataReferenceService {
                             PublicDataSource.REB, PublicDataType.MONTHLY_PRICE_INDEX,
                             today.minusMonths(2), today);
                 }
-                log.info("공공 데이터 전체 조회 완료: marketId={}, dataCount={}", marketId, publicData.size());
+                log.info("공공 데이터 전체 조회 완료: marketId={}, regionScope={}, dataCount={}",
+                        marketId, regionScope, publicData.size());
             }
         } catch (Exception e) {
             log.warn("공공 데이터 조회 실패: marketId={}", marketId, e);
@@ -203,16 +210,15 @@ public class MarketPublicDataReferenceService {
     }
 
     /**
-     * Market 지역 정책 기준 필터링
-     * - "전국": region_sido = '전국'
-     * - 시도(regionSigu=null): region_sido = :regionSido
-     * - 시군구: region_sido = :regionSido AND region_fullpath LIKE '%:regionSigu%'
+     * Market 지역 정책(regionScope) 기준 필터링
+     * - NATIONAL  : region_sido = '전국'
+     * - REGIONAL  : region_sido = :regionSido [AND region_fullpath LIKE '%:regionSigu%']
      */
     private List<PublicDataSnapshot> applyRegionFilter(List<PublicDataSnapshot> snapshots,
-                                                        String regionSido, String regionSigu) {
+                                                        String regionScope, String regionSido, String regionSigu) {
         return snapshots.stream()
                 .filter(snap -> {
-                    if ("전국".equals(regionSido)) {
+                    if ("NATIONAL".equals(regionScope)) {
                         return "전국".equals(snap.getRegionSido());
                     } else if (regionSigu != null && !regionSigu.isBlank()) {
                         return regionSido.equals(snap.getRegionSido())

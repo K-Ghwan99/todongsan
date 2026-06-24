@@ -5,6 +5,18 @@
 
 ---
 
+## 변경 내역 (v8 → v9)
+
+| 섹션 | 변경 내용 |
+|---|---|
+| 섹션 3-3 갱신 | Battle 관리자 리포트 `analysisData` 필드 구조 명세화 (투표 통계·인구통계·방문인증 패턴 JSON). 리포트 생성 시 자동 저장. |
+| 섹션 3-4-1 신규 | 관리자 마켓 통합 대시보드 API (`GET /api/v1/admin/insights/markets/{marketId}/dashboard`) |
+| 섹션 3-5 신규 | 플랫폼 전체 KPI 대시보드 API (`GET /api/v1/admin/insights/overview`) |
+| 섹션 3-6 신규 | 전국 지역별 가격 지수 지도 데이터 API (`GET /api/v1/admin/insights/regions/price-map`) |
+| 섹션 3-7 신규 | 플랫폼 활동 시계열 추이 API (`GET /api/v1/admin/insights/activity/trend`) |
+
+---
+
 ## 변경 내역 (v7 → v8)
 
 | 섹션 | 변경 내용 |
@@ -1068,4 +1080,332 @@ Headers:
 |---|---:|---|
 | `RESOURCE_NOT_FOUND` | 404 | 존재하지 않는 marketId (Market Service 확인된 경우) |
 | `EXTERNAL_SERVICE_UNAVAILABLE` | 503 | Market Service 연결 불가 (fallback 실패 시) |
+
+---
+
+> **[v9 신규 섹션]** 아래 섹션은 v9에서 추가된 관리자 대시보드 기능 명세다.
+
+---
+
+## 3-3 Battle AI 분석 리포트 관리자 조회 — `analysisData` 상세 (v9 갱신)
+
+기존 섹션 3-3의 응답에서 `analysisData` 필드가 `{}` 빈 객체로 반환됐으나, v9부터는 Battle AI 리포트 생성 시 아래 구조로 자동 저장된다. `status: "DONE"` 일 때만 값이 있다.
+
+```json
+{
+  "analysisData": {
+    "totalVotes": 189,
+    "optionDistribution": [
+      { "optionLabel": "찬성", "count": 112, "ratio": 0.593 },
+      { "optionLabel": "반대", "count": 77,  "ratio": 0.407 }
+    ],
+    "genderByOption": {
+      "찬성": { "MALE": 0.65, "FEMALE": 0.35 },
+      "반대": { "MALE": 0.48, "FEMALE": 0.52 }
+    },
+    "ageGroupByOption": {
+      "찬성": { "20대": 0.51, "30대": 0.29, "40대": 0.15, "50대 이상": 0.05 },
+      "반대": { "20대": 0.38, "30대": 0.32, "40대": 0.22, "50대 이상": 0.08 }
+    },
+    "visitCertifiedVotePattern": {
+      "certifiedVoterCount": 23,
+      "certifiedOptionDistribution": [
+        { "optionLabel": "찬성", "count": 17, "ratio": 0.739 },
+        { "optionLabel": "반대", "count": 6,  "ratio": 0.261 }
+      ]
+    }
+  }
+}
+```
+
+| 필드 | 설명 |
+|---|---|
+| `totalVotes` | 전체 투표 수 |
+| `optionDistribution` | 옵션별 투표 수·비율 (optionLabel은 BattleResponse.optionA / optionB 값) |
+| `genderByOption` | 옵션별 성별 분포 비율. 성별 정보 없는 투표자는 제외. |
+| `ageGroupByOption` | 옵션별 연령대 분포 비율. 연령 정보 없는 투표자는 제외. |
+| `visitCertifiedVotePattern.certifiedVoterCount` | 배틀 지역(sido + sigu) 방문 인증 이력이 있는 투표자 수 |
+| `visitCertifiedVotePattern.certifiedOptionDistribution` | 방문 인증 투표자들의 옵션별 투표 분포 |
+
+> **optionLabel 값:** `"A"`, `"B"` 대신 BattleResponse의 `optionA`, `optionB` 텍스트 값을 사용한다.
+> 방문 인증 패턴은 `VisitCertification` 테이블에서 배틀 지역(sido/sigu) 기준으로 집계한다.
+
+---
+
+## 3-4-1. 관리자 마켓 통합 대시보드 (v9 신규)
+
+`/price-history`의 슈퍼셋. 가격 이력에 참여자 인구통계·방문인증 현황·가격-예측 오버레이를 추가한 통합 뷰.
+
+```
+GET /api/v1/admin/insights/markets/{marketId}/dashboard
+Headers:
+  X-Member-Role: ADMIN
+```
+
+**응답 (200 OK)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "marketId": 123,
+    "title": "강남구 아파트 2024년 하반기 매매가격 변동률",
+    "regionSido": "서울",
+    "regionSigu": "강남구",
+
+    "priceHistory": {
+      "dataType": "WEEKLY_PRICE_INDEX",
+      "records": [
+        { "referenceDate": "2026-04-28", "value": 103.08 },
+        { "referenceDate": "2026-05-05", "value": 103.29 },
+        { "referenceDate": "2026-06-16", "value": 104.71 }
+      ],
+      "trendDirection": "RISING",
+      "changeRate": 1.58
+    },
+
+    "predictionDistribution": [
+      { "optionLabel": "0~5% 상승", "ratio": 0.657, "isResult": true },
+      { "optionLabel": "5~10% 상승", "ratio": 0.343, "isResult": false }
+    ],
+
+    "priceVsPredictionOverlay": {
+      "priceTrendDirection": "RISING",
+      "priceChangePct": 1.58,
+      "crowdPredictedCorrectly": true,
+      "majorityOption": "0~5% 상승"
+    },
+
+    "participantStats": {
+      "totalParticipants": 342,
+      "totalPoolAmount": 28500,
+      "genderDistribution": {
+        "MALE": 0.61,
+        "FEMALE": 0.39
+      },
+      "ageGroupDistribution": {
+        "20대": 0.44,
+        "30대": 0.31,
+        "40대": 0.18,
+        "50대 이상": 0.07
+      },
+      "residenceMatchRatio": 0.23
+    },
+
+    "visitCertStats": {
+      "certifiedVisitorCount": 47,
+      "gpsCertCount": 31,
+      "commentCertCount": 16
+    }
+  }
+}
+```
+
+| 필드 | Nullable | 설명 |
+|---|---|---|
+| `priceHistory.trendDirection` | N | `RISING` / `FALLING` / `FLAT`. 첫 값 대비 마지막 값 기준 |
+| `priceHistory.changeRate` | Y | 기간 내 변동률(%). 데이터 2개 미만 시 null |
+| `predictionDistribution` | — | SETTLED 마켓만 채워짐. 그 외 빈 배열 |
+| `priceVsPredictionOverlay` | Y | SETTLED + 가격 데이터 모두 있을 때만 값. 그 외 null |
+| `participantStats` | Y | SETTLED 마켓만 의미있음. 데이터 없으면 null |
+| `participantStats.residenceMatchRatio` | Y | regionSido가 있을 때만 계산 (null 가능) |
+| `visitCertStats` | N | regionSido null이면 전체 인증 수 반환 |
+
+**데이터 조회 우선순위 (priceHistory):** 주간(최근 8주) → 없으면 월간(최근 6개월) 폴백
+
+**Error Codes**
+
+| 에러 코드 | HTTP | 상황 |
+|---|---:|---|
+| `RESOURCE_NOT_FOUND` | 404 | 존재하지 않는 marketId |
+| `FORBIDDEN` | 403 | ADMIN 권한 없음 |
+| `EXTERNAL_SERVICE_UNAVAILABLE` | 503 | Market Service 연결 불가 |
+
+---
+
+## 3-5. 플랫폼 전체 KPI 대시보드 (v9 신규)
+
+관리자 메인 페이지용 플랫폼 전체 지표. 모든 데이터를 로컬 DB 집계로 제공한다 (외부 서비스 호출 최소화).
+
+```
+GET /api/v1/admin/insights/overview
+Headers:
+  X-Member-Role: ADMIN
+```
+
+**응답 (200 OK)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "platformStats": {
+      "totalMembersWithReputation": 1240,
+      "avgReputationScore": 47.3,
+      "avgPredictionAccuracy": 61.2,
+      "totalVisitCertifications": 892,
+      "activeMarketsCount": 38,
+      "activeBattlesCount": 22
+    },
+    "reputationDistribution": {
+      "0-20":   0.08,
+      "21-40":  0.23,
+      "41-60":  0.41,
+      "61-80":  0.21,
+      "81-100": 0.07
+    },
+    "crowdIntelligenceScore": 71.4,
+    "visitCertMethodRatio": {
+      "GPS":     0.68,
+      "COMMENT": 0.32
+    },
+    "aiReportStats": {
+      "totalDone":    48,
+      "totalFailed":   3,
+      "totalPending":  2,
+      "successRate": 0.941
+    }
+  }
+}
+```
+
+| 필드 | 설명 |
+|---|---|
+| `avgReputationScore` | `reputation.activity_score` 전체 평균 |
+| `avgPredictionAccuracy` | `reputation.prediction_accuracy` 전체 평균 (prediction_count > 0인 회원만) |
+| `crowdIntelligenceScore` | `market_prediction_result`에서 is_correct=true 비율 × 100. 플랫폼 예측 품질 지표 |
+| `activeMarketsCount` | Market Service 호출. 연결 불가 시 null 반환 |
+| `activeBattlesCount` | Battle Service 호출. 연결 불가 시 null 반환 |
+| `reputationDistribution` | activity_score 구간별 비율 (합계 = 1.0) |
+| `aiReportStats.successRate` | `totalDone / (totalDone + totalFailed)` |
+
+**Error Codes**
+
+| 에러 코드 | HTTP | 상황 |
+|---|---:|---|
+| `FORBIDDEN` | 403 | ADMIN 권한 없음 |
+
+---
+
+## 3-6. 전국 지역별 가격 지수 지도 데이터 (v9 신규)
+
+전국 시도(17개)별 최신 실거래가 지수와 방문 인증 활동량을 반환한다. 프론트엔드 Choropleth 지도 시각화용.
+
+```
+GET /api/v1/admin/insights/regions/price-map
+Headers:
+  X-Member-Role: ADMIN
+```
+
+**응답 (200 OK)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "asOf": "2026-06-20",
+    "dataType": "WEEKLY_PRICE_INDEX",
+    "regions": [
+      {
+        "regionSido": "서울",
+        "latestIndex": 103.2,
+        "prevIndex": 102.8,
+        "changePct": 0.39,
+        "direction": "RISING",
+        "visitCertCount": 142
+      },
+      {
+        "regionSido": "경기",
+        "latestIndex": 98.7,
+        "prevIndex": 99.1,
+        "changePct": -0.40,
+        "direction": "FALLING",
+        "visitCertCount": 87
+      }
+    ]
+  }
+}
+```
+
+| 필드 | Nullable | 설명 |
+|---|---|---|
+| `asOf` | N | 가장 최신 기준일 (공공 데이터 reference_date) |
+| `dataType` | N | `WEEKLY_PRICE_INDEX` 또는 `MONTHLY_PRICE_INDEX`. 주간 우선, 없으면 월간 |
+| `regions[].latestIndex` | Y | 최신 기준일 지수값 (itm_id = '10001'). 데이터 없으면 null |
+| `regions[].prevIndex` | Y | 직전 기준일 지수값. 주간이면 7일 전, 월간이면 30일 전 |
+| `regions[].changePct` | Y | `(latestIndex - prevIndex) / prevIndex * 100`. prev 없으면 null |
+| `regions[].direction` | Y | `RISING` (changePct > 0.05) / `FALLING` (< -0.05) / `FLAT` / null |
+| `regions[].visitCertCount` | N | 해당 시도의 방문 인증 누적 건수 (0이면 0) |
+
+> 전국(`regionSido = '전국'`) 레코드는 별도 집계 없이 지역 목록에서 제외한다.
+> 공공 데이터에 특정 시도 데이터가 없으면 해당 시도는 `latestIndex: null`로 포함한다.
+
+**Error Codes**
+
+| 에러 코드 | HTTP | 상황 |
+|---|---:|---|
+| `FORBIDDEN` | 403 | ADMIN 권한 없음 |
+
+---
+
+## 3-7. 플랫폼 활동 시계열 추이 (v9 신규)
+
+주간 단위로 집계한 플랫폼 활동 추이 데이터. 기본 12주, 최대 52주.
+
+```
+GET /api/v1/admin/insights/activity/trend?weeks=12
+Headers:
+  X-Member-Role: ADMIN
+```
+
+**Query Parameter**
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `weeks` | Int | N | 조회 주 수. 기본 12, 최대 52 |
+
+**응답 (200 OK)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": "LAST_12_WEEKS",
+    "weeklyTrend": [
+      {
+        "weekStart": "2026-03-31",
+        "newVisitCerts": 34,
+        "aiReportsCompleted": 8,
+        "aiReportSuccessRate": 0.875,
+        "predictionResultsProcessed": 89
+      },
+      {
+        "weekStart": "2026-04-07",
+        "newVisitCerts": 29,
+        "aiReportsCompleted": 5,
+        "aiReportSuccessRate": 1.0,
+        "predictionResultsProcessed": 112
+      }
+    ]
+  }
+}
+```
+
+| 필드 | 설명 |
+|---|---|
+| `weekStart` | 해당 주 월요일 날짜 (YEARWEEK 기준) |
+| `newVisitCerts` | 해당 주 최초 방문 인증 건수 (`visit_certification.certified_at` 기준) |
+| `aiReportsCompleted` | 해당 주 AI 리포트 완료 건수 (`insight_report.generated_at` 기준, BATTLE + MARKET 합산) |
+| `aiReportSuccessRate` | `DONE 건수 / (DONE + FAILED 건수)`. 생성 건수 0이면 null |
+| `predictionResultsProcessed` | 해당 주 처리된 예측 결과 건수 (`market_prediction_result.processed_at` 기준) |
+
+> 데이터 없는 주는 응답 배열에서 제외한다 (0으로 채우지 않음).
+> 가장 오래된 주부터 오름차순 정렬.
+
+**Error Codes**
+
+| 에러 코드 | HTTP | 상황 |
+|---|---:|---|
+| `FORBIDDEN` | 403 | ADMIN 권한 없음 |
+| `VALIDATION_FAILED` | 400 | weeks < 1 또는 weeks > 52 |
 
