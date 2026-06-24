@@ -29,7 +29,7 @@ CREATE TABLE member (
     residence_sido       VARCHAR(50),
     residence_sigu       VARCHAR(50),
     residence_changed_at DATETIME,
-    age_group            VARCHAR(10),                                 -- 연령대 (10대/20대/30대/40대/50대 이상/UNKNOWN)
+    age_group            VARCHAR(10),                                 -- 연령대. 저장값은 enum name(AGE_10S/AGE_20S/AGE_30S/AGE_40S/AGE_50S_ABOVE/UNKNOWN), API 응답 시 @JsonValue로 한글 라벨(10대/20대/.../50대 이상)로 직렬화됨
     gender               VARCHAR(10),                                 -- 성별 (MALE/FEMALE/UNKNOWN)
     oauth_provider       VARCHAR(20)     NOT NULL,
     oauth_id             VARCHAR(255)    NOT NULL,
@@ -104,7 +104,7 @@ erDiagram
         VARCHAR residence_sido
         VARCHAR residence_sigu
         DATETIME residence_changed_at "거주지 변경 쿨다운용"
-        VARCHAR age_group "10대/20대/30대/40대/50대이상/UNKNOWN"
+        VARCHAR age_group "저장값: AGE_10S~AGE_50S_ABOVE/UNKNOWN (API 응답은 한글 라벨로 직렬화)"
         VARCHAR gender "MALE/FEMALE/UNKNOWN"
         VARCHAR oauth_provider
         VARCHAR oauth_id
@@ -120,7 +120,7 @@ erDiagram
         TEXT access_token "암호화 저장"
         TEXT refresh_token "암호화 저장"
         DATETIME access_token_expires_at "6시간"
-        DATETIME refresh_token_expires_at "60일"
+        DATETIME refresh_token_expires_at "최초 로그인 시 +60일 설정, 재로그인 시에도 갱신 안 됨"
         DATETIME created_at "DEFAULT CURRENT_TIMESTAMP"
         DATETIME updated_at "ON UPDATE CURRENT_TIMESTAMP"
     }
@@ -219,6 +219,7 @@ public enum PointReferenceType {
 | gender | 카카오 gender 기반 저장 (male→MALE, female→FEMALE, 미제공→UNKNOWN) |
 | soft delete | deleted_at 설정, 물리 삭제 금지 |
 | 토큰 저장 | access_token, refresh_token 암호화 필수 |
+| oauth_token.refresh_token_expires_at | 최초 로그인 시 1회 +60일로 설정되고 이후 재로그인 시에도 연장되지 않음. 현재 어떤 비즈니스 로직도 이 컬럼 값을 읽어 검증하지 않음(우리 서비스 자체 JWT refresh는 `member-point-service`가 자체 발급한 refreshToken만 검증하며 이 컬럼과 무관) |
 
 ---
 
@@ -253,7 +254,7 @@ WHERE id = :memberId;
 ```
 일반 API (로그인, 조회, 투표, 예측 참여 등)
   → deleted_at IS NULL 조건 필수
-  → 탈퇴 회원 요청 시 MEMBER_ALREADY_DELETED 반환
+  → 탈퇴 회원 요청 시 MEMBER_NOT_FOUND 반환 (MEMBER_ALREADY_DELETED는 정의만 있고 미사용)
 ```
 
 시스템 보정성 API는 탈퇴 회원도 처리 가능하다.

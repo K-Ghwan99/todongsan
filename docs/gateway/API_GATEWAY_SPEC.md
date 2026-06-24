@@ -21,12 +21,14 @@
 │  3. 인식 못한 경로 → 404                 │
 └──────────────────────────────────────────┘
         │
+        ├── /api/v1/admin/markets/**  ──→ market-service:8082         (markets/**보다 먼저 매칭되도록 routes 선언 순서 주의)
         ├── /api/v1/members/**   ──→ member-point-service:8080
         ├── /api/v1/points/**    ──→ member-point-service:8080
         ├── /api/v1/battles/**   ──→ battle-service:8081
         ├── /api/v1/markets/**   ──→ market-service:8082
         ├── /api/v1/insights/**  ──→ insight-reputation-service:8083
-        └── /api/v1/reputations/**  ──→ insight-reputation-service:8083
+        ├── /api/v1/reputations/**  ──→ insight-reputation-service:8083
+        └── /api/v1/admin/insights/**  ──→ insight-reputation-service:8083
 
 [서비스 간 직접 호출 — Gateway 통과 안 함 / /internal/** 경로 사용]
 
@@ -40,13 +42,16 @@ insight-reputation-service ──→ battle-service:8081              GET  /inte
 insight-reputation-service ──→ market-service:8082              GET  /internal/api/v1/markets/{id}/insight-summary
 insight-reputation-service ──→ market-service:8082              GET  /internal/api/v1/markets/{id}/insight-predictions
 
-[DB — 모든 서비스가 외부 RDS에 직접 연결]
+[DB — RDS 아님. 단일 EC2의 Docker MySQL 컨테이너(todongsan-mysql)에 서비스별 스키마로 분리]
 
-member-point-service      ──→ RDS (memberpoint DB)
-battle-service            ──→ RDS (battle DB)
-market-service            ──→ RDS (market DB)
-insight-reputation-service ──→ RDS (insight DB)
+member-point-service      ──→ todongsan-mysql (memberpoint DB)
+battle-service            ──→ todongsan-mysql (battle DB)
+market-service            ──→ todongsan-mysql (market DB)
+insight-reputation-service ──→ todongsan-mysql (insight DB)
 ```
+
+> **[2026-06-23 갱신]** 이 문서는 통합 작업 전(각자 개발 중) 기준으로 작성된 초안이 많이 남아있다.
+> 실제 운영 인프라는 AWS RDS가 아니라 **EC2 1대 + Docker Compose**(`infra/docker-compose.yml`이 MySQL 컨테이너와 네트워크를 생성, 루트 `docker-compose.yml`이 앱 5개를 띄움) 구성이다. 8절의 RDS 기반 docker-compose 예시는 작성 당시의 계획안이며 현재 실제 배포 방식과 다르니, 정확한 배포 설정은 루트 `docker-compose.yml`과 `infra/INFRA_GUIDE.md`를 참고할 것.
 
 ---
 
@@ -61,9 +66,7 @@ insight-reputation-service ──→ RDS (insight DB)
 | `insight-reputation-service` | Insight | `8083` | AI 분석, 신뢰도 |
 | RDS | MySQL | - | 컨테이너 아님. 외부 AWS RDS |
 
-> **⚠️ 포트 통합 시 주의**
-> 현재 각자 개발 중이라 개인 환경의 `application.yml` 포트가 위와 다를 수 있다.
-> 통합 배포 시에는 반드시 위 포트 번호를 사용하도록 각자 `server.port`를 수정하는 것을 권장한다.
+> 통합 완료됨. 위 포트 번호가 각 서비스의 실제 `server.port` 값이다.
 
 ---
 
@@ -106,7 +109,12 @@ JWT 서명 검증 (Member-Point와 동일한 JWT_SECRET 사용)
 > **[보안 정책]** 클라이언트가 임의로 보낸 `X-Member-Id`, `X-Member-Role` 헤더는 반드시 제거 후
 > JWT claim 기준으로 덮어써야 한다. 클라이언트가 `X-Member-Role: ADMIN`을 임의로 설정하는
 > 스푸핑 공격을 차단한다.
-> `Idempotency-Key`는 건드리지 않고 원본 그대로 downstream 전달한다.
+> `Idempotency-Key`는 Gateway에 관련 로직이 전혀 없어 자연히 원본 그대로 downstream에 전달된다(의도적으로 보존 처리하는 코드가 있는 게 아니라, 건드리는 필터 자체가 없는 것).
+>
+> **[응답 포맷 주의]** JWT 검증 실패(헤더 없음/만료/위조)로 인한 401은 `JwtAuthenticationFilter`가 상태코드만 설정하고 즉시 응답을 끝내므로 **본문(JSON body)이 없다**. 반면 라우팅 실패(없는 경로 404 등) 또는 그 외 예외는 `GlobalWebExceptionHandler`가 받아 아래와 같은 공통 `ApiResponse` 포맷 JSON으로 응답한다.
+> ```json
+> { "success": false, "errorCode": "UNAUTHORIZED|NOT_FOUND|INTERNAL_ERROR", "message": "...", "data": null, "timestamp": "..." }
+> ```
 
 **Gateway GlobalFilter 구현 핵심:**
 ```java
@@ -125,12 +133,18 @@ public class JwtAuthenticationFilter implements GlobalFilter {
 
 ### 4-1. 공개 경로 (JWT 검증 없이 통과)
 
+`JwtAuthenticationFilter.isPublicPath()` 기준 실제 공개 경로는 4가지 패턴이다.
+
 | 경로 | 메서드 | 설명 |
 |---|---|---|
 | `/api/v1/members/oauth/kakao` | POST | 카카오 OAuth 로그인 |
 | `/api/v1/members/token/refresh` | POST | Access Token 재발급 |
+| `/api/v1/markets/**` (단, `/predictions/me`로 끝나는 경로 제외) | GET | Market 목록/상세/가격이력/내 예측 조회 등 — 비로그인 사용자에게도 공개 (커밋 `f5786ac`) |
+| `/api/v1/markets/{marketId}/predictions/quote` | POST | Market 예측 시세 견적 — 비로그인 허용 |
 
-### 4-2. 보호 경로 (JWT 검증 필수 → X-Member-Id 헤더 추가)
+> `/api/v1/markets/predictions/me`(내 전체 예측 조회)는 위 GET 공개 규칙에서 명시적으로 제외되어 로그인이 필요하다.
+
+### 4-2. 보호 경로 (JWT 검증 필수 → X-Member-Id, X-Member-Role 헤더 추가)
 
 공개 경로와 내부 API 외 모든 경로. 예시:
 
@@ -143,12 +157,27 @@ public class JwtAuthenticationFilter implements GlobalFilter {
 | `/api/v1/points/balance` | GET | 포인트 잔액 조회 |
 | `/api/v1/points/history` | GET | 포인트 내역 조회 |
 | `/api/v1/battles/**` | 전체 | Battle 관련 외부 API |
-| `/api/v1/admin/markets/**` | 전체 | Market 관리자 API (Market 팀 요청) |
-| `/api/v1/markets/**` | 전체 | Market 관련 외부 API |
+| `/api/v1/admin/markets/**` | 전체 | Market 관리자 API |
+| `/api/v1/markets/**` | 전체(4-1 공개 경로 제외) | Market 관련 외부 API |
 | `/api/v1/insights/**` | 전체 | Insight 관련 외부 API |
+| `/api/v1/reputations/**` | 전체 | 평판/방문인증 관련 외부 API |
+| `/api/v1/admin/insights/**` | 전체 | Insight 관리자 API |
 
 > ⚠️ `/api/v1/admin/markets/**`는 `/api/v1/markets/**`보다 **먼저** 등록해야 한다.
 > Spring Cloud Gateway는 등록 순서대로 매칭하므로 더 구체적인 경로를 위에 둔다.
+> 실제 `application.yml`에서는 `/api/v1/admin/insights/**`는 별도 route가 아니라 `insight` route 하나의 predicates에 `/api/v1/insights/**`, `/api/v1/reputations/**`와 함께 묶여 있다(순서 문제 없음, prefix 충돌 없는 경로라 한 route로 처리됨).
+
+### 4-2-1. CORS
+
+```yaml
+spring.cloud.gateway.globalcors.cors-configurations['[/**]']:
+  allowed-origins: ["http://localhost:5173"]
+  allowed-methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+  allowed-headers: "*"
+  allow-credentials: true
+```
+
+> **운영 도메인 미설정 상태**: `allowed-origins`에 로컬 프론트 주소 하나만 등록되어 있고, profile별 override 파일(`application-prod.yml` 등)도 없다. 운영 배포 시 실제 서비스 도메인을 추가해야 프론트가 Gateway를 호출할 수 있다.
 
 ### 4-3. 내부 연계 API (Gateway를 통하지 않음)
 
@@ -228,34 +257,53 @@ jwt:
 
 ---
 
-## 7. application.yml 예시 (Gateway)
+## 7. application.yml (Gateway, 실제 설정)
 
 ```yaml
 spring:
   application:
-    name: gateway-service
+    name: api-gateway
   cloud:
     gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origins:
+              - "http://localhost:5173"
+            allowed-methods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowed-headers: "*"
+            allow-credentials: true
       routes:
+        - id: admin-market
+          uri: ${MARKET_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/admin/markets/**
+
         - id: member-point
-          uri: http://member-point-service:8080
+          uri: ${MEMBER_POINT_SERVICE_URL:http://localhost:8080}
           predicates:
             - Path=/api/v1/members/**, /api/v1/points/**
 
         - id: battle
-          uri: http://battle-service:8081
+          uri: ${BATTLE_SERVICE_URL:http://localhost:8081}
           predicates:
             - Path=/api/v1/battles/**
 
         - id: market
-          uri: http://market-service:8082
+          uri: ${MARKET_SERVICE_URL:http://localhost:8082}
           predicates:
             - Path=/api/v1/markets/**
 
         - id: insight
-          uri: http://insight-reputation-service:8083
+          uri: ${INSIGHT_SERVICE_URL:http://localhost:8083}
           predicates:
-            - Path=/api/v1/insights/**
+            - Path=/api/v1/insights/**, /api/v1/reputations/**, /api/v1/admin/insights/**
 
 server:
   port: 9000
@@ -270,9 +318,13 @@ management:
         include: health
 ```
 
+> profile별 override 파일(`application-prod.yml` 등)은 없다 — 위 설정이 모든 환경에서 그대로 적용된다(CORS allowed-origins 포함).
+
 ---
 
-## 8. docker-compose.yml 예시 (RDS 연결 포함)
+## 8. docker-compose.yml 예시 (RDS 연결 포함) — ⚠️ 작성 당시 계획안, 실제와 다름
+
+> 아래는 통합 전 작성된 RDS 기반 계획 예시다. **실제로는 RDS를 쓰지 않고 EC2 1대 + Docker MySQL 컨테이너(`todongsan-mysql`)** 구성이며, 정확한 환경변수(`DB_URL` 형식, `MEMBER_POINT_CLIENT_MODE` 등)는 루트 `docker-compose.yml`을 참고할 것. 이 섹션은 라우팅/서비스 구성의 큰 그림 참고용으로만 남겨둔다.
 
 ```yaml
 version: '3.8'
@@ -381,10 +433,9 @@ REB_API_BASE_URL=https://...
 
 ---
 
-## 9. 팀원별 체크리스트
+## 9. 팀원별 체크리스트 (통합 작업 당시 작성, 현재는 모두 완료된 상태)
 
-> 현재 각자 개발 중이라 개인 환경의 포트 번호가 위 통합 포트와 다를 수 있다.
-> **통합 배포 시** 아래 지정된 포트를 사용하는 것을 권장한다.
+> 통합 완료됨. 아래 포트/경로 항목은 모두 현재 코드에 반영되어 있다. 과거 작업 기록 참고용으로 보존.
 
 ### 공통 (모든 팀원)
 
@@ -415,7 +466,7 @@ REB_API_BASE_URL=https://...
 ### Member-Point 담당자
 
 ```
-[ ] server.port: 8080 (현재 일치)
+[x] server.port: 8080 (완료)
 [ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
       @RequestMapping: /internal/api/v1/members/batch
       @RequestMapping: /internal/api/v1/points/earn, /spend, /settlements, /refunds, /transactions
@@ -426,8 +477,7 @@ REB_API_BASE_URL=https://...
 ### Battle 담당자
 
 ```
-[ ] server.port: 8081 권장
-      (현재 application.yml: 8082 → 통합 시 8081로 변경 권장)
+[x] server.port: 8081 (완료)
 [ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
       @RequestMapping: /internal/api/v1/battles/{battleId}/votes/raw
 [ ] SecurityConfig에서 /internal/** permitAll 설정
@@ -441,8 +491,7 @@ REB_API_BASE_URL=https://...
 ### Market 담당자
 
 ```
-[ ] server.port: 8082 권장
-      (현재 application.yml: 8081 → 통합 시 8082로 변경 권장)
+[x] server.port: 8082 (완료)
 [ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
       @RequestMapping: /internal/api/v1/markets/{marketId}/insight-summary
       @RequestMapping: /internal/api/v1/markets/{marketId}/insight-predictions
@@ -455,8 +504,7 @@ REB_API_BASE_URL=https://...
 ### Insight 담당자
 
 ```
-[ ] server.port: 8083 권장
-      (현재 application.yml: 8084 → 통합 시 8083으로 변경 권장)
+[x] server.port: 8083 (완료)
 [ ] 내부 연계 API 컨트롤러 경로 앞에 /internal 추가
       @RequestMapping: /internal/api/v1/reputations/activity
       @RequestMapping: /internal/api/v1/reputations/prediction
