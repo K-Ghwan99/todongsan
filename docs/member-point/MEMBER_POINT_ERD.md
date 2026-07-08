@@ -29,6 +29,8 @@ CREATE TABLE member (
     residence_sido       VARCHAR(50),
     residence_sigu       VARCHAR(50),
     residence_changed_at DATETIME,
+    age_group            VARCHAR(10),                                 -- 연령대. 저장값은 enum name(AGE_10S/AGE_20S/AGE_30S/AGE_40S/AGE_50S_ABOVE/UNKNOWN), API 응답 시 @JsonValue로 한글 라벨(10대/20대/.../50대 이상)로 직렬화됨
+    gender               VARCHAR(10),                                 -- 성별 (MALE/FEMALE/UNKNOWN)
     oauth_provider       VARCHAR(20)     NOT NULL,
     oauth_id             VARCHAR(255)    NOT NULL,
     deleted_at           DATETIME,
@@ -64,13 +66,15 @@ CREATE TABLE point_history (
     id                  BIGINT          NOT NULL AUTO_INCREMENT,
     member_id           BIGINT          NOT NULL,
     type                VARCHAR(50)     NOT NULL,                    -- PointHistoryType (방향 구분)
-    amount              DECIMAL(10,2)   NOT NULL CHECK (amount > 0), -- 항상 양수
-    balance_snapshot    DECIMAL(10,2)   NOT NULL,                    -- 처리 후 잔액
+    amount              DECIMAL(10,2)   NOT NULL CHECK (amount > 0), -- 항상 양수 (실패 기록 시에도 시도한 금액 저장)
+    balance_snapshot    DECIMAL(10,2)   NOT NULL,                    -- 처리 후 잔액 (FAILED 시 변경 없는 현재 잔액)
     reason              VARCHAR(255),
     reference_type      VARCHAR(50)     NULL,                        -- PointReferenceType (BATTLE / MARKET_PREDICTION / INSIGHT_REPORT)
     reference_id        BIGINT          NULL,                        -- 해당 도메인 객체의 ID
-    idempotency_key     VARCHAR(100)    UNIQUE,                      -- 중복 처리 방지
+    idempotency_key     VARCHAR(150)    UNIQUE,                      -- 중복 처리 방지 (Market 정산/환불 키 길이 대응)
     request_hash        VARCHAR(64)     NULL,                        -- SHA-256(memberId+type+amount+referenceType+referenceId) 충돌 감지용
+    status              VARCHAR(20)     NOT NULL DEFAULT 'SUCCEEDED', -- SUCCEEDED / FAILED (포인트 차감 실패 이력 추적용)
+    fail_reason         VARCHAR(50)     NULL,                        -- 실패 사유 ErrorCode (예: POINT_INSUFFICIENT). status=SUCCEEDED이면 NULL
     created_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -100,6 +104,8 @@ erDiagram
         VARCHAR residence_sido
         VARCHAR residence_sigu
         DATETIME residence_changed_at "거주지 변경 쿨다운용"
+        VARCHAR age_group "저장값: AGE_10S~AGE_50S_ABOVE/UNKNOWN (API 응답은 한글 라벨로 직렬화)"
+        VARCHAR gender "MALE/FEMALE/UNKNOWN"
         VARCHAR oauth_provider
         VARCHAR oauth_id
         DATETIME deleted_at
@@ -114,7 +120,7 @@ erDiagram
         TEXT access_token "암호화 저장"
         TEXT refresh_token "암호화 저장"
         DATETIME access_token_expires_at "6시간"
-        DATETIME refresh_token_expires_at "60일"
+        DATETIME refresh_token_expires_at "최초 로그인 시 +60일 설정, 재로그인 시에도 갱신 안 됨"
         DATETIME created_at "DEFAULT CURRENT_TIMESTAMP"
         DATETIME updated_at "ON UPDATE CURRENT_TIMESTAMP"
     }
@@ -124,12 +130,14 @@ erDiagram
         BIGINT member_id FK
         VARCHAR type "PointHistoryType"
         DECIMAL amount "CHECK > 0 (항상 양수)"
-        DECIMAL balance_snapshot "처리 후 잔액"
+        DECIMAL balance_snapshot "처리 후 잔액 (FAILED 시 현재 잔액)"
         VARCHAR reason
         VARCHAR reference_type "BATTLE/MARKET_PREDICTION/INSIGHT_REPORT"
         BIGINT reference_id "도메인 객체 ID"
-        VARCHAR idempotency_key UK
+        VARCHAR(150) idempotency_key UK
         VARCHAR request_hash "SHA-256 해시 (충돌 감지)"
+        VARCHAR status "SUCCEEDED / FAILED"
+        VARCHAR fail_reason "실패 ErrorCode (POINT_INSUFFICIENT 등)"
         DATETIME created_at "DEFAULT CURRENT_TIMESTAMP"
         DATETIME updated_at "ON UPDATE CURRENT_TIMESTAMP"
     }
@@ -207,8 +215,11 @@ public enum PointReferenceType {
 | reference_id | reference_type과 함께 사용, 해당 도메인 객체의 ID |
 | request_hash | SHA-256(memberId + type + amount + referenceType + referenceId) |
 | 거주지 변경 | 30일마다 1회 (residence_changed_at으로 추적) |
+| age_group | 카카오 birthyear 기반 계산, 미제공 시 UNKNOWN |
+| gender | 카카오 gender 기반 저장 (male→MALE, female→FEMALE, 미제공→UNKNOWN) |
 | soft delete | deleted_at 설정, 물리 삭제 금지 |
 | 토큰 저장 | access_token, refresh_token 암호화 필수 |
+| oauth_token.refresh_token_expires_at | 최초 로그인 시 1회 +60일로 설정되고 이후 재로그인 시에도 연장되지 않음. 현재 어떤 비즈니스 로직도 이 컬럼 값을 읽어 검증하지 않음(우리 서비스 자체 JWT refresh는 `member-point-service`가 자체 발급한 refreshToken만 검증하며 이 컬럼과 무관) |
 
 ---
 
@@ -243,14 +254,14 @@ WHERE id = :memberId;
 ```
 일반 API (로그인, 조회, 투표, 예측 참여 등)
   → deleted_at IS NULL 조건 필수
-  → 탈퇴 회원 요청 시 MEMBER_ALREADY_DELETED 반환
+  → 탈퇴 회원 요청 시 MEMBER_NOT_FOUND 반환 (MEMBER_ALREADY_DELETED는 정의만 있고 미사용)
 ```
 
 시스템 보정성 API는 탈퇴 회원도 처리 가능하다.
 
 ```
-POST /api/v1/points/settlements
-POST /api/v1/points/refunds
+POST /internal/api/v1/points/settlements
+POST /internal/api/v1/points/refunds
 
   → deleted_at 무시 (WHERE id = :memberId 만 사용)
   → 탈퇴 전 발생한 거래에 대한 정산/환불 책임 유지
@@ -270,8 +281,9 @@ POST /api/v1/points/refunds
 ## 6. request_hash 생성 규칙
 
 ```java
-// referenceType 포함 (v5부터 변경)
-String raw = memberId + "|" + type + "|" + amount + "|" + referenceType + "|" + referenceId;
+// referenceType 포함 (v5부터 변경), amount 정규화 (v8부터 추가)
+String normalizedAmount = new BigDecimal(amount).setScale(2, RoundingMode.DOWN).toPlainString();
+String raw = memberId + "|" + type + "|" + normalizedAmount + "|" + referenceType + "|" + referenceId;
 String hash = sha256(raw);
 // 결과: "a3f8c2d1e9b4..."  (64자리 16진수)
 ```
@@ -284,6 +296,13 @@ referenceType = INSIGHT_REPORT,    referenceId = 42  → Report 42
 
 같은 referenceId라도 referenceType이 다르면 완전히 다른 거래임.
 따라서 request_hash에 referenceType을 포함해야 정확한 충돌 감지 가능.
+```
+
+amount 정규화 이유:
+```
+"100", "100.0", "100.00" 은 모두 동일한 금액이지만 문자열이 다르면 해시가 달라짐.
+setScale(2, DOWN) 정규화 후 비교하면 세 값 모두 "100.00" → 동일 해시.
+호출자는 어떤 형태로 보내도 동일 요청으로 처리됨.
 ```
 
 ---
@@ -307,3 +326,8 @@ referenceType = INSIGHT_REPORT,    referenceId = 42  → Report 42
 | v5 | `request_hash` 생성 규칙 변경 (referenceType 포함) |
 | v5 | `point_balance` Atomic UPDATE 동시성 제어 정책 추가 |
 | v5 | 탈퇴 회원 정산/환불 허용 정책 추가 |
+| v6 | `member.age_group`, `member.gender` 컬럼 추가 (Insight 배치 조회 응답용) |
+| v7 | `point_history.idempotency_key` VARCHAR(100) → VARCHAR(150) (Market 정산/환불 키 길이 대응) |
+| v8 | `point_history.status` 컬럼 추가 (SUCCEEDED/FAILED). POINT_INSUFFICIENT 시 FAILED 기록 저장 |
+| v8 | `point_history.fail_reason` 컬럼 추가 (실패 ErrorCode 저장, SUCCEEDED 시 NULL) |
+| v8 | `request_hash` 생성 시 amount `setScale(2, DOWN)` 정규화 정책 추가 |

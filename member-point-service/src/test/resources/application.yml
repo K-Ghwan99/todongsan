@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        format_sql: true
+    show-sql: false
+crypto:
+  aes-key: test-aes-key-must-be-32-chars!!!
+
+jwt:
+  secret: test-jwt-secret-must-be-32chars!
+  access-token-expiry: 21600000
+  refresh-token-expiry: 5184000000
+
+kakao:
+  api-base-url: http://localhost:9999

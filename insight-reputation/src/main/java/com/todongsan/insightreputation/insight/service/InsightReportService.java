@@ -1,0 +1,875 @@
+package com.todongsan.insightreputation.insight.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.todongsan.insightreputation.enums.InsightReportStatus;
+import com.todongsan.insightreputation.enums.InsightReportType;
+import com.todongsan.insightreputation.global.client.BattleClient;
+import com.todongsan.insightreputation.global.client.BattleResponse;
+import com.todongsan.insightreputation.global.client.BattleVote;
+import com.todongsan.insightreputation.global.client.BattleVotesRawResponse;
+import com.todongsan.insightreputation.global.client.ClaudeApiClient;
+import com.todongsan.insightreputation.global.client.MarketClient;
+import com.todongsan.insightreputation.global.client.MarketInsightSummaryResponse;
+import com.todongsan.insightreputation.global.client.MarketPredictionResponse;
+import com.todongsan.insightreputation.global.client.MemberInfoResponse;
+import com.todongsan.insightreputation.global.client.MemberPointClient;
+import com.todongsan.insightreputation.global.exception.CustomException;
+import com.todongsan.insightreputation.global.exception.errorcode.ErrorCode;
+import com.todongsan.insightreputation.insight.dto.InsightReportResponse;
+import com.todongsan.insightreputation.insight.dto.InsightReportStatusResponse;
+import com.todongsan.insightreputation.insight.entity.InsightReport;
+import com.todongsan.insightreputation.insight.repository.InsightReportRepository;
+import com.todongsan.insightreputation.enums.PublicDataSource;
+import com.todongsan.insightreputation.enums.PublicDataType;
+import com.todongsan.insightreputation.publicdata.entity.PublicDataSnapshot;
+import com.todongsan.insightreputation.publicdata.repository.PublicDataSnapshotRepository;
+import com.todongsan.insightreputation.visitcertification.repository.VisitCertificationRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class InsightReportService {
+
+    private final InsightReportRepository insightReportRepository;
+    private final PublicDataSnapshotRepository publicDataSnapshotRepository;
+    private final VisitCertificationRepository visitCertificationRepository;
+    private final BattleClient battleClient;
+    private final MarketClient marketClient;
+    private final MemberPointClient memberPointClient;
+    private final ClaudeApiClient claudeApiClient;
+    private final ObjectMapper objectMapper;
+
+    private static final int REPORT_COST = 80;
+
+    /**
+     * Battle AI 분석 자동 트리거 (내부 API)
+     * Battle 종료 시 Battle Service에서 호출
+     * Point 차감 없음
+     * 
+     * @param battleId Battle ID
+     */
+    @Transactional
+    public void triggerBattleReport(Long battleId) {
+        log.info("Battle 자동 트리거 요청: battleId={}", battleId);
+        
+        // 1. 기존 리포트 확인 (중복 트리거 방지)
+        Optional<InsightReport> existingReport = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.BATTLE, battleId);
+        
+        if (existingReport.isPresent()) {
+            InsightReport report = existingReport.get();
+            log.info("기존 리포트 존재로 중복 트리거 무시: reportId={}, status={}, battleId={}", 
+                    report.getId(), report.getStatus(), battleId);
+            return; // 중복 트리거 무시
+        }
+        
+        // 2. Battle 상태 확인 (종료된 Battle만 분석 가능)
+        BattleResponse battleInfo = battleClient.getBattleInfo(battleId);
+        
+        if (!battleInfo.getIsClosed()) {
+            log.warn("종료되지 않은 Battle 자동 트리거: battleId={}, status={}", 
+                    battleId, battleInfo.getStatus());
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_SOURCE_NOT_CLOSED);
+        }
+        
+        // 3. 리포트 레코드 생성 (PENDING 상태, requestedBy는 시스템용으로 0)
+        InsightReport newReport = InsightReport.builder()
+                .type(InsightReportType.BATTLE)
+                .referenceId(battleId)
+                .requestedBy(0L) // 시스템 자동 트리거
+                .status(InsightReportStatus.PENDING)
+                .retryCount(0)
+                .build();
+        
+        InsightReport savedReport = insightReportRepository.save(newReport);
+        log.info("자동 트리거 리포트 레코드 생성: reportId={}, battleId={}", savedReport.getId(), battleId);
+        
+        // 4. 비동기 분석 시작
+        generateBattleReportAsync(savedReport.getId());
+    }
+
+    /**
+     * Battle AI 분석 리포트 생성 요청 (사용자 API - 미사용)
+     * 
+     * @param memberId 요청 회원 ID
+     * @param battleId Battle ID
+     * @param idempotencyKey 멱등성 키
+     * @return 리포트 응답
+     */
+    @Transactional
+    public InsightReportResponse requestBattleReport(Long memberId, Long battleId, String idempotencyKey) {
+        log.info("Battle 리포트 생성 요청: memberId={}, battleId={}", memberId, battleId);
+        
+        // 1. 기존 리포트 확인
+        Optional<InsightReport> existingReport = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.BATTLE, battleId);
+        
+        if (existingReport.isPresent()) {
+            InsightReport report = existingReport.get();
+            
+            // DONE 상태면 즉시 반환 (Point 차감 없음)
+            if (report.getStatus() == InsightReportStatus.DONE) {
+                log.info("기존 완료 리포트 반환: reportId={}, battleId={}", report.getId(), battleId);
+                return InsightReportResponse.builder()
+                        .reportId(report.getId())
+                        .status(report.getStatus().name())
+                        .reportContent(report.getReportContent())
+                        .generatedAt(report.getGeneratedAt())
+                        .pointCharged(0)
+                        .build();
+            }
+            
+            // PENDING 또는 PROCESSING 상태면 중복 처리 거부
+            if (report.getStatus() == InsightReportStatus.PENDING || 
+                report.getStatus() == InsightReportStatus.PROCESSING) {
+                log.warn("이미 처리 중인 리포트: reportId={}, status={}, battleId={}", 
+                        report.getId(), report.getStatus(), battleId);
+                throw new CustomException(ErrorCode.INSIGHT_REPORT_ALREADY_PROCESSING);
+            }
+        }
+        
+        // 2. Battle 상태 확인 (종료된 Battle만 분석 가능)
+        BattleResponse battleInfo = battleClient.getBattleInfo(battleId);
+        
+        if (!battleInfo.getIsClosed()) {
+            log.warn("종료되지 않은 Battle 분석 요청: battleId={}, status={}", 
+                    battleId, battleInfo.getStatus());
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_SOURCE_NOT_CLOSED);
+        }
+        
+        // 3. Point 차감 (멱등성 키 사용)
+        try {
+            memberPointClient.spendPoints(memberId, REPORT_COST, idempotencyKey);
+            log.info("포인트 차감 성공: memberId={}, amount={}, battleId={}", 
+                    memberId, REPORT_COST, battleId);
+        } catch (CustomException e) {
+            if (e.getErrorCode() == ErrorCode.POINT_INSUFFICIENT) {
+                log.warn("포인트 부족으로 리포트 생성 실패: memberId={}, battleId={}", memberId, battleId);
+                throw e;
+            }
+            log.error("포인트 차감 실패: memberId={}, battleId={}", memberId, battleId, e);
+            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
+        }
+        
+        // 4. 리포트 레코드 생성 (PENDING 상태)
+        InsightReport newReport = InsightReport.builder()
+                .type(InsightReportType.BATTLE)
+                .referenceId(battleId)
+                .requestedBy(memberId)
+                .status(InsightReportStatus.PENDING)
+                .retryCount(0)
+                .build();
+        
+        InsightReport savedReport = insightReportRepository.save(newReport);
+        log.info("리포트 레코드 생성: reportId={}, battleId={}", savedReport.getId(), battleId);
+        
+        // 5. 비동기 분석 시작
+        generateBattleReportAsync(savedReport.getId());
+        
+        return InsightReportResponse.builder()
+                .reportId(savedReport.getId())
+                .status(savedReport.getStatus().name())
+                .reportContent(null)  // PENDING 상태에서는 null
+                .generatedAt(null)    // PENDING 상태에서는 null
+                .pointCharged(REPORT_COST)
+                .build();
+    }
+    
+    /**
+     * Battle 리포트 관리자 조회 (내부 API)
+     * 
+     * @param battleId Battle ID
+     * @return 리포트 응답
+     */
+    @Transactional(readOnly = true)
+    public InsightReportResponse getAdminBattleReport(Long battleId) {
+        Optional<InsightReport> reportOpt = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.BATTLE, battleId);
+        
+        if (reportOpt.isEmpty()) {
+            throw new CustomException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        
+        InsightReport report = reportOpt.get();
+        
+        // Battle 정보도 함께 조회
+        BattleResponse battleInfo = null;
+        try {
+            battleInfo = battleClient.getBattleInfo(battleId);
+        } catch (Exception e) {
+            log.warn("Battle 정보 조회 실패 (관리자 조회는 계속): battleId={}", battleId, e);
+        }
+        
+        return InsightReportResponse.builder()
+                .reportId(report.getId())
+                .battleId(battleId)
+                .status(report.getStatus().name())
+                .title(battleInfo != null ? battleInfo.getTitle() : null)
+                .summary(report.getSummary())
+                .analysisData(report.getAnalysisData())
+                .generatedAt(report.getGeneratedAt())
+                .retryCount((int) report.getRetryCount())
+                .failedReason(report.getFailedReason())
+                .build();
+    }
+
+    /**
+     * Battle 리포트 조회 (사용자 API - 미사용)
+     * 
+     * @param battleId Battle ID
+     * @return 리포트 응답
+     */
+    @Transactional(readOnly = true)
+    public InsightReportResponse getBattleReport(Long battleId) {
+        Optional<InsightReport> reportOpt = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.BATTLE, battleId);
+        
+        if (reportOpt.isEmpty()) {
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
+        }
+        
+        InsightReport report = reportOpt.get();
+        
+        return InsightReportResponse.builder()
+                .reportId(report.getId())
+                .status(report.getStatus().name())
+                .reportContent(report.getReportContent())
+                .generatedAt(report.getGeneratedAt())
+                .pointCharged(0)  // 조회 시에는 Point 차감 없음
+                .build();
+    }
+
+    /**
+     * 리포트 상태 조회
+     * 
+     * @param battleId Battle ID
+     * @return 리포트 상태 응답
+     */
+    @Transactional(readOnly = true)
+    public InsightReportStatusResponse getBattleReportStatus(Long battleId) {
+        Optional<InsightReport> reportOpt = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.BATTLE, battleId);
+        
+        if (reportOpt.isEmpty()) {
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
+        }
+        
+        InsightReport report = reportOpt.get();
+        
+        return InsightReportStatusResponse.builder()
+                .reportId(report.getId())
+                .status(report.getStatus().name())
+                .retryCount((int) report.getRetryCount())
+                .createdAt(report.getCreatedAt())
+                .processingStartedAt(report.getProcessingStartedAt())
+                .generatedAt(report.getGeneratedAt())
+                .build();
+    }
+    
+    /**
+     * 비동기 Battle 리포트 생성
+     * 
+     * @param reportId 리포트 ID
+     */
+    @Async
+    public void generateBattleReportAsync(Long reportId) {
+        log.info("비동기 Battle 리포트 생성 시작: reportId={}", reportId);
+        
+        try {
+            // 1. 리포트 상태를 PROCESSING으로 전이
+            boolean transitioned = transitionToPROCESSING(reportId);
+            if (!transitioned) {
+                log.warn("PROCESSING 전이 실패 (이미 처리됨?): reportId={}", reportId);
+                return;
+            }
+            
+            // 2. Battle 데이터 수집 및 AI 분석 수행
+            performBattleAnalysis(reportId);
+            
+        } catch (Exception e) {
+            log.error("Battle 리포트 생성 중 오류: reportId={}", reportId, e);
+            handleAnalysisFailure(reportId, e);
+        }
+    }
+    
+    /**
+     * 리포트 상태를 PROCESSING으로 전이
+     * 
+     * @param reportId 리포트 ID
+     * @return 전이 성공 여부
+     */
+    @Transactional
+    public boolean transitionToPROCESSING(Long reportId) {
+        Optional<InsightReport> reportOpt = insightReportRepository.findById(reportId);
+        if (reportOpt.isEmpty()) {
+            log.warn("리포트 없음: reportId={}", reportId);
+            return false;
+        }
+        
+        InsightReport report = reportOpt.get();
+        
+        // PENDING 상태에서만 PROCESSING으로 전이 가능
+        if (report.getStatus() != InsightReportStatus.PENDING) {
+            log.warn("PROCESSING 전이 불가능한 상태: reportId={}, currentStatus={}", 
+                    reportId, report.getStatus());
+            return false;
+        }
+        
+        report.startProcessing();  // 상태를 PROCESSING으로 변경하고 processingStartedAt 설정
+        insightReportRepository.save(report);
+        
+        log.info("리포트 상태 PROCESSING 전이 완료: reportId={}", reportId);
+        return true;
+    }
+    
+    /**
+     * Battle 분석 수행
+     * 
+     * @param reportId 리포트 ID
+     */
+    private void performBattleAnalysis(Long reportId) {
+        InsightReport report = insightReportRepository.findById(reportId)
+                .orElseThrow(() -> new RuntimeException("리포트 없음: " + reportId));
+        
+        Long battleId = report.getReferenceId();
+        
+        try {
+            // 1. Battle 정보 조회
+            BattleResponse battleInfo = battleClient.getBattleInfo(battleId);
+            
+            // 2. 투표 원본 데이터 조회
+            BattleVotesRawResponse votesData = battleClient.getBattleVotesRaw(battleId);
+            
+            if (votesData.getVotes().isEmpty()) {
+                log.warn("투표 데이터 없음: battleId={}", battleId);
+                throw new RuntimeException("투표 데이터 없음");
+            }
+            
+            // 3. 회원 정보 조회 (AI 분석용)
+            List<Long> memberIds = votesData.getVotes().stream()
+                    .map(BattleVote::getMemberId)
+                    .distinct()
+                    .collect(Collectors.toList());
+            
+            List<MemberInfoResponse> memberInfo = memberPointClient.getBatchMemberInfo(memberIds);
+            
+            // 4. 참여 인원 기반 max_tokens 계산 후 프롬프트 생성
+            int totalVotes = votesData.getVotes().size();
+            int maxTokens = claudeApiClient.calculateMaxTokens(totalVotes);
+            log.info("Battle AI 분석 토큰 할당: battleId={}, totalVotes={}, maxTokens={}", battleId, totalVotes, maxTokens);
+
+            String prompt = claudeApiClient.createBattleAnalysisPrompt(
+                    battleInfo.getTitle(),
+                    battleInfo.getOptionA(),
+                    battleInfo.getOptionB(),
+                    votesData.getVotes(),
+                    memberInfo,
+                    maxTokens
+            );
+
+            // 5. Claude API를 통한 분석 수행
+            String analysisResult = claudeApiClient.analyze(prompt, maxTokens);
+
+            // 6. analysisData JSON 빌드
+            Map<Long, MemberInfoResponse> memberInfoMap = memberInfo.stream()
+                    .collect(Collectors.toMap(MemberInfoResponse::getMemberId, m -> m));
+
+            List<Long> certifiedMemberIds;
+            try {
+                if (battleInfo.getSigu() != null && !battleInfo.getSigu().isBlank()) {
+                    certifiedMemberIds = visitCertificationRepository
+                            .findMemberIdsBySidoAndSigu(battleInfo.getSido(), battleInfo.getSigu());
+                } else {
+                    certifiedMemberIds = visitCertificationRepository
+                            .findMemberIdsBySido(battleInfo.getSido());
+                }
+            } catch (Exception e) {
+                log.warn("방문 인증 데이터 조회 실패 (analysisData 부분 생략): battleId={}", battleId, e);
+                certifiedMemberIds = List.of();
+            }
+
+            String analysisDataJson = null;
+            try {
+                Map<String, Object> analysisData = buildAnalysisData(
+                        votesData.getVotes(), memberInfoMap, battleInfo, certifiedMemberIds);
+                analysisDataJson = objectMapper.writeValueAsString(analysisData);
+            } catch (Exception e) {
+                log.warn("analysisData 빌드/직렬화 실패 (리포트는 저장): battleId={}", battleId, e);
+            }
+
+            // 7. 분석 완료 처리
+            completeAnalysis(reportId, analysisResult, analysisDataJson);
+            
+        } catch (Exception e) {
+            log.error("Battle 분석 수행 중 오류: reportId={}, battleId={}", reportId, battleId, e);
+            throw e;  // handleAnalysisFailure에서 처리
+        }
+    }
+    
+    @Transactional
+    public void completeAnalysis(Long reportId, String analysisResult) {
+        completeAnalysis(reportId, analysisResult, null);
+    }
+
+    @Transactional
+    public void completeAnalysis(Long reportId, String analysisResult, String analysisData) {
+        InsightReport report = insightReportRepository.findById(reportId)
+                .orElseThrow(() -> new RuntimeException("리포트 없음: " + reportId));
+
+        report.complete(analysisResult);
+        if (analysisData != null) {
+            report.updateAnalysisData(analysisData);
+        }
+        insightReportRepository.save(report);
+
+        log.info("분석 완료: reportId={}, resultLength={}, hasAnalysisData={}",
+                reportId, analysisResult.length(), analysisData != null);
+    }
+    
+    /**
+     * 분석 실패 처리
+     * 
+     * @param reportId 리포트 ID
+     * @param exception 발생한 예외
+     */
+    @Transactional
+    public void handleAnalysisFailure(Long reportId, Exception exception) {
+        InsightReport report = insightReportRepository.findById(reportId)
+                .orElseThrow(() -> new RuntimeException("리포트 없음: " + reportId));
+        
+        int newRetryCount = report.getRetryCount() + 1;
+        
+        if (newRetryCount >= InsightReport.MAX_RETRY_COUNT) {
+            // 최대 재시도 횟수 초과 → 영구 FAILED
+            report.fail(exception.getMessage());
+            
+            // Point 환불 (비동기, 실패해도 비즈니스 연속성 유지)
+            try {
+                memberPointClient.refundPoints(
+                    report.getRequestedBy(), 
+                    REPORT_COST, 
+                    "AI 분석 영구 실패로 인한 환불"
+                );
+            } catch (Exception refundException) {
+                log.error("환불 처리 중 오류 (비즈니스 연속성 유지): reportId={}", reportId, refundException);
+            }
+            
+            log.error("리포트 영구 실패: reportId={}, retryCount={}", reportId, newRetryCount);
+        } else {
+            // 재시도 가능 → PENDING으로 리셋
+            report.resetForRetry();
+            log.warn("리포트 재시도 대기: reportId={}, retryCount={}", reportId, newRetryCount);
+        }
+        
+        insightReportRepository.save(report);
+    }
+    
+    /**
+     * Market AI 분석 자동 트리거 (내부 API)
+     * Market SETTLED 시 Market Service에서 호출
+     * Point 차감 없음
+     *
+     * @param marketId Market ID
+     */
+    @Transactional
+    public void triggerMarketReport(Long marketId) {
+        log.info("Market 자동 트리거 요청: marketId={}", marketId);
+
+        // 1. 기존 리포트 확인 (중복 트리거 방지)
+        Optional<InsightReport> existingReport = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.MARKET, marketId);
+
+        if (existingReport.isPresent()) {
+            InsightReport report = existingReport.get();
+            log.info("기존 리포트 존재로 중복 트리거 무시: reportId={}, status={}, marketId={}",
+                    report.getId(), report.getStatus(), marketId);
+            return;
+        }
+
+        // 2. Market SETTLED 상태 확인 — SETTLED가 아니면 getSummary가 예외를 던지므로 그대로 전파
+        marketClient.getSummary(marketId);
+
+        // 3. 리포트 레코드 생성 (PENDING 상태, requestedBy는 시스템용으로 0)
+        InsightReport newReport = InsightReport.builder()
+                .type(InsightReportType.MARKET)
+                .referenceId(marketId)
+                .requestedBy(0L) // 시스템 자동 트리거
+                .status(InsightReportStatus.PENDING)
+                .retryCount(0)
+                .build();
+
+        InsightReport savedReport = insightReportRepository.save(newReport);
+        log.info("자동 트리거 리포트 레코드 생성: reportId={}, marketId={}", savedReport.getId(), marketId);
+
+        // 4. 비동기 분석 시작
+        generateMarketReportAsync(savedReport.getId());
+    }
+
+    /**
+     * Market AI 정보 요약 생성 요청
+     *
+     * @param memberId 요청 회원 ID
+     * @param marketId Market ID
+     * @param idempotencyKey 멱등성 키
+     * @return 리포트 응답
+     */
+    @Transactional
+    public InsightReportResponse requestMarketReport(Long memberId, Long marketId, String idempotencyKey) {
+        log.info("Market 리포트 생성 요청: memberId={}, marketId={}", memberId, marketId);
+        
+        // 1. 기존 리포트 확인
+        Optional<InsightReport> existingReport = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.MARKET, marketId);
+        
+        if (existingReport.isPresent()) {
+            InsightReport report = existingReport.get();
+            
+            // DONE 상태면 즉시 반환 (Point 차감 없음)
+            if (report.getStatus() == InsightReportStatus.DONE) {
+                log.info("기존 완료 리포트 반환: reportId={}, marketId={}", report.getId(), marketId);
+                return InsightReportResponse.builder()
+                        .reportId(report.getId())
+                        .status(report.getStatus().name())
+                        .reportContent(report.getReportContent())
+                        .generatedAt(report.getGeneratedAt())
+                        .pointCharged(0)
+                        .build();
+            }
+            
+            // PENDING 또는 PROCESSING 상태면 중복 처리 거부
+            if (report.getStatus() == InsightReportStatus.PENDING || 
+                report.getStatus() == InsightReportStatus.PROCESSING) {
+                log.warn("이미 처리 중인 리포트: reportId={}, status={}, marketId={}", 
+                        report.getId(), report.getStatus(), marketId);
+                throw new CustomException(ErrorCode.INSIGHT_REPORT_ALREADY_PROCESSING);
+            }
+        }
+        
+        // 2. Point 차감 (멱등성 키 사용) - Market 상태 확인 전에 차감
+        try {
+            memberPointClient.spendPoints(memberId, REPORT_COST, idempotencyKey);
+            log.info("포인트 차감 성공: memberId={}, amount={}, marketId={}", 
+                    memberId, REPORT_COST, marketId);
+        } catch (CustomException e) {
+            if (e.getErrorCode() == ErrorCode.POINT_INSUFFICIENT) {
+                log.warn("포인트 부족으로 리포트 생성 실패: memberId={}, marketId={}", memberId, marketId);
+                throw e;
+            }
+            log.error("포인트 차감 실패: memberId={}, marketId={}", memberId, marketId, e);
+            throw new CustomException(ErrorCode.EXTERNAL_SERVICE_ERROR);
+        }
+        
+        // 3. Market 상태 확인 (SETTLED 여부) - Point 차감 후 확인
+        try {
+            MarketInsightSummaryResponse marketInfo = marketClient.getSummary(marketId);
+            log.info("Market 상태 확인 완료: marketId={}, status={}", marketId, marketInfo.getMarket().getStatus());
+        } catch (CustomException e) {
+            if (e.getErrorCode() == ErrorCode.INSIGHT_REPORT_SOURCE_DATA_NOT_READY) {
+                // Market 미정산 상태 - Point 환불 처리
+                log.warn("Market 미정산으로 리포트 생성 불가, 환불 처리: memberId={}, marketId={}", memberId, marketId);
+                try {
+                    memberPointClient.refundPoints(memberId, REPORT_COST, "Market 미정산으로 인한 환불");
+                } catch (Exception refundException) {
+                    log.error("환불 처리 중 오류 (비즈니스 연속성 유지): memberId={}, marketId={}", 
+                             memberId, marketId, refundException);
+                }
+                throw e;
+            }
+            // 다른 Market Service 에러도 환불 처리
+            log.error("Market 정보 조회 실패, 환불 처리: memberId={}, marketId={}", memberId, marketId, e);
+            try {
+                memberPointClient.refundPoints(memberId, REPORT_COST, "Market Service 오류로 인한 환불");
+            } catch (Exception refundException) {
+                log.error("환불 처리 중 오류 (비즈니스 연속성 유지): memberId={}, marketId={}", 
+                         memberId, marketId, refundException);
+            }
+            throw e;
+        }
+        
+        // 4. 리포트 레코드 생성 (PENDING 상태)
+        InsightReport newReport = InsightReport.builder()
+                .type(InsightReportType.MARKET)
+                .referenceId(marketId)
+                .requestedBy(memberId)
+                .status(InsightReportStatus.PENDING)
+                .retryCount(0)
+                .build();
+        
+        InsightReport savedReport = insightReportRepository.save(newReport);
+        log.info("리포트 레코드 생성: reportId={}, marketId={}", savedReport.getId(), marketId);
+        
+        // 5. 비동기 분석 시작
+        generateMarketReportAsync(savedReport.getId());
+        
+        return InsightReportResponse.builder()
+                .reportId(savedReport.getId())
+                .status(savedReport.getStatus().name())
+                .reportContent(null)  // PENDING 상태에서는 null
+                .generatedAt(null)    // PENDING 상태에서는 null
+                .pointCharged(REPORT_COST)
+                .build();
+    }
+    
+    /**
+     * Market 리포트 조회
+     * 
+     * @param marketId Market ID
+     * @return 리포트 응답
+     */
+    @Transactional(readOnly = true)
+    public InsightReportResponse getMarketReport(Long marketId) {
+        Optional<InsightReport> reportOpt = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.MARKET, marketId);
+        
+        if (reportOpt.isEmpty()) {
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
+        }
+        
+        InsightReport report = reportOpt.get();
+
+        return InsightReportResponse.builder()
+                .reportId(report.getId())
+                .status(report.getStatus().name())
+                .reportContent(report.getReportContent())
+                .generatedAt(report.getGeneratedAt())
+                .pointCharged(0)
+                .build();
+    }
+    
+    /**
+     * Market 리포트 상태 조회
+     * 
+     * @param marketId Market ID
+     * @return 리포트 상태 응답
+     */
+    @Transactional(readOnly = true)
+    public InsightReportStatusResponse getMarketReportStatus(Long marketId) {
+        Optional<InsightReport> reportOpt = insightReportRepository
+                .findByTypeAndReferenceId(InsightReportType.MARKET, marketId);
+        
+        if (reportOpt.isEmpty()) {
+            throw new CustomException(ErrorCode.INSIGHT_REPORT_NOT_FOUND);
+        }
+        
+        InsightReport report = reportOpt.get();
+        
+        return InsightReportStatusResponse.builder()
+                .reportId(report.getId())
+                .status(report.getStatus().name())
+                .retryCount((int) report.getRetryCount())
+                .createdAt(report.getCreatedAt())
+                .processingStartedAt(report.getProcessingStartedAt())
+                .generatedAt(report.getGeneratedAt())
+                .build();
+    }
+    
+    /**
+     * 비동기 Market 리포트 생성
+     * 
+     * @param reportId 리포트 ID
+     */
+    @Async
+    public void generateMarketReportAsync(Long reportId) {
+        log.info("비동기 Market 리포트 생성 시작: reportId={}", reportId);
+        
+        try {
+            // 1. 리포트 상태를 PROCESSING으로 전이
+            boolean transitioned = transitionToPROCESSING(reportId);
+            if (!transitioned) {
+                log.warn("PROCESSING 전이 실패 (이미 처리됨?): reportId={}", reportId);
+                return;
+            }
+            
+            // 2. Market 데이터 수집 및 AI 분석 수행
+            performMarketAnalysis(reportId);
+            
+        } catch (Exception e) {
+            log.error("Market 리포트 생성 중 오류: reportId={}", reportId, e);
+            handleAnalysisFailure(reportId, e);
+        }
+    }
+    
+    /**
+     * Market 분석 수행
+     * 
+     * @param reportId 리포트 ID
+     */
+    private void performMarketAnalysis(Long reportId) {
+        InsightReport report = insightReportRepository.findById(reportId)
+                .orElseThrow(() -> new RuntimeException("리포트 없음: " + reportId));
+        
+        Long marketId = report.getReferenceId();
+        
+        try {
+            // 1. Market 정보 조회
+            MarketInsightSummaryResponse marketInfo = marketClient.getSummary(marketId);
+            
+            // 2. 예측 원본 데이터 조회
+            List<MarketPredictionResponse> predictions = marketClient.getPredictions(marketId);
+            
+            if (predictions.isEmpty()) {
+                log.warn("예측 데이터 없음: marketId={}", marketId);
+                throw new RuntimeException("예측 데이터 없음");
+            }
+            
+            // 3. 회원 정보 조회 (AI 분석용)
+            List<Long> memberIds = predictions.stream()
+                    .map(MarketPredictionResponse::getMemberId)
+                    .distinct()
+                    .collect(Collectors.toList());
+
+            List<MemberInfoResponse> memberInfo = memberPointClient.getBatchMemberInfo(memberIds);
+
+            // 4. 공공데이터 조회 (최근 8주 주간 매매가격지수, 없으면 최근 3개월 월간)
+            List<PublicDataSnapshot> recentPriceData = Collections.emptyList();
+            try {
+                LocalDate today = LocalDate.now();
+                recentPriceData = publicDataSnapshotRepository.findRecentPriceData(
+                        PublicDataSource.REB, PublicDataType.WEEKLY_PRICE_INDEX,
+                        today.minusWeeks(8), today);
+                if (recentPriceData.isEmpty()) {
+                    recentPriceData = publicDataSnapshotRepository.findRecentPriceData(
+                            PublicDataSource.REB, PublicDataType.MONTHLY_PRICE_INDEX,
+                            today.minusMonths(3), today);
+                }
+                log.info("공공데이터 조회 완료: marketId={}, dataCount={}", marketId, recentPriceData.size());
+            } catch (Exception e) {
+                log.warn("공공데이터 조회 실패 (분석은 계속 진행): marketId={}", marketId, e);
+            }
+
+            // 5. 참여 인원 기반 max_tokens 계산 후 프롬프트 생성
+            int totalPredictions = predictions.size();
+            int maxTokens = claudeApiClient.calculateMaxTokens(totalPredictions);
+            log.info("Market AI 분석 토큰 할당: marketId={}, totalPredictions={}, maxTokens={}", marketId, totalPredictions, maxTokens);
+
+            String prompt = claudeApiClient.createMarketAnalysisPrompt(
+                    marketInfo.getMarket().getTitle(),
+                    marketInfo.getOptionStatistics(),
+                    predictions,
+                    memberInfo,
+                    maxTokens,
+                    recentPriceData
+            );
+
+            // 6. Claude API를 통한 분석 수행
+            String analysisResult = claudeApiClient.analyze(prompt, maxTokens);
+
+            // 7. 분석 완료 처리
+            completeAnalysis(reportId, analysisResult);
+            
+        } catch (Exception e) {
+            log.error("Market 분석 수행 중 오류: reportId={}, marketId={}", reportId, marketId, e);
+            throw e;  // handleAnalysisFailure에서 처리
+        }
+    }
+
+    private String generateIdempotencyKey(Long memberId, Long referenceId, String type) {
+        return String.format("%s-report-%d-%d-%s", type.toLowerCase(), memberId, referenceId,
+                LocalDateTime.now().toLocalDate().toString());
+    }
+
+    private Map<String, Object> buildAnalysisData(
+            List<BattleVote> rawVotes,
+            Map<Long, MemberInfoResponse> memberInfoMap,
+            BattleResponse battleInfo,
+            List<Long> certifiedMemberIds
+    ) {
+        int totalVotes = rawVotes.size();
+        String labelA = battleInfo.getOptionA() != null ? battleInfo.getOptionA() : "A";
+        String labelB = battleInfo.getOptionB() != null ? battleInfo.getOptionB() : "B";
+        Map<String, String> labelMap = Map.of("A", labelA, "B", labelB);
+
+        // 1. optionDistribution
+        Map<String, Long> countByOption = rawVotes.stream()
+                .filter(v -> labelMap.containsKey(v.getSelectedOption()))
+                .collect(Collectors.groupingBy(v -> labelMap.get(v.getSelectedOption()), Collectors.counting()));
+
+        List<Map<String, Object>> optionDistribution = countByOption.entrySet().stream()
+                .map(e -> Map.<String, Object>of(
+                        "optionLabel", e.getKey(),
+                        "count", e.getValue(),
+                        "ratio", totalVotes > 0 ? Math.round((double) e.getValue() / totalVotes * 1000) / 1000.0 : 0.0
+                )).toList();
+
+        // 2. genderByOption
+        Map<String, Map<String, Double>> genderByOption = rawVotes.stream()
+                .filter(v -> memberInfoMap.containsKey(v.getMemberId())
+                        && memberInfoMap.get(v.getMemberId()).getGender() != null
+                        && labelMap.containsKey(v.getSelectedOption()))
+                .collect(Collectors.groupingBy(
+                        v -> labelMap.get(v.getSelectedOption()),
+                        Collectors.collectingAndThen(
+                                Collectors.groupingBy(
+                                        v -> memberInfoMap.get(v.getMemberId()).getGender(),
+                                        Collectors.counting()
+                                ),
+                                genderCount -> {
+                                    long total = genderCount.values().stream().mapToLong(Long::longValue).sum();
+                                    return genderCount.entrySet().stream().collect(
+                                            Collectors.toMap(Map.Entry::getKey,
+                                                    e -> Math.round((double) e.getValue() / total * 1000) / 1000.0));
+                                }
+                        )
+                ));
+
+        // 3. ageGroupByOption
+        Map<String, Map<String, Double>> ageGroupByOption = rawVotes.stream()
+                .filter(v -> memberInfoMap.containsKey(v.getMemberId())
+                        && memberInfoMap.get(v.getMemberId()).getAgeGroup() != null
+                        && labelMap.containsKey(v.getSelectedOption()))
+                .collect(Collectors.groupingBy(
+                        v -> labelMap.get(v.getSelectedOption()),
+                        Collectors.collectingAndThen(
+                                Collectors.groupingBy(
+                                        v -> memberInfoMap.get(v.getMemberId()).getAgeGroup(),
+                                        Collectors.counting()
+                                ),
+                                ageCount -> {
+                                    long total = ageCount.values().stream().mapToLong(Long::longValue).sum();
+                                    return ageCount.entrySet().stream().collect(
+                                            Collectors.toMap(Map.Entry::getKey,
+                                                    e -> Math.round((double) e.getValue() / total * 1000) / 1000.0));
+                                }
+                        )
+                ));
+
+        // 4. visitCertifiedVotePattern
+        Set<Long> certifiedSet = new HashSet<>(certifiedMemberIds);
+        List<BattleVote> certifiedVotes = rawVotes.stream()
+                .filter(v -> certifiedSet.contains(v.getMemberId()))
+                .toList();
+
+        Map<String, Long> certifiedCountByOption = certifiedVotes.stream()
+                .filter(v -> labelMap.containsKey(v.getSelectedOption()))
+                .collect(Collectors.groupingBy(v -> labelMap.get(v.getSelectedOption()), Collectors.counting()));
+
+        int certifiedTotal = certifiedVotes.size();
+        List<Map<String, Object>> certifiedDistribution = certifiedCountByOption.entrySet().stream()
+                .map(e -> Map.<String, Object>of(
+                        "optionLabel", e.getKey(),
+                        "count", e.getValue(),
+                        "ratio", certifiedTotal > 0 ? Math.round((double) e.getValue() / certifiedTotal * 1000) / 1000.0 : 0.0
+                )).toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("totalVotes", totalVotes);
+        result.put("optionDistribution", optionDistribution);
+        result.put("genderByOption", genderByOption);
+        result.put("ageGroupByOption", ageGroupByOption);
+        result.put("visitCertifiedVotePattern", Map.of(
+                "certifiedVoterCount", certifiedTotal,
+                "certifiedOptionDistribution", certifiedDistribution
+        ));
+        return result;
+    }
+}

@@ -1,0 +1,28 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Build
+build/
+target/
+*.jar
+*.war
+
+# Environment variables
+.env
+.env.local
+.env.rds
+
+
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker
+.dockerignore

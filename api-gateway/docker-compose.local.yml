@@ -1,0 +1,28 @@
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: todongsan/api-gateway:local
+    container_name: api-gateway
+    restart: unless-stopped
+    env_file:
+      - path: ../..env.local
+        required: false
+      - path: ..env.local
+        required: false
+    environment:
+      TZ: Asia/Seoul
+      JWT_SECRET: local-jwt-secret-change-me-32chars
+      MEMBER_POINT_SERVICE_URL: http://member-point-service:8080
+      BATTLE_SERVICE_URL: http://battle-service:8081
+      MARKET_SERVICE_URL: http://market-service:8082
+      INSIGHT_SERVICE_URL: http://insight-reputation-service:8083
+    ports:
+      - "9000:9000"
+    networks:
+      - todongsan-network
+
+networks:
+  todongsan-network:
+    external: true

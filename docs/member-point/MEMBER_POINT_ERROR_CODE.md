@@ -19,8 +19,8 @@
 
 | ErrorCode | HTTP Status | 메시지 | 발생 조건 | Retry | 실패 후 상태 | 프론트 처리 |
 |---|---|---|---|---|---|---|
-| `MEMBER_NOT_FOUND` | 404 | 존재하지 않는 회원입니다. | 요청한 memberId가 DB에 없음 | X | 변경 없음 | Toast 표시 후 현재 화면 유지 |
-| `MEMBER_ALREADY_DELETED` | 409 | 이미 탈퇴한 회원입니다. | member.deleted_at이 존재하는 회원에 요청 | X | 변경 없음 | Toast 표시 후 로그인 페이지 이동 |
+| `MEMBER_NOT_FOUND` | 404 | 존재하지 않는 회원입니다. | 요청한 memberId가 DB에 없음. 모든 일반 API가 `findByIdAndDeletedAtIsNull`을 사용해 **탈퇴 회원도 이 코드로 처리됨** | X | 변경 없음 | Toast 표시 후 현재 화면 유지 |
+| `MEMBER_ALREADY_DELETED` | 409 | 이미 탈퇴한 회원입니다. | (현재 미사용) ErrorCode enum에 정의만 있고 실제로 throw하는 코드가 없음 — 탈퇴 회원 요청은 전부 `MEMBER_NOT_FOUND`로 처리됨 | X | 변경 없음 | 해당 없음 (실제로 발생하지 않음) |
 | `MEMBER_NICKNAME_DUPLICATE` | 409 | 이미 사용 중인 닉네임입니다. | member.nickname UNIQUE 제약 충돌 | X | 변경 없음 | Toast 표시 후 입력 폼 유지 |
 | `MEMBER_RESIDENCE_CHANGE_COOLDOWN` | 409 | 거주지는 30일마다 1회 변경 가능합니다. | residence_changed_at 기준 30일 이내 재변경 요청 | X | 변경 없음 | Toast 표시 후 현재 화면 유지 |
 
@@ -30,10 +30,10 @@
 
 | ErrorCode | HTTP Status | 메시지 | 발생 조건 | Retry | 실패 후 상태 | 프론트 처리 |
 |---|---|---|---|---|---|---|
-| `POINT_INSUFFICIENT` | 409 | 포인트가 부족합니다. | member.point_balance < 차감 요청액 | X | point_balance 변경 없음, point_history 생성 안 함 | Toast 표시 후 현재 화면 유지 |
+| `POINT_INSUFFICIENT` | 409 | 포인트가 부족합니다. | member.point_balance < 차감 요청액 | X | point_balance 변경 없음, point_history FAILED 레코드 INSERT (Scheduler 대사용) | Toast 표시 후 현재 화면 유지 |
 | `POINT_INVALID_AMOUNT` | 400 | 포인트 금액은 0보다 커야 합니다. | 요청 amount <= 0 | X | 변경 없음 | Toast 표시 후 입력 폼 유지 |
-| `POINT_HISTORY_NOT_FOUND` | 404 | 포인트 내역을 찾을 수 없습니다. | 요청한 point_history.id가 DB에 없음 | X | 변경 없음 | Toast 표시 후 현재 화면 유지 |
-| `POINT_ORIGINAL_TRANSACTION_NOT_FOUND` | 404 | 환불/정산 대상 원본 거래를 찾을 수 없습니다. | 환불/정산 요청의 reference_id에 해당하는 원본 거래 없음 | X | 변경 없음 | Toast 표시 후 관리자 문의 안내 |
+| `POINT_HISTORY_NOT_FOUND` | 404 | 포인트 내역을 찾을 수 없습니다. | (현재 미사용) ErrorCode enum에 정의만 있고 실제로 throw하는 코드가 없음 | X | 변경 없음 | 해당 없음 (실제로 발생하지 않음) |
+| `POINT_ORIGINAL_TRANSACTION_NOT_FOUND` | 404 | 환불/정산 대상 원본 거래를 찾을 수 없습니다. | (현재 미사용) ErrorCode enum에 정의만 있고 실제로 throw하는 코드가 없음 (정산/환불은 원본 거래 존재 여부를 검증하지 않음) | X | 변경 없음 | 해당 없음 (실제로 발생하지 않음) |
 | `POINT_INVALID_REFERENCE_TYPE` | 400 | 유효하지 않은 referenceType입니다. | referenceType이 BATTLE/MARKET_PREDICTION/INSIGHT_REPORT 외 값 | X | 변경 없음 | 호출 측 코드 수정 필요 |
 
 ---
@@ -44,7 +44,7 @@
 |---|---|---|---|---|---|---|
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | Idempotency-Key 헤더가 필요합니다. | 포인트 변경 API 호출 시 Idempotency-Key 헤더 누락 | X | 변경 없음 | 호출 측 코드 수정 필요 |
 | `POINT_TRANSACTION_ALREADY_PROCESSED` | 200 | 이미 처리된 요청입니다. | 동일 Idempotency-Key + 동일 요청 내용 재시도 | X | 변경 없음, 기존 처리 결과 반환 | 기존 응답 그대로 처리 |
-| `IDEMPOTENCY_KEY_CONFLICT` | 409 | 동일한 키로 다른 내용의 요청이 들어왔습니다. | 동일 Idempotency-Key인데 request_hash 불일치 (memberId/type/amount/referenceId 중 하나라도 다름) | X | 변경 없음 | 호출 측에서 키 재생성 후 재시도 |
+| `IDEMPOTENCY_KEY_CONFLICT` | 409 | 동일한 키로 다른 내용의 요청이 들어왔습니다. | 동일 Idempotency-Key인데 request_hash 불일치 (memberId/type/amount/referenceType/referenceId 중 하나라도 다름) | X | 변경 없음 | 호출 측에서 키 재생성 후 재시도 |
 
 ---
 
@@ -90,8 +90,7 @@
 | ErrorCode | 발생 상황 |
 |---|---|
 | `UNAUTHORIZED` | JWT 유효하지 않음 (공통) |
-| `MEMBER_NOT_FOUND` | 회원 없음 |
-| `MEMBER_ALREADY_DELETED` | 탈퇴한 회원 |
+| `MEMBER_NOT_FOUND` | 회원 없음 (탈퇴 회원 포함) |
 
 ---
 
@@ -111,8 +110,7 @@
 | ErrorCode | 발생 상황 |
 |---|---|
 | `UNAUTHORIZED` | JWT 유효하지 않음 (공통) |
-| `MEMBER_NOT_FOUND` | 회원 없음 |
-| `MEMBER_ALREADY_DELETED` | 이미 탈퇴한 회원 |
+| `MEMBER_NOT_FOUND` | 회원 없음 (이미 탈퇴한 회원도 동일하게 처리됨) |
 
 ---
 
@@ -134,7 +132,7 @@
 
 ---
 
-### 3-9. POST /api/v1/members/batch (회원 정보 배치 조회)
+### 3-9. POST /internal/api/v1/members/batch (회원 정보 배치 조회)
 
 | ErrorCode | 발생 상황 |
 |---|---|
@@ -142,7 +140,7 @@
 
 ---
 
-### 3-10. GET /api/v1/points/transactions (거래 상태 조회)
+### 3-10. GET /internal/api/v1/points/transactions (거래 상태 조회)
 
 | ErrorCode | 발생 상황 |
 |---|---|
@@ -150,7 +148,7 @@
 
 ---
 
-### 3-11. POST /api/v1/points/earn (포인트 적립)
+### 3-11. POST /internal/api/v1/points/earn (포인트 적립)
 
 | ErrorCode | 발생 상황 |
 |---|---|
@@ -163,7 +161,7 @@
 
 ---
 
-### 3-12. POST /api/v1/points/spend (포인트 차감)
+### 3-12. POST /internal/api/v1/points/spend (포인트 차감)
 
 | ErrorCode | 발생 상황 |
 |---|---|
@@ -177,27 +175,29 @@
 
 ---
 
-### 3-13. POST /api/v1/points/settlements (정산 일괄 지급)
+### 3-13. POST /internal/api/v1/points/settlements (정산 일괄 지급)
+
+요청 자체를 막는 에러(items 처리 시작 전):
 
 | ErrorCode | 발생 상황 |
 |---|---|
-| `IDEMPOTENCY_KEY_REQUIRED` | Idempotency-Key 헤더 누락 |
-| `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 요청 내용 다름 |
-| `POINT_TRANSACTION_ALREADY_PROCESSED` | 동일 키 + 동일 요청 재시도 |
-| `MEMBER_NOT_FOUND` | items 중 존재하지 않는 memberId 포함 |
-| `POINT_ORIGINAL_TRANSACTION_NOT_FOUND` | 정산 대상 원본 거래 없음 |
+| `IDEMPOTENCY_KEY_REQUIRED` | Header Idempotency-Key 누락, 또는 items 중 하나라도 idempotencyKey 누락 |
+| `INVALID_REQUEST` | Header Idempotency-Key 값이 body의 settlementId와 다름 |
+
+item 단위 에러(`results[].errorCode`로만 표시, 요청 전체는 200 유지)는 7절 참조. `MEMBER_NOT_FOUND`, `POINT_INVALID_AMOUNT`, `POINT_INVALID_REFERENCE_TYPE`, `IDEMPOTENCY_KEY_CONFLICT`가 여기 해당하며 요청 레벨 에러가 아니다.
 
 ---
 
-### 3-14. POST /api/v1/points/refunds (무효 환불)
+### 3-14. POST /internal/api/v1/points/refunds (무효 환불)
+
+요청 자체를 막는 에러(items 처리 시작 전):
 
 | ErrorCode | 발생 상황 |
 |---|---|
-| `IDEMPOTENCY_KEY_REQUIRED` | Idempotency-Key 헤더 누락 |
-| `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 요청 내용 다름 |
-| `POINT_TRANSACTION_ALREADY_PROCESSED` | 동일 키 + 동일 요청 재시도 |
-| `MEMBER_NOT_FOUND` | items 중 존재하지 않는 memberId 포함 |
-| `POINT_ORIGINAL_TRANSACTION_NOT_FOUND` | 환불 대상 원본 거래 없음 |
+| `IDEMPOTENCY_KEY_REQUIRED` | Header Idempotency-Key 누락, 또는 items 중 하나라도 idempotencyKey 누락 |
+| `INVALID_REQUEST` | Header Idempotency-Key 값이 body의 refundId와 다름 |
+
+item 단위 에러(`results[].errorCode`로만 표시, 요청 전체는 200 유지)는 7절 참조. `MEMBER_NOT_FOUND`, `POINT_INVALID_AMOUNT`, `POINT_INVALID_REFERENCE_TYPE`, `IDEMPOTENCY_KEY_CONFLICT`가 여기 해당하며 요청 레벨 에러가 아니다.
 
 ---
 
@@ -208,9 +208,10 @@
 ```
 POINT_INSUFFICIENT 발생
   → member.point_balance 변경 없음
-  → point_history INSERT 안 함
+  → point_history INSERT (status=FAILED, fail_reason=POINT_INSUFFICIENT, balance_snapshot=현재잔액)
   → 호출한 서비스(Market)에 409 반환
   → Market은 Prediction 상태를 FAILED로 변경
+  → Scheduler 대사 시 transactions API가 status=FAILED 반환 → Market Prediction FAILED 처리
 ```
 
 ### 4-2. 포인트 적립 실패 시 (Battle 투표 후)
@@ -221,7 +222,7 @@ MEMBER_NOT_FOUND 또는 INTERNAL_ERROR 발생
   → point_history INSERT 안 함
   → Battle은 투표 데이터 유지 (투표 취소 안 함)
   → Battle의 point_reward_retry_queue에 적재
-  → 스케줄러가 재시도 (2차 개발)
+  → battle-service RetryScheduler가 주기적으로 재시도 (구현 완료)
 ```
 
 ### 4-3. Market → Point 네트워크 오류 / Timeout 시
@@ -231,9 +232,11 @@ MEMBER_NOT_FOUND 또는 INTERNAL_ERROR 발생
   → 우리 서버가 처리했는지 여부 불명확
   → point_history INSERT 됐을 수도, 안 됐을 수도 있음
   → member.point_balance 변경 여부 불명확
-  → Market이 GET /api/v1/points/transactions?idempotencyKey={key} 호출
-     PROCESSED → point_history 존재, 차감 완료
-     NOT_FOUND → point_history 없음, 미처리 (재시도 가능)
+  → Market이 GET /internal/api/v1/points/transactions?idempotencyKey={key} 호출
+     PROCESSED  → point_history 존재 (status=SUCCEEDED), 차감 완료 → 가격 확정 재시도
+     FAILED     → point_history 존재 (status=FAILED), 잔액 부족 등 실패 → Prediction FAILED
+     NOT_FOUND  → point_history 없음, 미처리 → 자동 재차감하지 않고 Prediction FAILED
+     조회 자체 timeout/5xx → Prediction POINT_UNKNOWN 유지
 
 케이스 2: 정산/환불 요청 Timeout
   → Idempotency-Key 들고 재시도 (1회)
@@ -245,7 +248,7 @@ MEMBER_NOT_FOUND 또는 INTERNAL_ERROR 발생
 ```
 포인트 차감 후 LLM 호출에서 AI_GENERATION_FAILED 발생
   → 포인트는 이미 차감된 상태 (SPEND_INSIGHT)
-  → Insight Service가 POST /api/v1/points/refunds 호출
+  → Insight Service가 POST /internal/api/v1/points/refunds 호출
   → point_history INSERT
      - type: REFUND_INSIGHT
      - amount: 차감된 포인트 (양수)
@@ -277,10 +280,10 @@ MEMBER_NOT_FOUND 또는 INTERNAL_ERROR 발생
 
 | API | 멱등성 키 필수 |
 |---|---|
-| POST /api/v1/points/earn | O |
-| POST /api/v1/points/spend | O |
-| POST /api/v1/points/settlements | O |
-| POST /api/v1/points/refunds | O |
+| POST /internal/api/v1/points/earn | O |
+| POST /internal/api/v1/points/spend | O |
+| POST /internal/api/v1/points/settlements | O |
+| POST /internal/api/v1/points/refunds | O |
 | POST /api/v1/members/oauth/kakao | X |
 | GET 계열 전체 | X |
 
@@ -306,7 +309,7 @@ MEMBER_NOT_FOUND 또는 INTERNAL_ERROR 발생
 
 ```sql
 -- point_history.idempotency_key UNIQUE 제약 (중복 처리 방지)
-idempotency_key VARCHAR(100) UNIQUE
+idempotency_key VARCHAR(150) UNIQUE
 
 -- request_hash: 요청 내용의 SHA-256 해시 (충돌 감지용)
 -- SHA-256(memberId + "|" + type + "|" + amount + "|" + referenceType + "|" + referenceId)
@@ -334,17 +337,24 @@ Market이 Timeout 후 포인트 차감 성공 여부를 확인할 수 있도록
 idempotencyKey 기반 거래 조회 API를 제공한다.
 
 ```
-GET /api/v1/points/transactions?idempotencyKey={key}
+GET /internal/api/v1/points/transactions?idempotencyKey={key}
 
 Response:
 {
   "idempotencyKey": "uuid",
-  "status": "PROCESSED | NOT_FOUND",
+  "status": "PROCESSED | FAILED | NOT_FOUND",
   "memberId": 1,
-  "amount": 100,
-  "balanceSnapshot": 50
+  "amount": "100.00",
+  "failReason": "POINT_INSUFFICIENT",   // status=FAILED일 때만
+  "balanceSnapshot": "50.00"
 }
 ```
+
+| status | 의미 | Market 처리 |
+|---|---|---|
+| PROCESSED | 차감 성공 | 가격 확정 트랜잭션 재시도 후 CONFIRMED |
+| FAILED | 차감 시도했으나 실패 | Prediction FAILED |
+| NOT_FOUND | 이력 없음 | 재차감 또는 UNKNOWN 유지 |
 
 ---
 
@@ -369,6 +379,7 @@ Response:
 |---|---|---|
 | `MEMBER_NOT_FOUND` | memberId에 해당하는 회원 없음 | 관리자 확인 후 수동 보정 |
 | `POINT_INVALID_AMOUNT` | amount <= 0 | 호출 측 데이터 확인 |
+| `POINT_INVALID_REFERENCE_TYPE` | referenceType이 BATTLE/MARKET_PREDICTION/INSIGHT_REPORT 외 값 | 호출 측 데이터 확인 |
 | `IDEMPOTENCY_KEY_CONFLICT` | 동일 키인데 다른 요청 내용 | 호출 측 키 재생성 후 재시도 |
 | `INTERNAL_ERROR` | 서버 오류 | Retry 대상 |
 

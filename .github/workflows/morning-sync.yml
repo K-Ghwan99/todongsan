@@ -1,0 +1,35 @@
+name: Morning Sync
+
+on:
+  schedule:
+    - cron: '0 0 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+
+      - name: Sync develop from upstream
+        run: |
+          git remote add upstream https://github.com/asd1702/todongsan.git
+          git fetch upstream
+          git checkout develop
+          git merge upstream/develop
+          git push origin develop
+
+      - name: Merge develop into insight-reputation
+        run: |
+          git checkout insight-reputation
+          git merge develop
+          git push origin insight-reputation

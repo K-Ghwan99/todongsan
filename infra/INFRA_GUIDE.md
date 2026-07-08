@@ -87,23 +87,34 @@ docker compose down
 
 ---
 
-## 6. Docker MySQL 완전 초기화
+## 6. Docker MySQL 데이터 초기화 주의
 
-DB 데이터까지 삭제하고 처음부터 다시 생성한다.
+EC2와 통합 로컬 검증 환경에서 MySQL 데이터는 Docker volume에 저장된다.
+
+```text
+compose volume key: todongsan_mysql_data
+docker compose config output: infra_todongsan_mysql_data
+```
+
+일반 종료 또는 재기동 시에는 volume을 보존해야 한다.
 
 ```bash
 cd infra
-
-docker compose down -v
-
+docker compose down
 docker compose up -d
 ```
 
 ### 주의
 
-`-v` 옵션은 MySQL 데이터 볼륨을 삭제한다.
+아래 명령은 MySQL 데이터 volume 삭제 위험이 있으므로 일반 개발/배포 환경에서 사용하지 않는다.
 
-기존 데이터가 모두 제거되므로 개발 초기 단계에서만 사용한다.
+```bash
+docker compose down -v
+docker volume rm
+docker volume prune
+```
+
+스키마를 처음부터 다시 만들 필요가 있는 개발 초기 상황이라도, 먼저 백업 필요 여부를 확인한다.
 
 ---
 
@@ -208,17 +219,17 @@ SPRING_PROFILES_ACTIVE=local
 
 ---
 
-## 11. AWS RDS 사용 정책
+## 11. RDS 사용 정책
 
-로컬 개발은 Docker MySQL을 사용한다.
+현재 비용 문제로 RDS는 사용하지 않는다.
 
-AWS RDS는 다음 용도로만 사용한다.
+현재 배포 기준은 다음과 같다.
 
-- 통합 테스트
-- 개발 서버 검증
-- 배포 전 최종 검증
+```text
+EC2 1대 + Docker Compose + Docker MySQL
+```
 
-로컬 개발 시에는 Docker MySQL 사용을 권장한다.
+기존 `.env.rds.example` 또는 `docker-compose.rds.yml` 파일은 향후 RDS 재도입 시 참고용으로 남겨둘 수 있다. 이번 EC2 Docker MySQL 배포에서는 사용하지 않는다.
 
 ---
 
@@ -285,3 +296,182 @@ docker exec -it todongsan-mysql mysql -u root -p
 4. 로컬 개발은 Docker MySQL을 사용한다.
 5. AWS RDS는 통합 테스트 및 운영 검증 용도로 사용한다.
 6. 환경 변수(.env)는 Git에 커밋하지 않는다.
+
+---
+
+## 15. Local MSA Docker Compose
+
+Local integrated Docker execution uses the infra compose plus the root app compose.
+
+```text
+infra/docker-compose.yml
+  - MySQL only
+  - creates todongsan-network
+  - runs todongsan-mysql
+
+docker-compose.yml
+  - app services only
+  - api-gateway
+  - member-point-service
+  - battle-service
+  - market-service
+  - insight-reputation-service
+  - uses external todongsan-network
+```
+
+`docker-compose.local.yml` is no longer used. The standard local integrated app compose file is root `docker-compose.yml`.
+
+Run order:
+
+```bash
+cp .env.example .env
+docker compose -f infra/docker-compose.yml up -d
+docker network inspect todongsan-network
+docker compose config
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Root Docker Compose uses `.env` for variable substitution. The `.env` file is local-only and must not be committed.
+
+Step-by-step startup:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+docker network inspect todongsan-network
+docker ps
+
+docker compose up -d member-point-service market-service
+docker logs --tail=100 member-point-service
+docker logs --tail=100 market-service
+curl http://localhost:8082/actuator/health
+curl http://localhost:8082/api/v1/markets
+
+docker compose up -d --no-deps api-gateway
+docker logs --tail=100 api-gateway
+curl http://localhost:9000/api/v1/markets
+
+docker compose up -d battle-service insight-reputation-service
+docker logs --tail=100 battle-service
+docker logs --tail=100 insight-reputation-service
+docker compose ps
+```
+
+Smoke test examples:
+
+```bash
+curl http://localhost:9000/api/v1/markets
+curl http://localhost:8082/actuator/health
+curl http://localhost:8082/api/v1/markets
+```
+
+Network rules:
+
+```text
+Inside Docker Compose, localhost means the current container itself.
+Container-to-container calls must use Docker Compose service names.
+DB host inside app containers is todongsan-mysql.
+Use localhost:3307 only from the host PC when connecting to MySQL.
+```
+
+Service URL examples for integrated compose:
+
+```text
+MEMBER_POINT_SERVICE_URL=http://member-point-service:8080
+BATTLE_SERVICE_URL=http://battle-service:8081
+MARKET_SERVICE_URL=http://market-service:8082
+INSIGHT_SERVICE_URL=http://insight-reputation-service:8083
+
+MEMBER_POINT_SERVICE_BASE_URL=http://member-point-service:8080
+BATTLE_SERVICE_BASE_URL=http://battle-service:8081
+MARKET_SERVICE_BASE_URL=http://market-service:8082
+```
+
+Local environment files:
+
+Linux/macOS/Git Bash:
+
+```bash
+cp .env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Actual `.env`, `.env.local`, and `.env.rds` files are local-only files and must not be committed.
+Use `.env.example` as the shared placeholder template for root `docker-compose.yml`.
+If you test external API features, fill local values such as `REB_API_KEY` and `CLAUDE_API_KEY` in `.env`.
+Simple routing smoke tests can use placeholder values.
+
+Environment file roles:
+
+```text
+root .env
+  - Used only for root docker-compose.yml integrated local app execution.
+  - Create it from .env.example and fill local values when needed.
+  - Do not commit.
+
+service .env.local
+  - Used for running one service independently.
+  - Kept separate from root .env.
+  - Do not delete and do not commit.
+
+service .env.rds
+  - Currently unused for EC2 Docker MySQL deployment.
+  - Retained only as future RDS reference material.
+  - Do not merge into root .env for local integrated execution.
+  - Do not delete and do not commit.
+```
+
+JPA local policy:
+
+```text
+battle-service and insight-reputation-service are JPA-based services.
+In local Docker MySQL integration tests, ddl-auto=update may create or adjust their schema.
+This is allowed only for local integration testing.
+EC2 Docker MySQL deployment ddl-auto policy must be reviewed before deployment.
+```
+
+Forbidden commands for normal local verification and EC2 Docker MySQL deployment:
+
+```bash
+docker compose down -v
+docker volume rm
+DROP DATABASE
+TRUNCATE
+DELETE
+```
+
+Use plain `docker compose down` only when containers need to be stopped without deleting volumes.
+
+## 16. EC2 Docker MySQL 배포 안내
+
+현재 EC2 배포 기준은 RDS가 아니라 Docker MySQL이다.
+
+자세한 절차는 다음 문서를 따른다.
+
+```text
+docs/infra/EC2_DOCKER_DEPLOY.md
+```
+
+핵심 원칙:
+
+```text
+1. infra/docker-compose.yml로 todongsan-mysql을 먼저 실행한다.
+2. root docker-compose.yml로 app service 5개를 실행한다.
+3. root .env는 .env.ec2.example을 복사해 EC2에서 수동 작성한다.
+4. 외부 진입점은 api-gateway:9000으로 제한한다.
+5. MySQL 3306과 내부 서비스 포트 8080~8083은 외부에 공개하지 않는다.
+6. docker compose down -v와 docker volume rm/prune은 사용하지 않는다.
+7. 시연 또는 위험 작업 전 mysqldump 백업을 남긴다.
+```

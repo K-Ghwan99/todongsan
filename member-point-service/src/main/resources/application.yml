@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: member-point-service
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        default_batch_fetch_size: 100
+    open-in-view: false
+
+server:
+  port: 8080
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-expiry: 21600000
+  refresh-token-expiry: 5184000000
+
+kakao:
+  api-base-url: https://kapi.kakao.com
+
+crypto:
+  aes-key: ${CRYPTO_AES_KEY}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    com.todongsan.memberpointservice: DEBUG
+    org.hibernate.SQL: DEBUG
+    io.netty.resolver.dns.DnsServerAddressStreamProviders: OFF

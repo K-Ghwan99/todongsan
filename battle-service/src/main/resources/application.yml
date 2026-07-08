@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: battle-service
+
+  datasource:
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}?useSSL=false&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+    show-sql: true
+    open-in-view: false
+
+server:
+  port: 8081
+
+external:
+  member-point:
+    url: ${MEMBER_POINT_SERVICE_URL:http://localhost:8080}
+  insight:
+    url: ${INSIGHT_SERVICE_URL:http://localhost:8083}
+  internal-auth-token: ${INTERNAL_AUTH_TOKEN}
+
+logging:
+  level:
+    com.todongsan: DEBUG

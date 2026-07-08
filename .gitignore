@@ -40,6 +40,9 @@ application-secret.properties
 .env
 .env.*
 !.env.example
+!.env.ec2.example
+!.env.local.example
+!.env.rds.example
 
 # =========================
 # OS Files
@@ -72,12 +75,18 @@ target/
 surefire-reports/
 
 # =========================
+# Claude Code
+# =========================
+CLAUDE.md
+plan.md
+
+# =========================
 # Local Config
 # =========================
-application-local.yml
+!application-local.yml
 application-local.yaml
 application-local.properties
 
-application-prod.yml
+!application-prod.yml
 application-prod.yaml
 application-prod.properties

@@ -1,0 +1,36 @@
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3307/market_test?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&rewriteBatchedStatements=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: "1234"
+    hikari:
+      maximum-pool-size: 60
+      connection-timeout: 60000
+  # MySQL integration tests use an isolated schema and must never target the local service schema.
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+mybatis:
+  mapper-locations: classpath:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+client:
+  member-point:
+    mode: fake
+  insight:
+    mode: fake
+
+market:
+  scheduler:
+    prediction-reconciliation:
+      enabled: false
+    settlement-retry:
+      enabled: false
+    refund-retry:
+      enabled: false
+    reputation-update:
+      enabled: false
